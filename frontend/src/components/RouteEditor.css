@@ -72,7 +72,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
-  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  padding: var(--s-2);
   border-radius: var(--r-pill);
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
@@ -91,14 +91,14 @@
 .chip-index {
   width: 20px;
   height: 20px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   background: var(--accent-fill);
   color: var(--on-accent);
   font-size: 0.72rem;
   font-weight: 800;
-  flex: none;
 }
 
 .chip-remove {
@@ -109,8 +109,9 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition:
     color 0.15s,
     background 0.15s;
