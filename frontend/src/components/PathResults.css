@@ -27,10 +27,42 @@
 
 .result-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--s-4);
   margin-bottom: var(--s-4);
 }
+
+/* Pinned to the top-left (inline-end in RTL) corner of the card. */
+.copy-btn {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition:
+    color 0.15s var(--ease),
+    background 0.15s var(--ease),
+    border-color 0.15s var(--ease);
+}
+
+.copy-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+/* .copy-btn--done {
+  color: var(--on-accent);
+  background: var(--accent-fill);
+  border-color: transparent;
+} */
 
 .result-title {
   font-size: 1.1rem;
