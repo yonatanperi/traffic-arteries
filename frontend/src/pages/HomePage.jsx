@@ -57,8 +57,7 @@ export default function HomePage() {
       <div className="page-header">
         <h1 className="page-title">לאן ניסע היום?</h1>
         <p className="page-subtitle">
-          בחרו נקודת מוצא ויעד, ונמצא עבורכם את שלושת המסלולים הקצרים ביותר
-          ברשת.
+          בחרו נקודת מוצא ויעד, ונמצא עבורכם את המסלולים הקצרים ביותר.
         </p>
       </div>
 
