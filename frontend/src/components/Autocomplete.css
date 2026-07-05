@@ -1,0 +1,129 @@
+.ac {
+  position: relative;
+  width: 100%;
+  z-index: 1;
+}
+
+.ac-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: var(--s-2);
+}
+
+.ac-field {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0 var(--s-3);
+  transition:
+    border-color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease),
+    background 0.2s var(--ease);
+}
+.ac-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+  background: var(--surface);
+}
+.ac-field--open {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.ac-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.ac-field:focus-within .ac-icon {
+  color: var(--accent);
+}
+
+.ac-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.02rem;
+  padding: var(--s-3) 0;
+  min-width: 0;
+}
+.ac-input::placeholder {
+  color: var(--text-faint);
+}
+
+.ac-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 1.3rem;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.ac-clear:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.ac-list {
+  position: absolute;
+  z-index: 1000;
+  top: 100%;
+  inset-inline: 0;
+  margin: 0;
+  padding: var(--s-1);
+  list-style: none;
+  background: var(--surface);
+  border: 1.5px solid var(--accent);
+  border-top: none;
+  border-bottom-left-radius: var(--r-md);
+  border-bottom-right-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: dropdown 0.14s var(--ease) both;
+}
+
+@keyframes dropdown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.ac-option {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  border-radius: var(--r-sm);
+  font-size: 0.98rem;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.ac-option-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  opacity: 0.6;
+}
+.ac-option--active {
+  background: var(--accent-soft);
+}
+.ac-option--active .ac-option-dot {
+  opacity: 1;
+}

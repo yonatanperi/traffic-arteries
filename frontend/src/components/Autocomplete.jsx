@@ -1,0 +1,149 @@
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { IconClose } from "./icons.jsx";
+import "./Autocomplete.css";
+
+/**
+ * Accessible autocomplete combobox.
+ *
+ * props:
+ *   value, onChange   controlled text value
+ *   options           list of all place names
+ *   label, placeholder, icon
+ */
+export default function Autocomplete({
+  value,
+  onChange,
+  onSelect,
+  options,
+  label,
+  placeholder,
+  icon,
+}) {
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const wrapRef = useRef(null);
+  const listId = useId();
+
+  const matches = useMemo(() => {
+    const query = value.trim();
+    if (!query) return options.slice(0, 8);
+    const q = query.toLowerCase();
+    return options.filter((o) => o.toLowerCase().includes(q)).slice(0, 8);
+  }, [value, options]);
+
+  // Close when clicking outside.
+  useEffect(() => {
+    function onDocClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  useEffect(() => setHighlight(0), [value]);
+
+  function choose(place) {
+    // When a consumer wants "pick = commit" (e.g. adding a stop), it passes
+    // onSelect and we don't write the value back into the field. In that mode we
+    // keep the list open so several stops can be added in a row.
+    if (onSelect) {
+      onSelect(place);
+      setHighlight(0);
+      setOpen(true);
+    } else {
+      onChange(place);
+      setOpen(false);
+    }
+  }
+
+  function onKeyDown(e) {
+    if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      setOpen(true);
+      return;
+    }
+    if (!open) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((h) => Math.min(h + 1, matches.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      if (matches[highlight]) {
+        e.preventDefault();
+        choose(matches[highlight]);
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
+  }
+
+  const showList = open && matches.length > 0;
+
+  return (
+    <div className="ac" ref={wrapRef}>
+      {label && <label className="ac-label">{label}</label>}
+      <div className={"ac-field" + (showList ? " ac-field--open" : "")}>
+        {icon && (
+          <span className="ac-icon" aria-hidden="true">
+            {icon}
+          </span>
+        )}
+        <input
+          className="ac-input"
+          type="text"
+          role="combobox"
+          aria-expanded={showList}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          autoComplete="off"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
+        />
+        {value && (
+          <button
+            type="button"
+            className="ac-clear"
+            aria-label="נקה"
+            onClick={() => {
+              onChange("");
+              setOpen(true);
+            }}
+          >
+            <IconClose size={15} />
+          </button>
+        )}
+      </div>
+
+      {showList && (
+        <ul className="ac-list" id={listId} role="listbox">
+          {matches.map((place, i) => (
+            <li
+              key={place}
+              role="option"
+              aria-selected={i === highlight}
+              className={"ac-option" + (i === highlight ? " ac-option--active" : "")}
+              onMouseEnter={() => setHighlight(i)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                choose(place);
+              }}
+            >
+              <span className="ac-option-dot" aria-hidden="true" />
+              {place}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,40 @@
+.empty-state {
+  text-align: center;
+  padding: var(--s-7) var(--s-5);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  animation: rise 0.4s var(--ease) both;
+}
+
+.empty-state-icon {
+  display: flex;
+  justify-content: center;
+  color: var(--text);
+  margin-bottom: var(--s-4);
+}
+.empty-state--warning .empty-state-icon {
+  color: var(--warning);
+}
+.empty-state--danger .empty-state-icon {
+  color: var(--danger);
+}
+
+.empty-state-title {
+  font-size: 1.25rem;
+}
+
+.empty-state-message {
+  color: var(--text-muted);
+  margin: var(--s-2) auto 0;
+  max-width: 460px;
+}
+
+.empty-state--warning {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.06);
+}
+.empty-state--danger {
+  border-color: rgba(248, 81, 73, 0.4);
+  background: rgba(248, 81, 73, 0.06);
+}

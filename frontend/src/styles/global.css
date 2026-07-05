@@ -1,0 +1,274 @@
+/* ==========================================================================
+   Design tokens + global base. Dark, high-end, RTL-first.
+   ========================================================================== */
+
+:root {
+  /* Surfaces — near-black "TravelMate" dark */
+  --bg: #0d0e0b;
+  --bg-elevated: #141510;
+  --surface: #181915;
+  --surface-2: #1f201a;
+  --surface-hover: #262720;
+  --border: #2c2d24;
+  --border-strong: #3c3d31;
+
+  /* Text */
+  --text: #ffffff;
+  --text-muted: #c0c2b8; /* sage gray */
+  --text-faint: #83857a;
+
+  /* Brand / accent — lime, the single vivid color. */
+  --accent: #d5ff40; /* lime for titles/highlights */
+  --accent-2: #e2ff7a; /* brighter lime for graph hover */
+  --accent-soft: rgba(213, 255, 64, 0.14);
+  --accent-fill: #d5ff40; /* solid lime fill for buttons/badges */
+  --accent-fill-hover: #c6f52d;
+  --on-accent: #14160a; /* dark ink on lime fills */
+  /* Secondary CTA — muted olive (like the reference's second button). */
+  --olive: #5f6d2a;
+  --olive-hover: #6d7d31;
+  /* Kept for compatibility; now solid, not a gradient. */
+  --accent-gradient: var(--accent-fill);
+  --accent-gradient-soft: rgba(213, 255, 64, 0.12);
+
+  /* Feedback */
+  --success: #a6e22e;
+  --danger: #f85149;
+  --danger-soft: rgba(248, 81, 73, 0.12);
+  --warning: #e2c541;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+  --r-pill: 999px;
+
+  /* Spacing scale */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --glow:
+    0 0 0 1px rgba(213, 255, 64, 0.35), 0 8px 30px rgba(213, 255, 64, 0.18);
+
+  --ring: 0 0 0 3px var(--accent-soft);
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --font:
+    "Heebo", "Assistant", "Segoe UI", system-ui, -apple-system,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Ambient background glow */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(
+      900px 600px at 85% -10%,
+      rgba(213, 255, 64, 0.08),
+      transparent 60%
+    ),
+    radial-gradient(
+      800px 500px at 10% 0%,
+      rgba(213, 255, 64, 0.05),
+      transparent 55%
+    );
+  pointer-events: none;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* Icons: block-level so they never inherit text baseline misalignment, and
+   never shrink inside flex rows. */
+.ic {
+  display: block;
+  flex: none;
+}
+
+input {
+  font-family: inherit;
+}
+
+::selection {
+  background: rgba(213, 255, 64, 0.3);
+  color: var(--on-accent);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- Shared layout helpers ---- */
+.app-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.page {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--s-7) var(--s-5) var(--s-8);
+  animation: rise 0.5s var(--ease) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    /* `none` (not translateY(0)) so the finished element keeps NO transform and
+       therefore creates no stacking context — otherwise fill-mode:both would
+       trap descendant z-indexes (e.g. the autocomplete dropdown) inside the card. */
+    transform: none;
+  }
+}
+
+.page-header {
+  margin-bottom: var(--s-6);
+}
+
+.page-title {
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 900;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  color: white;
+  display: inline-block;
+}
+
+.page-subtitle {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  margin-top: var(--s-2);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  padding: var(--s-3) var(--s-5);
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border);
+  transition:
+    transform 0.15s var(--ease),
+    background 0.2s var(--ease),
+    border-color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease);
+}
+.btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--accent-fill);
+  border-color: transparent;
+  color: var(--on-accent);
+  font-weight: 800;
+  box-shadow: var(--shadow-md);
+}
+.btn-primary:hover {
+  background: var(--accent-fill-hover);
+  box-shadow: var(--glow);
+}
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.btn-danger {
+  color: var(--text-muted);
+  background: transparent;
+  border-color: var(--border);
+}
+.btn-danger:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: rgba(232, 131, 126, 0.3);
+}
+
+/* Card */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}

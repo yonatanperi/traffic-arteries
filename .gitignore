@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+backend/.venv/
+
+# Filesystem "DB" — regenerated from seed on first run
+backend/data/*.json
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+
+# Env / editor
+.DS_Store
+.env
+
+agent.md
+tasks/
