@@ -1,8 +1,6 @@
 .brain-page {
   display: flex;
   flex-direction: column;
-  /* Fill viewport below the sticky navbar so the canvas has real height. */
-  min-height: calc(100vh - 72px);
 }
 
 .brain-stats {
@@ -26,7 +24,6 @@
 
 .brain-canvas-wrap {
   flex: 1;
-  min-height: 460px;
   display: flex;
 }
 .brain-canvas-wrap > * {

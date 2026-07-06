@@ -23,7 +23,7 @@ export default function BrainPage() {
       <div className="page-header">
         <h1 className="page-title">הצצה למוח</h1>
         <p className="page-subtitle">
-          רשת הצמתים החיה של המערכת. גררו צמתים, הגדילו ותנועעו, והעבירו את העכבר
+          רשת הצמתים החיה של המערכת. גררו צמתים, שנו פרספקטיבה, והעבירו את העכבר
           מעל מקום כדי להאיר את חיבוריו הישירים.
         </p>
       </div>
@@ -56,7 +56,9 @@ export default function BrainPage() {
             message="עדיין אין מסלולים. הוסיפו מסלולים בעמוד עריכת המסלולים כדי לראות את הרשת מתעוררת לחיים."
           />
         )}
-        {!loading && !error && data && data.nodes.length > 0 && <GraphView data={data} />}
+        {!loading && !error && data && data.nodes.length > 0 && (
+          <GraphView data={data} />
+        )}
       </div>
     </div>
   );

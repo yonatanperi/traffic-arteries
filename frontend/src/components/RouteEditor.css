@@ -44,7 +44,7 @@
   font-size: 0.9rem;
   padding: var(--s-1) var(--s-3);
   border-radius: var(--r-pill);
-  background: var(--surface);
+  background: var(--surface-2);
   color: white;
 }
 

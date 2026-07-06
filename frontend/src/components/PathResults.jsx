@@ -56,9 +56,7 @@ export default function PathResults({ paths }) {
                 <h3 className="result-title">
                   {ORDINALS[i] || `מסלול ${i + 1}`}
                 </h3>
-                <span className="result-hops">
-                  {path.length} תחנות · {hops} מקטעים
-                </span>
+                <span className="result-hops">{path.length} תחנות</span>
               </div>
               <CopyButton path={path} />
             </header>
