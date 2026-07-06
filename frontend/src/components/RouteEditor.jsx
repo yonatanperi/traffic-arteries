@@ -116,6 +116,7 @@ function RouteRow({
             value={draft}
             onChange={setDraft}
             onSelect={commit}
+            onSubmit={commit}
             placeholder={route.length ? "הוסף תחנה…" : "תחנה ראשונה…"}
           />
           <button

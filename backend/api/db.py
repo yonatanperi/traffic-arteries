@@ -7,7 +7,7 @@ Two JSON files under ``backend/data``:
     can be loaded straight from disk without recomputation.
 
 Writes are atomic (temp file + ``os.replace``) so a crash mid-write can never
-leave a half-written file. On first access the store seeds itself.
+leave a half-written file. On first access an empty store is initialised.
 """
 
 import json
@@ -15,7 +15,6 @@ import os
 import tempfile
 
 from . import graph
-from .seed import SEED_ROUTES
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 DATA_DIR = os.path.abspath(DATA_DIR)
@@ -73,9 +72,11 @@ def validate_routes(routes):
     return cleaned
 
 
-def _ensure_seeded():
+def _ensure_files():
     if not os.path.exists(ROUTES_FILE):
-        save_routes(SEED_ROUTES)
+        # Start empty; routes are added through the editor.
+        _atomic_write_json(ROUTES_FILE, [])
+        _rebuild_graph([])
     elif not os.path.exists(GRAPH_FILE):
         # routes exist but graph is missing/stale — rebuild it.
         _rebuild_graph(_read_json(ROUTES_FILE))
@@ -88,13 +89,13 @@ def _rebuild_graph(routes):
 
 
 def load_routes():
-    _ensure_seeded()
+    _ensure_files()
     return _read_json(ROUTES_FILE)
 
 
 def load_graph():
     """Load the pre-built adjacency list straight from disk."""
-    _ensure_seeded()
+    _ensure_files()
     return _read_json(GRAPH_FILE)
 
 

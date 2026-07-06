@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import RouteEditor from "../components/RouteEditor.jsx";
 import Loader from "../components/Loader.jsx";
-import { IconCheck } from "../components/icons.jsx";
 import { getRoutes, saveRoutes } from "../api/client.js";
 import "./RoutesPage.css";
 
@@ -9,8 +8,8 @@ export default function RoutesPage() {
   const [routes, setRoutes] = useState(null);
   const [original, setOriginal] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState(null); // {type, text}
+  // Serializes saves so overlapping actions persist in order.
+  const savingRef = useRef(Promise.resolve());
 
   useEffect(() => {
     getRoutes()
@@ -18,13 +17,10 @@ export default function RoutesPage() {
         setRoutes(data);
         setOriginal(JSON.stringify(data));
       })
-      .catch((e) => setStatus({ type: "error", text: e.message }))
       .finally(() => setLoading(false));
   }, []);
 
-  const dirty = routes !== null && JSON.stringify(routes) !== original;
-
-  // Known place names across all routes -> datalist suggestions.
+  // Known place names across all routes -> autocomplete suggestions.
   const suggestions = useMemo(() => {
     if (!routes) return [];
     const set = new Set();
@@ -32,26 +28,25 @@ export default function RoutesPage() {
     return [...set].sort((a, b) => a.localeCompare(b, "he"));
   }, [routes]);
 
-  const invalid = routes ? routes.filter((r) => r.length < 2).length : 0;
+  // Auto-save on every edit action. RouteEditor calls this instead of a plain
+  // setState, so each add/remove immediately persists (when the result is
+  // valid). Invalid intermediate states (e.g. a brand-new empty route) are
+  // held locally and saved as soon as they become valid again.
+  function applyChange(next) {
+    setRoutes(next);
 
-  async function onSave() {
-    setStatus(null);
-    setSaving(true);
-    try {
-      const saved = await saveRoutes(routes);
-      setRoutes(saved);
-      setOriginal(JSON.stringify(saved));
-      setStatus({ type: "success", text: "המסלולים נשמרו והגרף נבנה מחדש." });
-    } catch (e) {
-      setStatus({ type: "error", text: e.message });
-    } finally {
-      setSaving(false);
-    }
-  }
+    const snapshot = JSON.stringify(next);
+    if (snapshot === original) return; // no net change vs. what's persisted
+    if (next.some((r) => r.length < 2)) return; // wait until valid
 
-  function onReset() {
-    setRoutes(JSON.parse(original));
-    setStatus(null);
+    savingRef.current = savingRef.current
+      .catch(() => {})
+      .then(async () => {
+        const saved = await saveRoutes(next);
+        setOriginal(snapshot);
+        // Adopt the server's normalized copy only if nothing changed since.
+        setRoutes((cur) => (JSON.stringify(cur) === snapshot ? saved : cur));
+      });
   }
 
   if (loading) {
@@ -68,51 +63,11 @@ export default function RoutesPage() {
         <h1 className="page-title">עריכת מסלולים</h1>
         <p className="page-subtitle">
           בנו וערכו את רשת המסלולים. כל מסלול הוא שרשרת של תחנות; תחנות עוקבות
-          מחוברות זו לזו בשני הכיוונים.
+          מחוברות זו לזו בשני הכיוונים. השינויים נשמרים אוטומטית.
         </p>
       </div>
 
-      {status && (
-        <div className={"status-banner status-banner--" + status.type} role="alert">
-          {status.text}
-        </div>
-      )}
-
-      <RouteEditor routes={routes} onChange={setRoutes} suggestions={suggestions} />
-
-      <div className={"save-bar" + (dirty ? " save-bar--active" : "")}>
-        <div className="save-bar-info">
-          {invalid > 0 ? (
-            <span className="save-bar-warn">
-              {invalid} מסלולים עם פחות משתי תחנות — יש להשלים לפני שמירה
-            </span>
-          ) : dirty ? (
-            <span>יש שינויים שלא נשמרו</span>
-          ) : (
-            <span className="save-bar-clean">
-              <IconCheck size={15} /> הכול שמור
-            </span>
-          )}
-        </div>
-        <div className="save-bar-actions">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={onReset}
-            disabled={!dirty || saving}
-          >
-            בטל שינויים
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onSave}
-            disabled={!dirty || saving || invalid > 0}
-          >
-            {saving ? "שומר…" : "שמור שינויים"}
-          </button>
-        </div>
-      </div>
+      <RouteEditor routes={routes} onChange={applyChange} suggestions={suggestions} />
     </div>
   );
 }

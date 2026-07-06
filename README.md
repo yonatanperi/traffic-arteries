@@ -7,7 +7,8 @@ between any two points (e.g. `K → M ⇒ [K, J, E, G, N, M]`), or reports that 
 route exists.
 
 Full-stack **Django REST Framework + React**, with a **filesystem JSON store**
-(no SQL). The UI is fully **Hebrew / RTL** and seeded with real Israeli cities.
+(no SQL). The UI is fully **Hebrew / RTL**. The store starts empty — routes are
+added through the editor.
 
 ## Architecture
 
@@ -15,7 +16,6 @@ Full-stack **Django REST Framework + React**, with a **filesystem JSON store**
 backend/                     Django + DRF (function views)
   api/graph.py               adjacency build + BFS k-shortest-paths (the core)
   api/db.py                  filesystem DB: routes.json (truth) -> graph.json (derived)
-  api/seed.py                Israeli-cities demo data
   api/views.py / urls.py     @api_view endpoints
   data/                      routes.json + graph.json (generated on first run)
 frontend/                    React + Vite (raw CSS)

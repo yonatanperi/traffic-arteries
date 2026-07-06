@@ -14,6 +14,7 @@ export default function Autocomplete({
   value,
   onChange,
   onSelect,
+  onSubmit,
   options,
   label,
   placeholder,
@@ -75,6 +76,10 @@ export default function Autocomplete({
       if (matches[highlight]) {
         e.preventDefault();
         choose(matches[highlight]);
+      } else if (onSubmit && value.trim()) {
+        // No matching suggestion: Enter commits the typed text (acts as "add").
+        e.preventDefault();
+        onSubmit(value);
       }
     } else if (e.key === "Escape") {
       setOpen(false);
