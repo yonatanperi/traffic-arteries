@@ -43,7 +43,7 @@ export default function BrainPage() {
         {loading && <Loader label="בונה את הרשת…" />}
         {error && (
           <EmptyState
-            icon={<IconAlert size={30} />}
+            icon={<IconAlert size={60} />}
             tone="danger"
             title="שגיאה בטעינת הגרף"
             message={error}
@@ -51,7 +51,7 @@ export default function BrainPage() {
         )}
         {!loading && !error && data && data.nodes.length === 0 && (
           <EmptyState
-            icon={<IconNetwork size={30} />}
+            icon={<IconNetwork size={60} />}
             title="הרשת ריקה"
             message="עדיין אין מסלולים. הוסיפו מסלולים בעמוד עריכת המסלולים כדי לראות את הרשת מתעוררת לחיים."
           />

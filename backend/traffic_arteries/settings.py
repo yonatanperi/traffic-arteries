@@ -5,9 +5,13 @@ store in ``api/db.py``), so the ORM/migrations machinery is left at defaults but
 never exercised. CORS is unnecessary because the Vite dev server proxies /api.
 """
 
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
+DATA_DIR = os.path.abspath(DATA_DIR)
 
 SECRET_KEY = "dev-only-not-secret-change-in-production"
 DEBUG = True

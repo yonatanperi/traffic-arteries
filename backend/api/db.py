@@ -14,12 +14,13 @@ import json
 import os
 import tempfile
 
+from django.conf import settings
+
 from . import graph
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
-DATA_DIR = os.path.abspath(DATA_DIR)
-ROUTES_FILE = os.path.join(DATA_DIR, "routes.json")
-GRAPH_FILE = os.path.join(DATA_DIR, "graph.json")
+
+ROUTES_FILE = os.path.join(settings.DATA_DIR, "routes.json")
+GRAPH_FILE = os.path.join(settings.DATA_DIR, "graph.json")
 
 
 class ValidationError(ValueError):
