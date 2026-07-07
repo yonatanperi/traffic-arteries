@@ -33,9 +33,9 @@ export function getGraph() {
   return request("/api/graph/");
 }
 
-export function findPaths(start, end) {
+export function findPaths(start, end, via = []) {
   return request("/api/path/", {
     method: "POST",
-    body: JSON.stringify({ start, end }),
+    body: JSON.stringify({ start, end, via }),
   });
 }

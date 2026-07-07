@@ -1,0 +1,221 @@
+/* Shared styles for the floating cards that overlay the brain canvas
+   (node detail + insights). */
+
+.fp {
+  position: absolute;
+  top: var(--s-4);
+  z-index: 5;
+  width: 260px;
+  max-width: calc(100% - 2 * var(--s-4));
+  max-height: calc(100% - 2 * var(--s-4));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  animation: fp-in 0.28s var(--ease) both;
+}
+/* RTL: "start" is the right edge, "end" the left. */
+.fp--start {
+  inset-inline-start: var(--s-4);
+}
+.fp--end {
+  inset-inline-end: var(--s-4);
+}
+
+@keyframes fp-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.fp-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--accent);
+  min-width: 0;
+}
+.fp-title {
+  font-size: 1.05rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fp-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  transition: color 0.2s, background 0.2s;
+}
+.fp-close:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.fp-badge-row {
+  display: flex;
+  gap: var(--s-2);
+}
+.fp-badge {
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.fp-badge strong {
+  color: var(--accent);
+  margin-inline-end: 3px;
+}
+
+/* Stat grid (insights) */
+.fp-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-2);
+}
+.fp-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--s-3) var(--s-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+.fp-stat strong {
+  font-size: 1.25rem;
+  color: var(--text);
+}
+.fp-stat span {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.fp-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.fp-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: none;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.fp-section-hint {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.fp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fp-list-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: var(--s-2) var(--s-2);
+  border: none;
+  background: transparent;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 0.9rem;
+  text-align: start;
+  transition: background 0.15s;
+}
+.fp-list-btn:hover {
+  background: var(--surface-hover);
+}
+.fp-list-meta {
+  margin-inline-start: auto;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+.fp-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.fp-dot--warn {
+  background: var(--warning);
+}
+
+.fp-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.fp-deadend-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: border-color 0.2s, background 0.2s;
+}
+.fp-deadend-btn:hover:not(:disabled) {
+  border-color: var(--warning);
+  background: var(--surface-hover);
+}
+.fp-deadend-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (max-width: 620px) {
+  .fp {
+    width: auto;
+    inset-inline: var(--s-3);
+    inset-inline-start: var(--s-3);
+    inset-inline-end: var(--s-3);
+  }
+}

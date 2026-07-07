@@ -145,3 +145,94 @@ export function IconSearch(props) {
     </Svg>
   );
 }
+
+// Focus — crosshair for centering on a node.
+export function IconFocus(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+    </Svg>
+  );
+}
+
+// Fit — expand arrows to the four corners.
+export function IconFit(props) {
+  return (
+    <Svg {...props}>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+      <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+    </Svg>
+  );
+}
+
+// Reset — circular refresh arrow.
+export function IconReset(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+    </Svg>
+  );
+}
+
+export function IconPause(props) {
+  return (
+    <Svg {...props}>
+      <rect x="6" y="5" width="4" height="14" rx="1" />
+      <rect x="14" y="5" width="4" height="14" rx="1" />
+    </Svg>
+  );
+}
+
+export function IconPlay(props) {
+  return (
+    <Svg {...props}>
+      <path d="M7 4.5v15l13-7.5-13-7.5Z" />
+    </Svg>
+  );
+}
+
+export function IconDownload(props) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M4 20h16" />
+    </Svg>
+  );
+}
+
+// Insights — a lightbulb.
+export function IconBulb(props) {
+  return (
+    <Svg {...props}>
+      <path d="M9 18h6" />
+      <path d="M10 21h4" />
+      <path d="M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.3 1 2.5h6c0-1.2.3-1.8 1-2.5A6 6 0 0 0 12 3Z" />
+    </Svg>
+  );
+}
+
+// Route — path mode.
+export function IconRoute(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="6" cy="19" r="2.4" />
+      <circle cx="18" cy="5" r="2.4" />
+      <path d="M8.4 19H14a3.5 3.5 0 0 0 0-7h-4a3.5 3.5 0 0 1 0-7h5.6" />
+    </Svg>
+  );
+}
+
+// Hub — a busy node, drawn as a star burst.
+export function IconHub(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5 19 19M19 5l-2.5 2.5M7.5 16.5 5 19" />
+    </Svg>
+  );
+}

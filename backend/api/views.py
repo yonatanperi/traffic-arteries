@@ -43,13 +43,18 @@ def network(request):
 
 @api_view(["POST"])
 def path(request):
-    """Top 3 shortest paths between two points.
+    """Top 3 shortest paths between two points, optionally via required stops.
 
-    Body: ``{"start": <place>, "end": <place>}``.
+    Body: ``{"start": <place>, "end": <place>, "via": [<place>, ...]}``.
+    ``via`` is optional — required intermediate stops the route must pass
+    through (visited in an optimised order).
     Response: ``{"paths": [[...], ...]}`` — an empty list means no route exists.
     """
     start = (request.data.get("start") or "").strip()
     end = (request.data.get("end") or "").strip()
+
+    via_raw = request.data.get("via")
+    via = [str(v).strip() for v in via_raw if str(v).strip()] if isinstance(via_raw, list) else []
 
     if not start or not end:
         return Response(
@@ -58,5 +63,5 @@ def path(request):
         )
 
     adjacency = db.load_graph()
-    paths = graph.k_shortest_paths(adjacency, start, end, k=3)
+    paths = graph.k_shortest_paths(adjacency, start, end, k=3, via=via)
     return Response({"paths": paths})

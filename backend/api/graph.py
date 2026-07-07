@@ -1,12 +1,20 @@
-"""Graph construction and shortest-path search.
+"""Graph construction and diverse alternative-route search.
 
 Routes are chains of place names. Consecutive places in a route form a
-bidirectional edge. From those edges we build an undirected, unweighted graph
-stored as an adjacency list. Path search is a BFS enumeration that yields the
-top-k distinct simple paths, shortest first.
+bidirectional edge. From those edges we build an undirected graph stored as an
+adjacency list.
+
+Route search returns up to ``k`` *genuinely different* options (Waze-style
+alternatives), not near-duplicates of the shortest path. See
+:func:`k_shortest_paths` for the algorithm.
 """
 
-from collections import deque
+import heapq
+import itertools
+
+# Above this many required stops the permutation count (n!) makes exhaustive
+# order optimisation impractical, so we fall back to the caller's order.
+MAX_OPTIMIZED_WAYPOINTS = 7
 
 
 def build_adjacency(routes):
@@ -60,40 +68,233 @@ def to_network(adjacency):
     return {"nodes": nodes, "links": links}
 
 
-def k_shortest_paths(adjacency, start, end, k=3):
-    """Return up to ``k`` distinct simple paths from ``start`` to ``end``.
+def _edge_key(a, b):
+    """Order-independent key for an undirected edge."""
+    return (a, b) if a <= b else (b, a)
 
-    Paths are ordered shortest-first. Because the graph is unweighted, a BFS
-    that expands partial paths in FIFO order discovers them in non-decreasing
-    length order. We only extend to nodes not already on the current path, so
-    every result is a simple (cycle-free) path.
+
+def _edges(path):
+    """The set of undirected edges that make up a path."""
+    return {_edge_key(a, b) for a, b in zip(path, path[1:])}
+
+
+def _shortest_path(adjacency, start, end, penalty):
+    """Dijkstra from ``start`` to ``end`` over penalty-weighted edges.
+
+    Every edge has base cost 1, multiplied by any accumulated penalty in
+    ``penalty`` (an ``{edge_key: multiplier}`` dict). With no penalties this is
+    just an unweighted shortest path; penalising the edges of already-chosen
+    routes steers each subsequent search onto a different corridor.
+
+    A monotonically increasing counter breaks cost ties in insertion order, so
+    among equal-cost paths the one whose nodes come first (neighbours are
+    iterated in sorted order) wins — stable, deterministic output.
+    """
+    counter = itertools.count()
+    # Heap entries: (cost, tie_breaker, node, path_so_far).
+    heap = [(0.0, next(counter), start, [start])]
+    best_cost = {start: 0.0}
+
+    while heap:
+        cost, _, node, path = heapq.heappop(heap)
+        if node == end:
+            return path, cost
+        if cost > best_cost.get(node, float("inf")):
+            continue  # a cheaper route to this node was already settled
+        for neighbour in adjacency[node]:
+            if neighbour in path:
+                continue  # keep the path simple (cycle-free)
+            step = penalty.get(_edge_key(node, neighbour), 1.0)
+            new_cost = cost + step
+            if new_cost < best_cost.get(neighbour, float("inf")):
+                best_cost[neighbour] = new_cost
+                heapq.heappush(heap, (new_cost, next(counter), neighbour, path + [neighbour]))
+
+    return None, float("inf")
+
+
+def _dijkstra_costs(adjacency, source):
+    """Unweighted single-source shortest-path costs from ``source``.
+
+    Returns ``{node: cost}`` for every node reachable from ``source`` (each edge
+    costs 1). Used to score candidate waypoint orderings cheaply, before running
+    the real penalty-weighted search.
+    """
+    costs = {source: 0.0}
+    heap = [(0.0, source)]
+    while heap:
+        cost, node = heapq.heappop(heap)
+        if cost > costs.get(node, float("inf")):
+            continue
+        for neighbour in adjacency[node]:
+            new_cost = cost + 1.0
+            if new_cost < costs.get(neighbour, float("inf")):
+                costs[neighbour] = new_cost
+                heapq.heappush(heap, (new_cost, neighbour))
+    return costs
+
+
+def _order_waypoints(adjacency, start, end, waypoints):
+    """Order required stops to minimise total detour (a small TSP).
+
+    Returns the ordered point list ``[start, *waypoints_in_best_order, end]``,
+    or ``None`` if some required stop is unreachable from the others. Ordering is
+    chosen by comparing base-cost distances between the key nodes (start, end and
+    each waypoint). Beyond :data:`MAX_OPTIMIZED_WAYPOINTS` stops the permutation
+    count explodes, so we keep the caller's order (still checked for reach).
+    """
+    key_nodes = [start, end, *waypoints]
+    costs = {node: _dijkstra_costs(adjacency, node) for node in key_nodes}
+
+    def total(order):
+        sequence = [start, *order, end]
+        acc = 0.0
+        for a, b in zip(sequence, sequence[1:]):
+            step = costs[a].get(b)
+            if step is None:
+                return None  # a required leg is unreachable
+            acc += step
+        return acc
+
+    if len(waypoints) <= MAX_OPTIMIZED_WAYPOINTS:
+        candidates = itertools.permutations(waypoints)
+    else:
+        candidates = [tuple(waypoints)]
+
+    best_order, best_cost = None, float("inf")
+    for order in candidates:
+        cost = total(order)
+        if cost is not None and cost < best_cost:
+            best_order, best_cost = order, cost
+
+    if best_order is None:
+        return None
+    return [start, *best_order, end]
+
+
+def _shortest_path_via(adjacency, points, penalty):
+    """Penalty-weighted shortest path visiting ``points`` in order.
+
+    Concatenates the per-leg :func:`_shortest_path` results into one route. Each
+    leg stays simple on its own; a node may recur across legs (a required stop is
+    naturally a shared leg endpoint), which is expected for waypoint routing.
+    Returns ``(None, inf)`` if any leg has no connection.
+    """
+    full = [points[0]]
+    total = 0.0
+    for a, b in zip(points, points[1:]):
+        if a == b:
+            continue  # collapse a zero-length leg (e.g. a tour where start==end)
+        leg, cost = _shortest_path(adjacency, a, b, penalty)
+        if leg is None:
+            return None, float("inf")
+        full.extend(leg[1:])
+        total += cost
+    return full, total
+
+
+def k_shortest_paths(
+    adjacency,
+    start,
+    end,
+    k=3,
+    penalty_factor=3.0,
+    max_overlap=0.6,
+    max_stretch=2.5,
+    via=None,
+):
+    """Return up to ``k`` *diverse* alternative routes from ``start`` to ``end``.
+
+    The goal is Waze-style options: option 1 is the genuine shortest route, and
+    each further option is a meaningfully different corridor rather than the
+    shortest path with one node swapped.
+
+    ``via`` is an optional list of *required stops* the route must pass through.
+    Their visiting order is optimised (a small TSP over :func:`_order_waypoints`)
+    and then fixed; the alternatives differ by corridor, not by stop order.
+
+    Algorithm — the iterative edge-penalty method used by real routing engines:
+
+      1. Find the shortest path (unweighted Dijkstra).
+      2. Multiply the weight of every edge on it by ``penalty_factor``.
+      3. Search again; the penalty repels the next route away from edges the
+         chosen routes already cover, so it takes a different corridor.
+      4. Keep a candidate only if it is not too similar to an already-chosen
+         route (``max_overlap``) and not an excessive detour (``max_stretch``).
+
+    Tunables:
+      * ``penalty_factor`` — how hard reused edges are pushed away (>1).
+      * ``max_overlap``    — reject a candidate sharing more than this fraction
+                             of its own edges with any accepted route (0..1).
+      * ``max_stretch``    — reject alternatives longer than this multiple of
+                             the shortest route's length.
 
     Edge cases:
-      * ``start == end``           -> ``[[start]]`` (if the node exists)
-      * ``start`` or ``end`` absent -> ``[]``
-      * no connection              -> ``[]``
+      * ``start == end`` (no ``via``) -> ``[[start]]`` (if the node exists)
+      * ``start``/``end``/``via`` absent from graph -> ``[]``
+      * no connection / unreachable stop           -> ``[]``
     """
+    # Normalise required stops: drop blanks, de-duplicate, and discard any that
+    # coincide with start/end (already visited), preserving first-seen order.
+    waypoints = []
+    seen = {start, end}
+    for stop in via or []:
+        stop = stop.strip() if isinstance(stop, str) else stop
+        if stop and stop not in seen:
+            seen.add(stop)
+            waypoints.append(stop)
+
     if start not in adjacency or end not in adjacency:
         return []
-    if start == end:
+    if any(stop not in adjacency for stop in waypoints):
+        return []
+    if start == end and not waypoints:
         return [[start]]
 
-    paths = []
-    # Queue holds partial simple paths; start with just the origin.
-    queue = deque([[start]])
+    points = [start, end]
+    if waypoints:
+        points = _order_waypoints(adjacency, start, end, waypoints)
+        if points is None:
+            return []  # a required stop is unreachable
 
-    while queue and len(paths) < k:
-        path = queue.popleft()
-        last = path[-1]
-        for neighbour in adjacency[last]:
-            if neighbour in path:
-                continue  # keep paths simple
-            new_path = path + [neighbour]
-            if neighbour == end:
-                paths.append(new_path)
-                if len(paths) >= k:
-                    break
-            else:
-                queue.append(new_path)
+    penalty = {}
+    accepted = []
+    accepted_edges = []  # edge set per accepted route, parallel to ``accepted``
+    shortest_cost = None
 
-    return paths
+    # Bound the work: each round either accepts a route or diverges further,
+    # and heavily-penalised candidates converge quickly.
+    for _ in range(k * 8):
+        if len(accepted) >= k:
+            break
+
+        path, cost = _shortest_path_via(adjacency, points, penalty)
+        if path is None:
+            break
+
+        edges = _edges(path)
+        # Penalise this path's edges whether or not we keep it, so the next
+        # search is pushed somewhere new either way.
+        for edge in edges:
+            penalty[edge] = penalty.get(edge, 1.0) * penalty_factor
+
+        if any(path == p for p in accepted):
+            continue
+
+        if shortest_cost is None:
+            shortest_cost = cost  # the first (unpenalised) path is the fastest
+        elif cost > shortest_cost * max_stretch:
+            continue  # too long a detour to be a useful alternative
+
+        # Reject near-duplicates: too much of this route reuses one we kept.
+        if any(
+            len(edges & prior) / len(edges) > max_overlap for prior in accepted_edges
+        ):
+            continue
+
+        accepted.append(path)
+        accepted_edges.append(edges)
+
+    # Present fastest-first; a stable sort preserves discovery order among ties.
+    accepted.sort(key=lambda p: len(p))
+    return accepted
