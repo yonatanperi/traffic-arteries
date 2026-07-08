@@ -39,6 +39,13 @@ class Command(BaseCommand):
             default=CONFIRMED_GAP,
             help="Max stops filled into a hop several routes take directly.",
         )
+        parser.add_argument(
+            "--save-filled",
+            action="store_true",
+            default=False,
+            help="Persist the filled routes (post fill_missing_destinations) to "
+            "routes.json instead of the routes as authored.",
+        )
 
     def handle(self, *args, **options):
         routes = []
@@ -80,10 +87,20 @@ class Command(BaseCommand):
 
         # Persist the routes exactly as authored; the derived graph is built from
         # the *filled* routes inside _rebuild_graph, so stops skipped on segments
-        # detailed elsewhere don't fabricate a direct edge.
+        # detailed elsewhere don't fabricate a direct edge. With --save-filled,
+        # the filled routes are written instead, once fill_missing_destinations
+        # has run.
+        routes_to_save = routes
+        if options["save_filled"]:
+            routes_to_save = database.fill_missing_destinations(
+                routes,
+                lazy_gap=options["lazy_gap"],
+                confirmed_gap=options["confirmed_gap"],
+            )
+
         os.makedirs(os.path.dirname(ROUTES_JSON), exist_ok=True)
         with open(ROUTES_JSON, "w", encoding="utf-8") as f:
-            json.dump(routes, f, ensure_ascii=False, indent=2)
+            json.dump(routes_to_save, f, ensure_ascii=False, indent=2)
 
         database._rebuild_graph(
             routes,

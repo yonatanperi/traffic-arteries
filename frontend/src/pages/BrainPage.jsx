@@ -39,14 +39,11 @@ export default function BrainPage() {
 
   const hasGraph = !loading && !error && data && data.nodes.length > 0;
 
-  const metrics = useMemo(
-    () => (data ? computeMetrics(data) : null),
-    [data]
-  );
+  const metrics = useMemo(() => (data ? computeMetrics(data) : null), [data]);
 
   const placeOptions = useMemo(
     () => (data ? data.nodes.map((n) => n.id) : []),
-    [data]
+    [data],
   );
 
   // Nodes / edges of the currently highlighted path (path mode only).
@@ -99,7 +96,7 @@ export default function BrainPage() {
       <div className="page-header">
         <h1 className="page-title">הצצה למוח</h1>
         <p className="page-subtitle">
-          רשת הצמתים החיה של המערכת. חפשו מקום, סמנו צומת לפרטים, או שרטטו מסלול
+          רשת הצמתים החיה של המערכת. חפשו מקום, סמנו צומת לפרטים, או שרטטו ציר
           בין שתי נקודות — והציצו במבנה הפנימי של הרשת.
         </p>
       </div>
@@ -143,7 +140,7 @@ export default function BrainPage() {
           <EmptyState
             icon={<IconNetwork size={60} />}
             title="הרשת ריקה"
-            message="עדיין אין מסלולים. הוסיפו מסלולים בעמוד עריכת המסלולים כדי לראות את הרשת מתעוררת לחיים."
+            message="עדיין אין צירים. הוסיפו צירים בעמוד עריכת הצירים כדי לראות את הרשת מתעוררת לחיים."
           />
         )}
         {hasGraph && (

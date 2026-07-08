@@ -105,7 +105,7 @@ export default function BrainToolbar({
           onClick={() => onModeChange("path")}
         >
           <IconRoute size={16} />
-          מסלול
+          ציר
         </button>
       </div>
 
@@ -151,7 +151,10 @@ export default function BrainToolbar({
             </button>
             <button
               type="button"
-              className={"btn btn-ghost bt-icon" + (highlightDeadEnds ? " bt-icon--on" : "")}
+              className={
+                "btn btn-ghost bt-icon" +
+                (highlightDeadEnds ? " bt-icon--on" : "")
+              }
               onClick={onToggleDeadEnds}
               title="הדגש קצוות מבודדים"
               aria-label="הדגש קצוות מבודדים"
@@ -161,7 +164,9 @@ export default function BrainToolbar({
             </button>
             <button
               type="button"
-              className={"btn btn-ghost bt-icon" + (showInsights ? " bt-icon--on" : "")}
+              className={
+                "btn btn-ghost bt-icon" + (showInsights ? " bt-icon--on" : "")
+              }
               onClick={onToggleInsights}
               title="תובנות על הרשת"
               aria-label="תובנות על הרשת"
@@ -210,9 +215,13 @@ export default function BrainToolbar({
             />
           </div>
 
-          <button type="submit" className="btn btn-primary bt-find" disabled={pathLoading}>
+          <button
+            type="submit"
+            className="btn btn-primary bt-find"
+            disabled={pathLoading}
+          >
             <IconRoute size={17} />
-            {pathLoading ? "מחשב…" : "הצג מסלול"}
+            {pathLoading ? "מחשב…" : "הצג ציר"}
           </button>
 
           {paths && paths.length > 0 && (
@@ -221,10 +230,12 @@ export default function BrainToolbar({
                 <button
                   key={i}
                   type="button"
-                  className={"bt-chip" + (i === activePathIndex ? " bt-chip--on" : "")}
+                  className={
+                    "bt-chip" + (i === activePathIndex ? " bt-chip--on" : "")
+                  }
                   onClick={() => onSelectPathIndex(i)}
                 >
-                  {ORDINALS[i] || `מסלול ${i + 1}`}
+                  {ORDINALS[i] || `ציר ${i + 1}`}
                   <span className="bt-chip-hops">{p.length} תחנות</span>
                 </button>
               ))}
@@ -232,8 +243,8 @@ export default function BrainToolbar({
                 type="button"
                 className="bt-chip bt-chip--clear"
                 onClick={clearPath}
-                aria-label="נקה מסלול"
-                title="נקה מסלול"
+                aria-label="נקה ציר"
+                title="נקה ציר"
               >
                 <IconClose size={15} />
               </button>
@@ -247,7 +258,7 @@ export default function BrainToolbar({
           )}
           {paths && paths.length === 0 && !pathError && (
             <p className="bt-path-error" role="status">
-              אין מסלול מחבר בין הנקודות.
+              אין ציר מחבר בין הנקודות.
             </p>
           )}
         </form>

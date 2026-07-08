@@ -2,8 +2,8 @@ import { NavLink } from "react-router-dom";
 import "./NavBar.css";
 
 const LINKS = [
-  { to: "/", label: "מסלולים", end: true },
-  { to: "/routes", label: "עריכת מסלולים" },
+  { to: "/", label: "בניית ציר תנועה", end: true },
+  { to: "/routes", label: "עריכת צירים" },
   { to: "/brain", label: "הצצה למוח" },
 ];
 

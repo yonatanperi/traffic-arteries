@@ -18,6 +18,9 @@ const TEXT = "#ffffff";
 const WARNING = "#e2c541";
 const EXPORT_BG = "#141510"; // --bg-elevated, so exported PNGs aren't transparent.
 
+// Minimum screen-space gap enforced between neighbouring labels.
+const LABEL_SCREEN_PADDING = 4;
+
 /**
  * Interactive force-directed graph of the place network.
  *
@@ -186,20 +189,79 @@ const GraphView = forwardRef(function GraphView(
         ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
         ctx.stroke();
       }
+    },
+    [tierOf, degree, highlightDeadEnds, deadEndIds, pathActive]
+  );
 
-      // Label
-      const bright = tier === "selected" || tier === "neighbour" ||
-        tier === "normal" || tier === "path";
+  /**
+   * Draws node labels as a separate pass so placement can be decided
+   * globally instead of node-by-node: nodes the user is actively engaging
+   * with (selected / neighbours / path) always get a label and claim their
+   * space first, then the rest compete for remaining room in order of
+   * importance (busiest hubs win). A label is skipped whenever it would
+   * overlap one already placed, so a zoomed-out view naturally keeps only
+   * the labels that fit — exactly the declutter-as-you-zoom-in effect maps
+   * use — without any dataset-size-dependent tuning.
+   */
+  const paintLabels = useCallback(
+    (ctx, globalScale) => {
       const fontSize = Math.max(11 / globalScale, 3.2);
       ctx.font = `600 ${fontSize}px Heebo, Assistant, system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      ctx.fillStyle = bright ? TEXT : "rgba(154,167,194,0.5)";
-      ctx.globalAlpha = bright ? 1 : 0.4;
-      ctx.fillText(node.id, node.x, node.y + radius + 1.5);
-      ctx.globalAlpha = 1;
+      const pad = LABEL_SCREEN_PADDING / globalScale;
+
+      const always = [];
+      const candidates = [];
+      data.nodes.forEach((node) => {
+        const tier = tierOf(node.id);
+        if (tier === "selected" || tier === "neighbour" || tier === "path") {
+          always.push(node);
+        } else {
+          candidates.push(node);
+        }
+      });
+      candidates.sort(
+        (a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0)
+      );
+
+      const placed = [];
+      const tryPlace = (node, force) => {
+        const deg = degree.get(node.id) || 1;
+        const radius = 4 + Math.min(deg, 6) * 0.9;
+        const width = ctx.measureText(node.id).width;
+        const top = node.y + radius + 1.5;
+        const rect = {
+          left: node.x - width / 2 - pad,
+          right: node.x + width / 2 + pad,
+          top: top - pad,
+          bottom: top + fontSize + pad,
+        };
+        if (!force) {
+          const overlaps = placed.some(
+            (r) =>
+              rect.left < r.right &&
+              rect.right > r.left &&
+              rect.top < r.bottom &&
+              rect.bottom > r.top
+          );
+          if (overlaps) return;
+        }
+        placed.push(rect);
+
+        const tier = tierOf(node.id);
+        const bright = tier === "selected" || tier === "neighbour" ||
+          tier === "normal" || tier === "path";
+        ctx.fillStyle = bright ? TEXT : "rgba(154,167,194,0.5)";
+        ctx.globalAlpha = bright ? 1 : 0.4;
+        ctx.fillText(node.id, node.x, top);
+        ctx.globalAlpha = 1;
+      };
+
+      always.forEach((node) => tryPlace(node, true));
+      candidates.forEach((node) => tryPlace(node, false));
     },
-    [tierOf, degree, highlightDeadEnds, deadEndIds, pathActive]
+    [data, tierOf, degree]
   );
 
   const linkColor = useCallback(
@@ -244,6 +306,7 @@ const GraphView = forwardRef(function GraphView(
         onNodeClick={(n) => onPinNode?.(n ? n.id : null)}
         onBackgroundClick={() => onPinNode?.(null)}
         nodeCanvasObject={drawNode}
+        onRenderFramePost={paintLabels}
         nodePointerAreaPaint={(node, color, ctx) => {
           const deg = degree.get(node.id) || 1;
           const radius = 4 + Math.min(deg, 6) * 0.9;

@@ -3,7 +3,7 @@ import { IconChevron, IconCopy, IconCheck } from "./icons.jsx";
 import { classifyPlace } from "../utils/placeTypes.js";
 import "./PathResults.css";
 
-const ORDINALS = ["המסלול הקצר ביותר", "מסלול חלופי", "מסלול חלופי נוסף"];
+const ORDINALS = ["הציר הקצר ביותר", "ציר חלופי", "ציר חלופי נוסף"];
 
 // Start and end are always kept; only interior stops are subject to filtering.
 function visiblePath(path, hiddenTypes) {
@@ -42,8 +42,8 @@ function CopyButton({ path }) {
       type="button"
       className={"copy-btn" + (copied ? " copy-btn--done" : "")}
       onClick={copy}
-      aria-label="העתק מסלול"
-      title="העתק מסלול"
+      aria-label="העתק ציר"
+      title="העתק ציר"
     >
       {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
       {copied ? "הועתק" : "העתק"}
@@ -66,7 +66,7 @@ export default function PathResults({ paths, hiddenTypes }) {
             <header className="result-head">
               <div className="result-meta">
                 <h3 className="result-title">
-                  {ORDINALS[i] || `מסלול ${i + 1}`}
+                  {ORDINALS[i] || `ציר ${i + 1}`}
                 </h3>
                 <span className="result-hops">
                   {path.length} תחנות

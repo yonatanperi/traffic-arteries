@@ -26,9 +26,11 @@
   font-weight: 600;
   font-size: 0.92rem;
   border-radius: var(--r-pill);
-  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+  transition:
+    color 0.2s var(--ease),
+    background 0.2s var(--ease);
 }
-.bt-mode:hover {
+.bt-mode:not(.bt-mode--on):hover {
   color: var(--text);
 }
 .bt-mode--on {
@@ -96,7 +98,10 @@
   color: var(--text-muted);
   display: grid;
   place-items: center;
-  transition: transform 0.3s var(--ease), color 0.2s, border-color 0.2s,
+  transition:
+    transform 0.3s var(--ease),
+    color 0.2s,
+    border-color 0.2s,
     background 0.2s;
 }
 .swap-btn:hover {
@@ -124,7 +129,10 @@
   color: var(--text-muted);
   font-weight: 600;
   font-size: 0.85rem;
-  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  transition:
+    color 0.2s,
+    border-color 0.2s,
+    background 0.2s;
 }
 .bt-chip:hover {
   color: var(--text);

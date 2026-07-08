@@ -100,7 +100,7 @@ export default function HomePage() {
       <div className="page-header">
         <h1 className="page-title">לאן ניסע היום?</h1>
         <p className="page-subtitle">
-          בחרו נקודת מוצא ויעד, ונמצא עבורכם את המסלולים הקצרים ביותר.
+          בחרו נקודת מוצא ויעד, נבנה את ציר התנועה עבורכם.
         </p>
       </div>
 
@@ -143,7 +143,7 @@ export default function HomePage() {
                 עצירות ביניים
               </span>
               <span className="waypoints-hint">
-                המסלול יעבור בכל העצירות, בסדר האופטימלי
+                הציר יעבור בכל העצירות, בסדר האופטימלי
               </span>
             </div>
           )}
@@ -152,7 +152,7 @@ export default function HomePage() {
             <div className="waypoint-row" key={i}>
               <Autocomplete
                 icon={<IconRoute size={16} />}
-                placeholder="תחנה שהמסלול חייב לעבור בה"
+                placeholder="תחנה שהציר חייב לעבור בה"
                 options={places}
                 value={v}
                 onChange={(val) => setVia(i, val)}
@@ -181,7 +181,7 @@ export default function HomePage() {
           disabled={loading}
         >
           <IconSearch size={18} />
-          {loading ? "מחפש…" : "מצא מסלול"}
+          {loading ? "מחפש…" : "בניית ציר תנועה"}
         </button>
       </form>
 
@@ -192,14 +192,14 @@ export default function HomePage() {
       )}
 
       <section className="results-area">
-        {loading && <Loader label="מחשב מסלולים…" />}
+        {loading && <Loader label="מחשב צירים…" />}
 
         {!loading && result && result.paths.length === 0 && (
           <EmptyState
             icon={<IconAlert size={60} />}
             tone="warning"
-            title="לא נמצא מסלול בין הנקודות"
-            message="שתי הנקודות אינן מחוברות ברשת המסלולים הקיימת. נסו יעד אחר, או הוסיפו מסלול מקשר בעמוד עריכת המסלולים."
+            title="לא נמצא ציר בין הנקודות"
+            message="שתי הנקודות אינן מחוברות ברשת הצירים הקיימת. נסו יעד אחר, או הוסיפו ציר מקשר בעמוד עריכת הצירים."
           />
         )}
 
@@ -237,7 +237,7 @@ export default function HomePage() {
           <EmptyState
             icon={<IconCompass size={60} />}
             title="מוכנים לצאת לדרך"
-            message="הזינו שתי נקודות למעלה כדי לגלות את המסלולים האפשריים ביניהן."
+            message="הזינו שתי נקודות למעלה כדי לגלות את הצירים האפשריים ביניהן."
           />
         )}
       </section>

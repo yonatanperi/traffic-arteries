@@ -52,7 +52,7 @@ export default function RoutesPage() {
   if (loading) {
     return (
       <div className="page">
-        <Loader label="טוען מסלולים…" />
+        <Loader label="טוען צירים…" />
       </div>
     );
   }
@@ -60,14 +60,18 @@ export default function RoutesPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1 className="page-title">עריכת מסלולים</h1>
+        <h1 className="page-title">עריכת צירים</h1>
         <p className="page-subtitle">
-          בנו וערכו את רשת המסלולים. כל מסלול הוא שרשרת של תחנות; תחנות עוקבות
+          בנו וערכו את רשת הצירים. כל ציר הוא שרשרת של תחנות; תחנות עוקבות
           מחוברות זו לזו בשני הכיוונים. השינויים נשמרים אוטומטית.
         </p>
       </div>
 
-      <RouteEditor routes={routes} onChange={applyChange} suggestions={suggestions} />
+      <RouteEditor
+        routes={routes}
+        onChange={applyChange}
+        suggestions={suggestions}
+      />
     </div>
   );
 }

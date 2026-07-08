@@ -85,22 +85,22 @@ class Database:
         non-empty strings. Place names are trimmed of surrounding whitespace.
         """
         if not isinstance(routes, list):
-            raise ValidationError("הנתונים חייבים להיות רשימה של מסלולים.")
+            raise ValidationError("הנתונים חייבים להיות רשימה של צירים.")
 
         cleaned = []
         for index, route in enumerate(routes):
             if not isinstance(route, list):
-                raise ValidationError(f"מסלול מספר {index + 1} אינו רשימה.")
+                raise ValidationError(f"ציר מספר {index + 1} אינו רשימה.")
             places = []
             for place in route:
                 if not isinstance(place, str) or not place.strip():
                     raise ValidationError(
-                        f"מסלול מספר {index + 1} מכיל שם מקום ריק או לא תקין."
+                        f"ציר מספר {index + 1} מכיל שם מקום ריק או לא תקין."
                     )
                 places.append(place.strip())
             if len(places) < 2:
                 raise ValidationError(
-                    f"מסלול מספר {index + 1} חייב לכלול לפחות שתי נקודות."
+                    f"ציר מספר {index + 1} חייב לכלול לפחות שתי נקודות."
                 )
             cleaned.append(places)
         return cleaned
