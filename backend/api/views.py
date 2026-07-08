@@ -7,15 +7,15 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from . import db, graph
-from .db import ValidationError
+from .db import ValidationError, database
+from .graph import RouteFinder
 
 
 @api_view(["GET"])
 def places(request):
     """All known place names, sorted — feeds the autocomplete inputs."""
-    adjacency = db.load_graph()
-    return Response(graph.all_places(adjacency))
+    graph = database.load_graph()
+    return Response(graph.places())
 
 
 @api_view(["GET", "PUT"])
@@ -25,10 +25,10 @@ def routes(request):
     A successful PUT re-validates the payload and regenerates graph.json.
     """
     if request.method == "GET":
-        return Response(db.load_routes())
+        return Response(database.load_routes())
 
     try:
-        saved = db.save_routes(request.data)
+        saved = database.save_routes(request.data)
     except ValidationError as exc:
         return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response(saved)
@@ -37,8 +37,8 @@ def routes(request):
 @api_view(["GET"])
 def network(request):
     """Graph as {nodes, links} for react-force-graph-2d (read-only view)."""
-    adjacency = db.load_graph()
-    return Response(graph.to_network(adjacency))
+    graph = database.load_graph()
+    return Response(graph.to_network())
 
 
 @api_view(["POST"])
@@ -62,6 +62,6 @@ def path(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    adjacency = db.load_graph()
-    paths = graph.k_shortest_paths(adjacency, start, end, k=3, via=via)
+    graph = database.load_graph()
+    paths = RouteFinder(graph).k_shortest_paths(start, end, k=3, via=via)
     return Response({"paths": paths})
