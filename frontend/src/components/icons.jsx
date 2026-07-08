@@ -227,6 +227,15 @@ export function IconRoute(props) {
   );
 }
 
+// Filter — a funnel.
+export function IconFilter(props) {
+  return (
+    <Svg {...props}>
+      <path d="M4 5h16l-6 7.5V18l-4 2v-7.5Z" />
+    </Svg>
+  );
+}
+
 // Hub — a busy node, drawn as a star burst.
 export function IconHub(props) {
   return (

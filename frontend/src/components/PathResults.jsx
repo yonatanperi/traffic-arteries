@@ -1,8 +1,19 @@
 import { useState } from "react";
 import { IconChevron, IconCopy, IconCheck } from "./icons.jsx";
+import { classifyPlace } from "../utils/placeTypes.js";
 import "./PathResults.css";
 
 const ORDINALS = ["המסלול הקצר ביותר", "מסלול חלופי", "מסלול חלופי נוסף"];
+
+// Start and end are always kept; only interior stops are subject to filtering.
+function visiblePath(path, hiddenTypes) {
+  if (!hiddenTypes || hiddenTypes.size === 0) return path;
+  return path.filter((place, i) => {
+    if (i === 0 || i === path.length - 1) return true;
+    const type = classifyPlace(place);
+    return !(type && hiddenTypes.has(type));
+  });
+}
 
 function CopyButton({ path }) {
   const [copied, setCopied] = useState(false);
@@ -40,11 +51,12 @@ function CopyButton({ path }) {
   );
 }
 
-export default function PathResults({ paths }) {
+export default function PathResults({ paths, hiddenTypes }) {
   return (
     <div className="results">
       {paths.map((path, i) => {
-        const hops = path.length - 1;
+        const shown = visiblePath(path, hiddenTypes);
+        const filtered = shown.length !== path.length;
         return (
           <article
             className="result-card"
@@ -56,24 +68,27 @@ export default function PathResults({ paths }) {
                 <h3 className="result-title">
                   {ORDINALS[i] || `מסלול ${i + 1}`}
                 </h3>
-                <span className="result-hops">{path.length} תחנות</span>
+                <span className="result-hops">
+                  {path.length} תחנות
+                  {filtered && ` (${shown.length} מוצגות)`}
+                </span>
               </div>
               <CopyButton path={path} />
             </header>
 
             <ol className="chain">
-              {path.map((place, j) => (
+              {shown.map((place, j) => (
                 <li className="chain-item" key={j}>
                   <span
                     className={
                       "stop" +
                       (j === 0 ? " stop--start" : "") +
-                      (j === path.length - 1 ? " stop--end" : "")
+                      (j === shown.length - 1 ? " stop--end" : "")
                     }
                   >
                     {place}
                   </span>
-                  {j < path.length - 1 && (
+                  {j < shown.length - 1 && (
                     <span className="chain-arrow" aria-hidden="true">
                       <IconChevron size={15} />
                     </span>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Autocomplete from "../components/Autocomplete.jsx";
 import PathResults from "../components/PathResults.jsx";
 import EmptyState from "../components/EmptyState.jsx";
@@ -13,8 +13,10 @@ import {
   IconRoute,
   IconPlus,
   IconClose,
+  IconFilter,
 } from "../components/icons.jsx";
 import { getPlaces, findPaths } from "../api/client.js";
+import { PLACE_TYPES, classifyPlace } from "../utils/placeTypes.js";
 import "./HomePage.css";
 
 export default function HomePage() {
@@ -25,6 +27,23 @@ export default function HomePage() {
   const [result, setResult] = useState(null); // { paths } | null
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [hiddenTypes, setHiddenTypes] = useState(() => new Set()); // stop types filtered out of the results
+
+  // Only interior stops are ever filtered (start/end are always kept), so a
+  // filter chip is only worth showing if some route actually has one of that
+  // type among its interior stops.
+  const presentTypes = useMemo(() => {
+    const set = new Set();
+    if (!result) return set;
+    result.paths.forEach((path) => {
+      path.forEach((place, i) => {
+        if (i === 0 || i === path.length - 1) return;
+        const type = classifyPlace(place);
+        if (type) set.add(type);
+      });
+    });
+    return set;
+  }, [result]);
 
   useEffect(() => {
     getPlaces()
@@ -65,6 +84,15 @@ export default function HomePage() {
   }
   function removeVia(index) {
     setVias((v) => v.filter((_, i) => i !== index));
+  }
+
+  function toggleType(key) {
+    setHiddenTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   return (
@@ -176,7 +204,33 @@ export default function HomePage() {
         )}
 
         {!loading && result && result.paths.length > 0 && (
-          <PathResults paths={result.paths} />
+          <>
+            {presentTypes.size > 0 && (
+              <div className="type-filters">
+                <span className="type-filters-label">
+                  <IconFilter size={24} />
+                </span>
+                {PLACE_TYPES.filter((t) => presentTypes.has(t.key)).map((t) => {
+                  const active = !hiddenTypes.has(t.key);
+                  return (
+                    <button
+                      key={t.key}
+                      type="button"
+                      className={
+                        "type-filter-chip" +
+                        (active ? "" : " type-filter-chip--off")
+                      }
+                      aria-pressed={active}
+                      onClick={() => toggleType(t.key)}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <PathResults paths={result.paths} hiddenTypes={hiddenTypes} />
+          </>
         )}
 
         {!loading && !result && !error && (

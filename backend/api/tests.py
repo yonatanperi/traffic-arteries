@@ -49,6 +49,53 @@ class KShortestPathsTests(SimpleTestCase):
         self.assertEqual(graph.k_shortest_paths(adj, "X", "Q"), [])
 
 
+class WaypointTests(SimpleTestCase):
+    """Required intermediate stops: real-world simple paths, no pointless detour."""
+
+    def setUp(self):
+        # A-B direct; A-C and C-B direct (short way through C); plus a long
+        # detour from A to C via Z, X, N, K.
+        self.adj = graph.build_adjacency(
+            [["A", "B"], ["A", "C"], ["C", "B"], ["A", "Z", "X", "N", "K", "C"]]
+        )
+
+    def test_route_passes_through_required_stop(self):
+        for p in graph.k_shortest_paths(self.adj, "A", "B", via=["C"]):
+            self.assertIn("C", p)
+
+    def test_no_revisits_with_waypoints(self):
+        for p in graph.k_shortest_paths(self.adj, "A", "B", via=["C"]):
+            self.assertEqual(len(p), len(set(p)), f"route revisits a node: {p}")
+
+    def test_short_connection_is_not_detoured(self):
+        # The short A-C-B must be chosen; the long A-Z-X-N-K-C-B detour rejected.
+        paths = graph.k_shortest_paths(self.adj, "A", "B", via=["C"])
+        self.assertEqual(paths[0], ["A", "C", "B"])
+        self.assertNotIn(["A", "Z", "X", "N", "K", "C", "B"], paths)
+
+    def test_optimised_stop_order(self):
+        # Stops given as [X, A] are visited in the order that minimises the
+        # route: A before X (A sits between the start K... here start=A).
+        adj = graph.build_adjacency([["S", "P", "Q", "E"]])
+        paths = graph.k_shortest_paths(adj, "S", "E", via=["Q", "P"])
+        self.assertEqual(paths[0], ["S", "P", "Q", "E"])
+
+    def test_unknown_stop_returns_empty(self):
+        self.assertEqual(graph.k_shortest_paths(self.adj, "A", "B", via=["ZZZ"]), [])
+
+    def test_stop_equal_to_endpoint_is_ignored(self):
+        # A required stop that is already the start/end changes nothing.
+        with_stop = graph.k_shortest_paths(self.adj, "A", "B", via=["A"])
+        plain = graph.k_shortest_paths(self.adj, "A", "B")
+        self.assertEqual(with_stop, plain)
+
+    def test_empty_via_matches_no_via(self):
+        self.assertEqual(
+            graph.k_shortest_paths(self.adj, "A", "B", via=[]),
+            graph.k_shortest_paths(self.adj, "A", "B"),
+        )
+
+
 class GraphShapeTests(SimpleTestCase):
     def test_edges_are_bidirectional(self):
         adj = graph.build_adjacency([["X", "Y", "Z"]])
