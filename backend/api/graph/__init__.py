@@ -6,8 +6,10 @@ The public objects:
     (:meth:`Graph.from_routes`) or wrapped around a persisted adjacency dict.
   * :class:`RouteFinder` — Waze-style diverse route search over a ``Graph``.
 
-Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.search`
-(single-route strategies), :mod:`.routing` (the diversity layer).
+Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.contraction`
+(collapsing transparent ≤2-connection nodes into crossroad-to-crossroad
+segments), :mod:`.search` (single-route strategies), :mod:`.routing` (the
+diversity layer).
 """
 
 from .core import Graph

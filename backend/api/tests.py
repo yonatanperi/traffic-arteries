@@ -98,6 +98,74 @@ class WaypointTests(SimpleTestCase):
         )
 
 
+class TransparencyTests(SimpleTestCase):
+    """Nodes with <=2 connections are transparent: only crossroads count."""
+
+    def assert_full_chain(self, graph, path):
+        """Every consecutive pair in a returned route is a real graph edge."""
+        for a, b in zip(path, path[1:]):
+            self.assertIn(b, graph.neighbors(a), f"{a}->{b} is not a real edge in {path}")
+
+    def test_crossroads_are_degree_three_or_more(self):
+        # C has neighbours B, D, X (degree 3); everything else is degree <= 2.
+        graph = Graph.from_routes([["A", "B", "C", "D", "E"], ["C", "X"]])
+        self.assertEqual(graph.crossroads(), ["C"])
+        self.assertEqual(graph.degree("B"), 2)  # transparent
+        self.assertEqual(graph.degree("C"), 3)  # crossroad
+
+    def test_transparent_chain_counts_as_one_hop(self):
+        # A long transparent chain A..B is ONE crossroad-to-crossroad hop, so it
+        # beats the two-hop route through crossroad M -- even though it has far
+        # more nodes. Under the old edge-count model M's route (2 edges) would
+        # have won over the chain (6 edges); this is the shortest-path change.
+        graph = Graph.from_routes(
+            [
+                ["A", "l1", "l2", "l3", "l4", "l5", "B"],  # long transparent road
+                ["A", "M", "B"],                            # short road via crossroad M
+                ["A", "a2"], ["B", "b2"], ["M", "m2"],      # make A, B, M crossroads
+            ]
+        )
+        finder = RouteFinder(graph)
+        paths = finder.k_shortest_paths("A", "B", k=3)
+        self.assertEqual(paths[0], ["A", "l1", "l2", "l3", "l4", "l5", "B"])
+        self.assertIn(["A", "M", "B"], paths)
+        for p in paths:
+            self.assert_full_chain(graph, p)
+
+    def test_parallel_roads_are_distinct_alternatives(self):
+        # A and C are crossroads joined by TWO different roads: a direct edge and
+        # a road through transparent p, q. Both must come back as alternatives.
+        graph = Graph.from_routes(
+            [["A", "C"], ["A", "p", "q", "C"], ["A", "x"], ["C", "y"]]
+        )
+        paths = RouteFinder(graph).k_shortest_paths("A", "C", k=3)
+        self.assertIn(["A", "C"], paths)
+        self.assertIn(["A", "p", "q", "C"], paths)
+        self.assertEqual(len(paths), 2)
+
+    def test_transparent_endpoint_is_still_routable(self):
+        # a2 and m2 are dead-end (degree-1) transparent nodes; as the query's
+        # terminals they are kept and must remain routable through the network.
+        graph = Graph.from_routes(
+            [
+                ["A", "l1", "l2", "l3", "l4", "l5", "B"],
+                ["A", "M", "B"],
+                ["A", "a2"], ["B", "b2"], ["M", "m2"],
+            ]
+        )
+        paths = RouteFinder(graph).k_shortest_paths("a2", "m2")
+        self.assertTrue(paths)
+        self.assertEqual(paths[0][0], "a2")
+        self.assertEqual(paths[0][-1], "m2")
+        self.assert_full_chain(graph, paths[0])
+
+    def test_transparent_only_graph_collapses_to_single_segment(self):
+        # No crossroads anywhere: a plain chain is one segment end to end.
+        graph = Graph.from_routes([["S", "a", "b", "c", "d", "E"]])
+        paths = RouteFinder(graph).k_shortest_paths("S", "E", k=3)
+        self.assertEqual(paths, [["S", "a", "b", "c", "d", "E"]])
+
+
 class GraphShapeTests(SimpleTestCase):
     def test_edges_are_bidirectional(self):
         graph = Graph.from_routes([["X", "Y", "Z"]])

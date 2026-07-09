@@ -12,11 +12,6 @@ def edge_key(a, b):
     return (a, b) if a <= b else (b, a)
 
 
-def path_edges(path):
-    """The set of undirected edges that make up a path."""
-    return {edge_key(a, b) for a, b in zip(path, path[1:])}
-
-
 class Graph:
     """An undirected graph of places, backed by an adjacency list.
 
@@ -75,6 +70,21 @@ class Graph:
     def neighbors(self, place):
         """Sorted neighbours of ``place`` (raises ``KeyError`` if unknown)."""
         return self._adjacency[place]
+
+    def degree(self, place):
+        """Number of connections ``place`` has (raises ``KeyError`` if unknown)."""
+        return len(self._adjacency[place])
+
+    def crossroads(self, min_degree=3):
+        """Sorted places that are real intersections (``degree >= min_degree``).
+
+        Places below the threshold are transparent to routing: they are shape
+        points along a road, not decision points, so only travel between
+        crossroads is counted. See :class:`~.contraction.SegmentGraph`.
+        """
+        return sorted(
+            place for place in self._adjacency if len(self._adjacency[place]) >= min_degree
+        )
 
     def places(self):
         """Sorted list of every place in the graph (autocomplete source)."""

@@ -8,8 +8,8 @@ is bound to one :class:`~.core.Graph` and holds the diversity tunables; call
 
 import itertools
 
-from .core import path_edges
-from .search import ShortestPathStrategy, WaypointStrategy, single_source_costs
+from .contraction import SegmentGraph, expand
+from .search import ShortestPathStrategy, WaypointStrategy
 
 # Above this many required stops the permutation count (n!) makes exhaustive
 # order optimisation impractical, so we fall back to the caller's order.
@@ -77,22 +77,28 @@ class RouteFinder:
         if any(stop not in graph for stop in waypoints):
             return []
 
+        # Contract away transparent (<=2-connection) nodes, keeping the terminals
+        # so they stay routable. The search then reasons in crossroad-to-crossroad
+        # segments; we expand each result back to a full chain before returning.
+        seg_graph = SegmentGraph.build(graph, {start, end, *waypoints})
+
         # No required stops -> classic diverse shortest-path search.
         if not waypoints:
             if start == end:
                 return [[start]]
-            strategy = ShortestPathStrategy(graph, start, end)
-            return self._collect_diverse(strategy, k, self.max_stretch)
+            strategy = ShortestPathStrategy(seg_graph, start, end)
+            routes = self._collect_diverse(strategy, k, self.max_stretch)
+            return [expand(start, segments) for segments in routes]
 
         # Required stops -> strict simple paths, tightly bounded so no route
         # wanders off on a detour. Try candidate stop orders cheapest-first and
         # keep the first order that actually yields a simple route.
         stretch = min(self.max_stretch, WAYPOINT_MAX_STRETCH)
-        for points in self._ordered_point_lists(start, end, waypoints):
-            strategy = WaypointStrategy(graph, points)
-            accepted = self._collect_diverse(strategy, k, stretch)
-            if accepted:
-                return accepted
+        for points in self._ordered_point_lists(seg_graph, start, end, waypoints):
+            strategy = WaypointStrategy(seg_graph, points)
+            routes = self._collect_diverse(strategy, k, stretch)
+            if routes:
+                return [expand(start, segments) for segments in routes]
 
         return []
 
@@ -110,12 +116,12 @@ class RouteFinder:
                 waypoints.append(stop)
         return waypoints
 
-    def _ordered_point_lists(self, start, end, waypoints):
+    def _ordered_point_lists(self, seg_graph, start, end, waypoints):
         """Candidate point sequences ``[start, *stops, end]``, cheapest order first.
 
         The visiting order of the required stops is a small travelling-salesman
-        problem. We score every ordering by the base-cost distances between the
-        key nodes (start, end, each stop) and return the reachable orderings
+        problem. We score every ordering by the segment-count distances between
+        the key nodes (start, end, each stop) and return the reachable orderings
         sorted from cheapest to most expensive. The caller walks this list and
         keeps the first order that yields an actual (simple-path) route — the
         heuristic order is almost always feasible, but this stays correct when it
@@ -124,9 +130,8 @@ class RouteFinder:
         Beyond :data:`MAX_OPTIMIZED_WAYPOINTS` stops the permutation count
         explodes, so we consider only the caller's given order.
         """
-        graph = self.graph
         key_nodes = [start, end, *waypoints]
-        costs = {node: single_source_costs(graph, node) for node in key_nodes}
+        costs = {node: seg_graph.source_costs(node) for node in key_nodes}
 
         def total(order):
             sequence = [start, *order, end]
@@ -152,53 +157,57 @@ class RouteFinder:
         return [points for _, points in scored]
 
     def _collect_diverse(self, strategy, k, max_stretch):
-        """Iterative edge-penalty search for up to ``k`` diverse routes.
+        """Iterative segment-penalty search for up to ``k`` diverse routes.
 
-        ``strategy.find(penalty)`` returns ``(path, cost)`` for the current
+        ``strategy.find(penalty)`` returns ``(segments, cost)`` for the current
         penalty map — it encapsulates *how* a single route is found (plain
         shortest path, or a simple path through required stops). This method is
-        the shared diversity layer: it penalises the edges of each route it sees
-        so the next search is pushed onto a different corridor, and keeps a
-        candidate only if it is neither too similar to an accepted route
-        (``max_overlap``) nor an excessive detour (``max_stretch``).
+        the shared diversity layer: it penalises the segments of each route it
+        sees so the next search is pushed onto a different corridor (including a
+        parallel road between the same two crossroads), and keeps a candidate
+        only if it is neither too similar to an accepted route (``max_overlap``)
+        nor an excessive detour (``max_stretch``).
+
+        Returns a list of routes, each an ordered list of
+        :class:`~.contraction.Segment` objects, fastest (fewest segments) first.
         """
         penalty = {}
         accepted = []
-        accepted_edges = []  # edge set per accepted route, parallel to ``accepted``
+        accepted_ids = []  # segment-id set per accepted route, parallel to ``accepted``
         shortest_cost = None
 
         for _ in range(k * 8):
             if len(accepted) >= k:
                 break
 
-            path, cost = strategy.find(penalty)
-            if path is None:
+            segments, cost = strategy.find(penalty)
+            if not segments:
                 break
 
-            edges = path_edges(path)
-            # Penalise this path's edges whether or not we keep it, so the next
-            # search is pushed somewhere new either way.
-            for edge in edges:
-                penalty[edge] = penalty.get(edge, 1.0) * self.penalty_factor
+            ids = {seg.id for seg in segments}
+            # Penalise this route's segments whether or not we keep it, so the
+            # next search is pushed somewhere new either way.
+            for seg in segments:
+                penalty[seg.id] = penalty.get(seg.id, 1.0) * self.penalty_factor
 
-            if any(path == p for p in accepted):
+            if any(ids == prior for prior in accepted_ids):
                 continue
 
             if shortest_cost is None:
-                shortest_cost = cost  # the first (unpenalised) path is the fastest
+                shortest_cost = cost  # the first (unpenalised) route is the fastest
             elif cost > shortest_cost * max_stretch:
                 continue  # too long a detour to be a useful alternative
 
             # Reject near-duplicates: too much of this route reuses one we kept.
             if any(
-                len(edges & prior) / len(edges) > self.max_overlap
-                for prior in accepted_edges
+                len(ids & prior) / len(ids) > self.max_overlap
+                for prior in accepted_ids
             ):
                 continue
 
-            accepted.append(path)
-            accepted_edges.append(edges)
+            accepted.append(segments)
+            accepted_ids.append(ids)
 
         # Present fastest-first; a stable sort preserves discovery order among ties.
-        accepted.sort(key=lambda p: len(p))
+        accepted.sort(key=lambda segments: len(segments))
         return accepted
