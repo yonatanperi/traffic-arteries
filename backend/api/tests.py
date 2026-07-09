@@ -22,10 +22,11 @@ class KShortestPathsTests(SimpleTestCase):
         self.assertTrue(paths)
         self.assertEqual(paths[0], ["K", "J", "E", "G", "N", "M"])
 
-    def test_results_are_shortest_first(self):
-        paths = self.finder.k_shortest_paths("A", "R", k=3)
-        lengths = [len(p) for p in paths]
-        self.assertEqual(lengths, sorted(lengths))
+    def test_results_are_best_first(self):
+        # Best-first now means fewest merged routes, then fewest intersections.
+        routes = self.finder.find_routes("A", "R", k=3)
+        keys = [(r.route_count, r.crossroad_hops) for r in routes]
+        self.assertEqual(keys, sorted(keys))
 
     def test_at_most_k_distinct_paths(self):
         paths = self.finder.k_shortest_paths("A", "R", k=3)
@@ -164,6 +165,75 @@ class TransparencyTests(SimpleTestCase):
         graph = Graph.from_routes([["S", "a", "b", "c", "d", "E"]])
         paths = RouteFinder(graph).k_shortest_paths("S", "E", k=3)
         self.assertEqual(paths, [["S", "a", "b", "c", "d", "E"]])
+
+
+class MergeTests(SimpleTestCase):
+    """"Best" = the route merging the fewest authored routes from routes.json."""
+
+    def setUp(self):
+        self.finder = RouteFinder(Graph.from_routes(SPEC_ROUTES))
+
+    def test_edge_route_membership(self):
+        g = Graph.from_routes([["A", "B", "C"], ["B", "C", "D"]])
+        self.assertEqual(g.routes_on("A", "B"), (0,))
+        self.assertEqual(g.routes_on("C", "B"), (0, 1))  # order-independent; both
+        self.assertEqual(g.routes_on("C", "D"), (1,))
+
+    def test_best_merges_fewest_routes(self):
+        # The spec example: A..G along one route beats A-B-R-G across two, even
+        # though A-B-R-G is shorter.
+        finder = RouteFinder(
+            Graph.from_routes([
+                ["A", "B", "C", "D", "E", "F", "G"],
+                ["B", "R", "G"],
+            ])
+        )
+        routes = finder.find_routes("A", "G", k=3)
+        self.assertEqual(routes[0].stops, ["A", "B", "C", "D", "E", "F", "G"])
+        self.assertEqual(routes[0].route_count, 1)
+        self.assertEqual(routes[0].route_ids, [0])
+
+        stops = [r.stops for r in routes]
+        self.assertIn(["A", "B", "R", "G"], stops)
+        alt = next(r for r in routes if r.stops == ["A", "B", "R", "G"])
+        self.assertEqual(alt.route_count, 2)
+        self.assertEqual(alt.route_ids, [0, 1])
+
+    def test_transfer_counted_at_transparent_node(self):
+        # B is a degree-2 (transparent) node where two authored routes meet, so
+        # X->Y still merges two routes.
+        finder = RouteFinder(Graph.from_routes([["X", "A", "B"], ["B", "C", "Y"]]))
+        routes = finder.find_routes("X", "Y")
+        self.assertEqual(routes[0].stops, ["X", "A", "B", "C", "Y"])
+        self.assertEqual(routes[0].route_count, 2)
+        self.assertEqual(routes[0].route_ids, [0, 1])
+
+    def test_spec_km_reports_merged_routes(self):
+        best = self.finder.find_routes("K", "M", k=3)[0]
+        self.assertEqual(best.stops, ["K", "J", "E", "G", "N", "M"])
+        self.assertEqual(best.route_count, 2)  # merges routes 1 and 2
+        self.assertEqual(best.route_ids, [1, 2])
+
+    def test_equal_merge_tiebreak_by_crossroad_hops(self):
+        # A->R: both corridors merge 2 routes; the one crossing fewer
+        # intersections (only E) wins.
+        best = self.finder.find_routes("A", "R", k=3)[0]
+        self.assertEqual(best.stops, ["A", "L", "K", "J", "E", "R"])
+        self.assertEqual(best.route_count, 2)
+
+    def test_via_still_works_with_merges(self):
+        routes = self.finder.find_routes("K", "M", via=["E"])
+        self.assertTrue(routes)
+        self.assertIn("E", routes[0].stops)
+        self.assertTrue(all(len(r.stops) == len(set(r.stops)) for r in routes))
+
+    def test_k_shortest_paths_returns_stop_lists(self):
+        finder = RouteFinder(
+            Graph.from_routes([["A", "B", "C", "D", "E", "F", "G"], ["B", "R", "G"]])
+        )
+        paths = finder.k_shortest_paths("A", "G")
+        self.assertEqual(paths[0], ["A", "B", "C", "D", "E", "F", "G"])
+        self.assertTrue(all(isinstance(p, list) for p in paths))
 
 
 class GraphShapeTests(SimpleTestCase):

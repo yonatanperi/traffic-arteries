@@ -18,7 +18,13 @@ import {
 } from "../icons";
 import "./BrainToolbar.css";
 
-const ORDINALS = ["הקצר ביותר", "חלופי", "חלופי נוסף"];
+const ORDINALS = ["המיטבי", "חלופי", "חלופי נוסף"];
+
+// Compact merge-count label for a path chip ("best" = fewest merged routes).
+function mergeShort(count) {
+  if (!count) return null;
+  return count === 1 ? "ציר יחיד" : `${count} צירים`;
+}
 
 /**
  * The control strip above the brain canvas. Two modes:
@@ -83,6 +89,7 @@ export default function BrainToolbar({
   }
 
   const paths = pathResult?.paths ?? null;
+  const meta = pathResult?.meta ?? null;
 
   return (
     <div className="brain-toolbar">
@@ -236,7 +243,9 @@ export default function BrainToolbar({
                   onClick={() => onSelectPathIndex(i)}
                 >
                   {ORDINALS[i] || `ציר ${i + 1}`}
-                  <span className="bt-chip-hops">{p.length} תחנות</span>
+                  <span className="bt-chip-hops">
+                    {mergeShort(meta?.[i]?.routeCount) ?? `${p.length} תחנות`}
+                  </span>
                 </button>
               ))}
               <button

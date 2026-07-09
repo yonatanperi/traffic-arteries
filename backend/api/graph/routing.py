@@ -1,71 +1,89 @@
 """Diverse alternative-route search — the :class:`RouteFinder`.
 
-Route search returns up to ``k`` *genuinely different* options (Waze-style
-alternatives), not near-duplicates of the shortest path. A :class:`RouteFinder`
-is bound to one :class:`~.core.Graph` and holds the diversity tunables; call
-:meth:`RouteFinder.k_shortest_paths` to search it.
+Route search returns up to ``k`` *genuinely different* options, and "best" means
+the route that **merges the fewest authored routes** from ``routes.json`` (not
+the shortest one). A :class:`RouteFinder` is bound to one :class:`~.core.Graph`
+and holds the diversity tunables; call :meth:`RouteFinder.find_routes` for the
+rich results (stops + which authored routes are merged) or
+:meth:`RouteFinder.k_shortest_paths` for just the stop chains.
 """
 
 import itertools
 
-from .contraction import SegmentGraph, expand
-from .search import ShortestPathStrategy, WaypointStrategy
+from .core import path_edges
+from .search import TRANSFER_WEIGHT, MinMergeStrategy, WaypointStrategy, single_source_costs
 
 # Above this many required stops the permutation count (n!) makes exhaustive
 # order optimisation impractical, so we fall back to the caller's order.
 MAX_OPTIMIZED_WAYPOINTS = 7
 
 # With required stops we keep alternatives tight: a route may not exceed the
-# best route through those stops by more than this factor. This is what stops
-# an alternative from wandering off on a pointless detour when a short
-# connection between two stops already exists.
+# best route through those stops by more than this factor (measured in crossroad
+# hops). This stops an alternative from wandering off on a pointless detour.
 WAYPOINT_MAX_STRETCH = 1.5
+
+
+class Route:
+    """One result route: the stop chain plus the authored routes it merges.
+
+      * ``stops``          — full place-name chain (consecutive pairs are edges).
+      * ``route_ids``      — sorted distinct authored-route indices it stitches.
+      * ``route_count``    — how many authored routes are merged (the "best" key).
+      * ``crossroad_hops`` — intersections crossed (the tiebreak).
+    """
+
+    def __init__(self, stops, route_ids, crossroad_hops):
+        self.stops = list(stops)
+        self.route_ids = sorted(set(route_ids))
+        self.route_count = len(self.route_ids)
+        self.crossroad_hops = crossroad_hops
 
 
 class RouteFinder:
     """Finds diverse alternative routes over a fixed :class:`~.core.Graph`.
 
-    The goal is Waze-style options: option 1 is the genuine shortest route, and
-    each further option is a meaningfully different corridor rather than the
-    shortest path with one node swapped. The tunables shape that diversity:
+    Option 1 is the genuine best (fewest merged authored routes, then fewest
+    intersections); each further option is a meaningfully different corridor. The
+    tunables shape that diversity:
 
-      * ``penalty_factor`` — how hard reused edges are pushed away (>1).
+      * ``penalty_step``  — how much cost each reuse of an edge *adds* (additive,
+                            in the search's cost units). One transfer costs
+                            :data:`~.search.TRANSFER_WEIGHT`, so a step of that
+                            size means "reusing an edge is about as bad as an
+                            extra route merge", enough to flip onto a fresh
+                            corridor even against a zero-transfer best route.
       * ``max_overlap``    — reject a candidate sharing more than this fraction
                              of its own edges with any accepted route (0..1).
-      * ``max_stretch``    — reject alternatives longer than this multiple of
-                             the shortest route's length.
+      * ``max_stretch``    — reject alternatives whose crossroad-hop count exceeds
+                             the best route's by more than this factor.
     """
 
-    def __init__(self, graph, penalty_factor=3.0, max_overlap=0.6, max_stretch=2.5):
+    def __init__(self, graph, penalty_step=TRANSFER_WEIGHT, max_overlap=0.6, max_stretch=2.5):
         self.graph = graph
-        self.penalty_factor = penalty_factor
+        self.penalty_step = penalty_step
         self.max_overlap = max_overlap
         self.max_stretch = max_stretch
 
-    def k_shortest_paths(self, start, end, k=3, via=None):
-        """Return up to ``k`` diverse alternative routes from ``start`` to ``end``.
+    def find_routes(self, start, end, k=3, via=None):
+        """Return up to ``k`` diverse :class:`Route` results, best first.
 
         ``via`` is an optional list of *required stops* the route must pass
-        through. When given, every returned route is a real-world simple path —
-        **no node is ever visited twice** — that touches the stops in an
-        optimised order, and alternatives are kept tight (see
-        :data:`WAYPOINT_MAX_STRETCH`) so none of them detours around a connection
-        that is already short. With no ``via`` the behaviour is the classic
-        diverse shortest-path search.
+        through (visited in an optimised order, alternatives kept tight so none
+        detours around an already-short connection). "Best" is the route merging
+        the fewest authored routes, tiebroken by fewest crossroad hops.
 
         Algorithm — the iterative edge-penalty method used by real routing
         engines:
 
-          1. Find the shortest path.
-          2. Multiply the weight of every edge on it by ``penalty_factor``.
-          3. Search again; the penalty repels the next route away from edges the
-             chosen routes already cover, so it takes a different corridor.
+          1. Find the best (fewest-merge) route.
+          2. Multiply the penalty of every edge on it by ``penalty_factor``.
+          3. Search again; the penalty repels the next route onto a different
+             corridor.
           4. Keep a candidate only if it is not too similar to an already-chosen
-             route (``max_overlap``) and not an excessive detour
-             (``max_stretch``).
+             route (``max_overlap``) and not an excessive detour (``max_stretch``).
 
         Edge cases:
-          * ``start == end`` (no ``via``) -> ``[[start]]`` (if the node exists)
+          * ``start == end`` (no ``via``) -> a single trivial ``Route([start])``
           * ``start``/``end``/``via`` absent from graph -> ``[]``
           * no connection / unreachable stop           -> ``[]``
         """
@@ -77,30 +95,27 @@ class RouteFinder:
         if any(stop not in graph for stop in waypoints):
             return []
 
-        # Contract away transparent (<=2-connection) nodes, keeping the terminals
-        # so they stay routable. The search then reasons in crossroad-to-crossroad
-        # segments; we expand each result back to a full chain before returning.
-        seg_graph = SegmentGraph.build(graph, {start, end, *waypoints})
-
-        # No required stops -> classic diverse shortest-path search.
+        # No required stops -> plain point-to-point merge-minimising search.
         if not waypoints:
             if start == end:
-                return [[start]]
-            strategy = ShortestPathStrategy(seg_graph, start, end)
-            routes = self._collect_diverse(strategy, k, self.max_stretch)
-            return [expand(start, segments) for segments in routes]
+                return [Route([start], [], 0)]
+            strategy = MinMergeStrategy(graph, start, end)
+            return self._collect_diverse(strategy, k, self.max_stretch)
 
-        # Required stops -> strict simple paths, tightly bounded so no route
-        # wanders off on a detour. Try candidate stop orders cheapest-first and
-        # keep the first order that actually yields a simple route.
+        # Required stops -> strict simple paths, tightly bounded. Try candidate
+        # stop orders cheapest-first and keep the first order that yields a route.
         stretch = min(self.max_stretch, WAYPOINT_MAX_STRETCH)
-        for points in self._ordered_point_lists(seg_graph, start, end, waypoints):
-            strategy = WaypointStrategy(seg_graph, points)
+        for points in self._ordered_point_lists(start, end, waypoints):
+            strategy = WaypointStrategy(graph, points)
             routes = self._collect_diverse(strategy, k, stretch)
             if routes:
-                return [expand(start, segments) for segments in routes]
+                return routes
 
         return []
+
+    def k_shortest_paths(self, start, end, k=3, via=None):
+        """Backward-compatible view of :meth:`find_routes`: just the stop chains."""
+        return [route.stops for route in self.find_routes(start, end, k=k, via=via)]
 
     @staticmethod
     def _normalise_waypoints(start, end, via):
@@ -116,11 +131,11 @@ class RouteFinder:
                 waypoints.append(stop)
         return waypoints
 
-    def _ordered_point_lists(self, seg_graph, start, end, waypoints):
+    def _ordered_point_lists(self, start, end, waypoints):
         """Candidate point sequences ``[start, *stops, end]``, cheapest order first.
 
         The visiting order of the required stops is a small travelling-salesman
-        problem. We score every ordering by the segment-count distances between
+        problem. We score every ordering by the unweighted hop distances between
         the key nodes (start, end, each stop) and return the reachable orderings
         sorted from cheapest to most expensive. The caller walks this list and
         keeps the first order that yields an actual (simple-path) route — the
@@ -131,7 +146,7 @@ class RouteFinder:
         explodes, so we consider only the caller's given order.
         """
         key_nodes = [start, end, *waypoints]
-        costs = {node: seg_graph.source_costs(node) for node in key_nodes}
+        costs = {node: single_source_costs(self.graph, node) for node in key_nodes}
 
         def total(order):
             sequence = [start, *order, end]
@@ -156,58 +171,63 @@ class RouteFinder:
         scored.sort(key=lambda item: item[0])
         return [points for _, points in scored]
 
+    def _crossroad_hops(self, nodes):
+        """Intersections entered along ``nodes`` (crossroads after the start)."""
+        return sum(1 for node in nodes[1:] if self.graph.is_crossroad(node))
+
     def _collect_diverse(self, strategy, k, max_stretch):
-        """Iterative segment-penalty search for up to ``k`` diverse routes.
+        """Iterative edge-penalty search for up to ``k`` diverse :class:`Route`s.
 
-        ``strategy.find(penalty)`` returns ``(segments, cost)`` for the current
+        ``strategy.find(penalty)`` returns ``(nodes, route_seq)`` for the current
         penalty map — it encapsulates *how* a single route is found (plain
-        shortest path, or a simple path through required stops). This method is
-        the shared diversity layer: it penalises the segments of each route it
-        sees so the next search is pushed onto a different corridor (including a
-        parallel road between the same two crossroads), and keeps a candidate
+        point-to-point, or a simple path through required stops). This is the
+        shared diversity layer: it penalises the edges of each route it sees so
+        the next search is pushed onto a different corridor, and keeps a candidate
         only if it is neither too similar to an accepted route (``max_overlap``)
-        nor an excessive detour (``max_stretch``).
+        nor an excessive detour — more than ``max_stretch`` times the best route's
+        length. (Length, not crossroad hops: a detour down a chain of transparent
+        nodes adds no hops yet is still a pointless detour.)
 
-        Returns a list of routes, each an ordered list of
-        :class:`~.contraction.Segment` objects, fastest (fewest segments) first.
+        Results are returned best-first: fewest merged routes, then fewest
+        crossroad hops, then fewest stops.
         """
         penalty = {}
         accepted = []
-        accepted_ids = []  # segment-id set per accepted route, parallel to ``accepted``
-        shortest_cost = None
+        accepted_edges = []  # edge set per accepted route, parallel to ``accepted``
+        best_stops = None
 
         for _ in range(k * 8):
             if len(accepted) >= k:
                 break
 
-            segments, cost = strategy.find(penalty)
-            if not segments:
+            nodes, route_seq = strategy.find(penalty)
+            if not nodes or len(nodes) < 2:
                 break
 
-            ids = {seg.id for seg in segments}
-            # Penalise this route's segments whether or not we keep it, so the
-            # next search is pushed somewhere new either way.
-            for seg in segments:
-                penalty[seg.id] = penalty.get(seg.id, 1.0) * self.penalty_factor
+            edges = path_edges(nodes)
+            # Penalise this route's edges (additively) whether or not we keep it,
+            # so the next search is pushed somewhere new either way.
+            for edge in edges:
+                penalty[edge] = penalty.get(edge, 0.0) + self.penalty_step
 
-            if any(ids == prior for prior in accepted_ids):
+            if any(edges == prior for prior in accepted_edges):
                 continue
 
-            if shortest_cost is None:
-                shortest_cost = cost  # the first (unpenalised) route is the fastest
-            elif cost > shortest_cost * max_stretch:
+            if best_stops is None:
+                best_stops = len(nodes)  # the first (unpenalised) route is the best
+            elif len(nodes) > best_stops * max_stretch:
                 continue  # too long a detour to be a useful alternative
 
             # Reject near-duplicates: too much of this route reuses one we kept.
             if any(
-                len(ids & prior) / len(ids) > self.max_overlap
-                for prior in accepted_ids
+                len(edges & prior) / len(edges) > self.max_overlap
+                for prior in accepted_edges
             ):
                 continue
 
-            accepted.append(segments)
-            accepted_ids.append(ids)
+            accepted.append(Route(nodes, route_seq, self._crossroad_hops(nodes)))
+            accepted_edges.append(edges)
 
-        # Present fastest-first; a stable sort preserves discovery order among ties.
-        accepted.sort(key=lambda segments: len(segments))
+        # Best-first: fewest merged routes, then fewest intersections, then stops.
+        accepted.sort(key=lambda r: (r.route_count, r.crossroad_hops, len(r.stops)))
         return accepted

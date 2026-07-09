@@ -229,7 +229,11 @@ export default function HomePage() {
                 })}
               </div>
             )}
-            <PathResults paths={result.paths} hiddenTypes={hiddenTypes} />
+            <PathResults
+              paths={result.paths}
+              meta={result.meta}
+              hiddenTypes={hiddenTypes}
+            />
           </>
         )}
 

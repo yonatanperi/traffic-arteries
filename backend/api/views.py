@@ -43,12 +43,17 @@ def network(request):
 
 @api_view(["POST"])
 def path(request):
-    """Top 3 shortest paths between two points, optionally via required stops.
+    """Top 3 routes between two points, optionally via required stops.
+
+    "Best" is the route that merges the fewest authored routes, tiebroken by
+    fewest intersections.
 
     Body: ``{"start": <place>, "end": <place>, "via": [<place>, ...]}``.
     ``via`` is optional — required intermediate stops the route must pass
     through (visited in an optimised order).
-    Response: ``{"paths": [[...], ...]}`` — an empty list means no route exists.
+    Response: ``{"paths": [[...], ...], "meta": [{"routeCount", "routes"}, ...]}``
+    — ``paths`` are the stop chains; ``meta[i]`` describes which authored routes
+    route ``i`` merges (labelled by their endpoints). Empty lists mean no route.
     """
     start = (request.data.get("start") or "").strip()
     end = (request.data.get("end") or "").strip()
@@ -63,5 +68,21 @@ def path(request):
         )
 
     graph = database.load_graph()
-    paths = RouteFinder(graph).k_shortest_paths(start, end, k=3, via=via)
-    return Response({"paths": paths})
+    routes = database.load_routes()  # originals, for human-readable labels
+
+    def label(index):
+        route = routes[index] if 0 <= index < len(routes) else None
+        if route:
+            return f"{route[0]} - {route[-1]}"
+        return f"ציר {index + 1}"
+
+    results = RouteFinder(graph).find_routes(start, end, k=3, via=via)
+    paths = [r.stops for r in results]
+    meta = [
+        {
+            "routeCount": r.route_count,
+            "routes": [{"id": i, "label": label(i)} for i in r.route_ids],
+        }
+        for r in results
+    ]
+    return Response({"paths": paths, "meta": meta})
