@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { IconChevron, IconCopy, IconCheck } from "./icons.jsx";
+import { IconCopy, IconCheck } from "./icons.jsx";
+import { RouteChain } from "./RouteChain";
 import { classifyPlace } from "../utils/placeTypes.js";
 import "./PathResults.css";
 
@@ -76,26 +77,7 @@ export default function PathResults({ paths, hiddenTypes }) {
               <CopyButton path={path} />
             </header>
 
-            <ol className="chain">
-              {shown.map((place, j) => (
-                <li className="chain-item" key={j}>
-                  <span
-                    className={
-                      "stop" +
-                      (j === 0 ? " stop--start" : "") +
-                      (j === shown.length - 1 ? " stop--end" : "")
-                    }
-                  >
-                    {place}
-                  </span>
-                  {j < shown.length - 1 && (
-                    <span className="chain-arrow" aria-hidden="true">
-                      <IconChevron size={15} />
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ol>
+            <RouteChain stops={shown} />
           </article>
         );
       })}

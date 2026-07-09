@@ -1,12 +1,7 @@
 import { useMemo, useState } from "react";
 import Autocomplete from "./Autocomplete.jsx";
-import {
-  IconPlus,
-  IconClose,
-  IconTrash,
-  IconSearch,
-  IconAlert,
-} from "./icons.jsx";
+import { EditableRouteChain } from "./RouteChain";
+import { IconPlus, IconTrash, IconSearch, IconAlert } from "./icons.jsx";
 import "./RouteEditor.css";
 
 /**
@@ -79,17 +74,6 @@ export default function RouteEditor({ routes, onChange, suggestions }) {
     onChange(next);
   }
 
-  function removeStop(routeIndex, stopIndex) {
-    updateRoute(
-      routeIndex,
-      routes[routeIndex].filter((_, i) => i !== stopIndex),
-    );
-  }
-
-  function addStop(routeIndex, place) {
-    updateRoute(routeIndex, [...routes[routeIndex], place]);
-  }
-
   function addRoute() {
     onChange([...routes, []]);
   }
@@ -144,8 +128,7 @@ export default function RouteEditor({ routes, onChange, suggestions }) {
               suggestions={suggestions}
               highlight={query}
               disconnected={disconnected}
-              onRemoveStop={(s) => removeStop(i, s)}
-              onAddStop={(p) => addStop(i, p)}
+              onChangeRoute={(next) => updateRoute(i, next)}
               onRemoveRoute={() => removeRoute(i)}
             />
           );
@@ -165,19 +148,9 @@ function RouteRow({
   suggestions,
   highlight,
   disconnected,
-  onRemoveStop,
-  onAddStop,
+  onChangeRoute,
   onRemoveRoute,
 }) {
-  const [draft, setDraft] = useState("");
-
-  function commit(value) {
-    const place = (value ?? draft).trim();
-    if (!place) return;
-    onAddStop(place);
-    setDraft("");
-  }
-
   const tooShort = route.length < 2;
 
   return (
@@ -210,45 +183,12 @@ function RouteRow({
         </button>
       </div>
 
-      <div className="stops">
-        {route.map((place, j) => {
-          const matched = highlight && place.toLowerCase().includes(highlight);
-          return (
-            <span className={"chip" + (matched ? " chip--match" : "")} key={j}>
-              <span className="chip-index">{j + 1}</span>
-              {place}
-              <button
-                type="button"
-                className="chip-remove"
-                aria-label={`הסר את ${place}`}
-                onClick={() => onRemoveStop(j)}
-              >
-                <IconClose size={13} />
-              </button>
-            </span>
-          );
-        })}
-
-        <div className="add-stop">
-          <Autocomplete
-            options={suggestions}
-            value={draft}
-            onChange={setDraft}
-            onSelect={commit}
-            onSubmit={commit}
-            placeholder={route.length ? "הוסף תחנה…" : "תחנה ראשונה…"}
-          />
-          <button
-            type="button"
-            className="add-stop-btn"
-            onClick={() => commit()}
-            disabled={!draft.trim()}
-            aria-label="הוסף תחנה"
-          >
-            <IconPlus size={16} />
-          </button>
-        </div>
-      </div>
+      <EditableRouteChain
+        stops={route}
+        onChange={onChangeRoute}
+        suggestions={suggestions}
+        highlight={highlight}
+      />
     </div>
   );
 }

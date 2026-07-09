@@ -1,0 +1,263 @@
+/* Shared chain rendering, used by both the static <RouteChain> (path results)
+   and the dynamic <EditableRouteChain> (routes editor). The resting look is
+   identical for both. */
+
+.chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3) var(--s-2);
+}
+
+.chain-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.stop {
+  display: inline-block;
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 0.94rem;
+  white-space: nowrap;
+}
+.stop--start,
+.stop--end {
+  background: var(--accent-soft);
+  border-color: rgba(213, 255, 64, 0.5);
+  color: var(--accent);
+}
+
+.chain-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--text-faint);
+}
+
+/* Editor search highlight (ports the old .chip--match). */
+.stop--match {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* ---- Editable chain additions ---- */
+
+.stop--editable {
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition:
+    transform 0.15s var(--ease),
+    border-color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+.stop--editable:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+.stop--dragging {
+  cursor: grabbing;
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+  transform: scale(1.03);
+}
+
+/* Insert slot occupies a chain gap. Between two stops it shows the chevron at
+   rest and cross-fades to a plus on hover/focus; at the two ends it is a thin,
+   transparent target that only reveals a plus on hover — so the resting view
+   matches the static chain exactly. */
+.insert-slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--text-faint);
+  border-radius: var(--r-pill);
+  transition: color 0.15s var(--ease);
+}
+.insert-slot--gap {
+  width: 22px;
+  height: 22px;
+}
+/* The leading/trailing slots collapse to zero width at rest (so the first/last
+   stop sits flush with the row edge, no gap) and only negate the flex gap that
+   would otherwise sit beside them. Their hover target lives in the card padding
+   via .insert-slot-hit, so nothing shows or clips at rest. */
+.insert-slot--lead,
+.insert-slot--trail {
+  width: 0;
+  height: 30px;
+  overflow: visible;
+  transition:
+    width 0.16s var(--ease),
+    color 0.15s var(--ease);
+}
+.insert-slot--lead {
+  margin-inline-end: calc(-1 * var(--s-2));
+}
+.insert-slot--trail {
+  margin-inline-start: calc(-1 * var(--s-2));
+}
+
+/* Invisible hover targets that reach into the card's inline padding. */
+.insert-slot-hit {
+  position: absolute;
+  inset-block: -4px;
+  width: 24px;
+}
+.insert-slot--lead .insert-slot-hit {
+  inset-inline-start: -24px;
+}
+.insert-slot--trail .insert-slot-hit {
+  inset-inline-end: -24px;
+}
+
+.insert-slot-chevron,
+.insert-slot-plus {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    opacity 0.15s var(--ease),
+    transform 0.15s var(--ease);
+}
+/* Decorative glyphs never intercept pointer events — the button/hit-zone does. */
+.insert-slot-chevron,
+.insert-slot-plus {
+  pointer-events: none;
+}
+/* Crisper, heavier plus glyph in the add affordance. */
+.insert-slot-plus .ic {
+  stroke-width: 2.75px;
+}
+.insert-slot-plus {
+  opacity: 0;
+  transform: scale(0.6);
+  color: var(--on-accent);
+}
+/* Lead: plus anchored to the row start so it lands at the beginning of the
+   grid; the slot is wider than the disc by var(--s-2), so the pushed-over first
+   stop clears it by that gap. */
+.insert-slot--lead .insert-slot-plus {
+  inset-block: 3px;
+  inset-inline-start: 0;
+  inset-inline-end: auto;
+  width: 24px;
+  height: 24px;
+}
+
+/* Trail: plus sits var(--s-2) past the last stop (on the stop-facing side), the
+   slot growing into the row's trailing free space without moving any stop. */
+.insert-slot--trail .insert-slot-plus {
+  inset-block: 3px;
+  inset-inline-start: var(--s-2);
+  inset-inline-end: auto;
+  width: 24px;
+  height: 24px;
+}
+
+/* On hover/focus: hide chevron, reveal the plus inside a lime disc.
+   Suppressed while a stop is being dragged. */
+.chain:not(.chain--dragging) .insert-slot:hover .insert-slot-chevron,
+.chain:not(.chain--dragging) .insert-slot:focus-visible .insert-slot-chevron {
+  opacity: 0;
+}
+.chain:not(.chain--dragging) .insert-slot:hover .insert-slot-plus,
+.chain:not(.chain--dragging) .insert-slot:focus-visible .insert-slot-plus {
+  opacity: 1;
+  transform: scale(1);
+  background: var(--accent-fill);
+  border-radius: 50%;
+}
+.chain:not(.chain--dragging) .insert-slot:hover,
+.chain:not(.chain--dragging) .insert-slot:focus-visible {
+  color: var(--on-accent);
+}
+.chain:not(.chain--dragging) .insert-slot--gap:hover .insert-slot-plus,
+.chain:not(.chain--dragging) .insert-slot--gap:focus-visible .insert-slot-plus {
+  inset: -1px;
+}
+/* Both ends expand in-flow on hover to disc + gap. The lead nudges the
+   following stops over; the trail grows into the row's trailing free space, so
+   no stop moves. */
+.chain:not(.chain--dragging) .insert-slot--lead:hover,
+.chain:not(.chain--dragging) .insert-slot--lead:focus-visible,
+.chain:not(.chain--dragging) .insert-slot--trail:hover,
+.chain:not(.chain--dragging) .insert-slot--trail:focus-visible {
+  width: calc(24px + var(--s-2));
+}
+/* Freeze the insert affordances entirely during a drag. */
+.chain--dragging .insert-slot {
+  pointer-events: none;
+}
+
+/* Inline editor sits in the chain in place of a stop. */
+.stop-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.stop-edit .ac {
+  width: 180px;
+}
+.stop-edit .ac-field {
+  padding-block: 0;
+}
+.stop-edit .ac-input {
+  padding: var(--s-2) 0;
+  font-size: 0.92rem;
+}
+.stop-edit-delete {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition:
+    color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+.stop-edit-delete:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* Visible affordance for an empty route (no stops yet). */
+.chain-empty-add {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-pill);
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.94rem;
+  transition:
+    color 0.15s var(--ease),
+    border-color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+.chain-empty-add:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}

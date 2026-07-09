@@ -72,41 +72,5 @@
   font-size: 0.86rem;
 }
 
-.chain {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s-3) var(--s-2);
-}
-
-.chain-item {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-}
-
-.stop {
-  display: inline-block;
-  padding: var(--s-2) var(--s-4);
-  border-radius: var(--r-pill);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  font-weight: 600;
-  font-size: 0.94rem;
-  white-space: nowrap;
-}
-.stop--start,
-.stop--end {
-  background: var(--accent-soft);
-  border-color: rgba(213, 255, 64, 0.5);
-  color: var(--accent);
-}
-
-.chain-arrow {
-  display: flex;
-  align-items: center;
-  color: var(--text-faint);
-}
+/* Chain rendering (.chain / .stop / .chain-arrow) now lives in
+   components/RouteChain/RouteChain.css, shared with the routes editor. */
