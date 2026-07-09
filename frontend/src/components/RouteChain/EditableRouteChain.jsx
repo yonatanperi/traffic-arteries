@@ -239,8 +239,13 @@ function SortableStop({
     isDragging,
   } = useSortable({ id: item.id });
 
+  // CSS.Translate (not CSS.Transform): apply only the x/y translation, never the
+  // scaleX/scaleY that rectSortingStrategy adds to make items match the dragged
+  // pill's size. Those scales are what made every pill visibly change width mid
+  // drag; with translate-only the dragged pill still tracks the cursor 1:1 and
+  // neighbours just slide to reorder.
   const style = {
-    transform: CSS.Transform.toString(transform),
+    transform: CSS.Translate.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
