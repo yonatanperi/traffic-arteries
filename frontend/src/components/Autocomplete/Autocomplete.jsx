@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { IconClose } from "./icons.jsx";
+import { IconClose } from "../icons";
 import "./Autocomplete.css";
 
 /**
@@ -19,6 +19,7 @@ export default function Autocomplete({
   label,
   placeholder,
   icon,
+  prefix,
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -91,12 +92,19 @@ export default function Autocomplete({
   return (
     <div className="ac" ref={wrapRef}>
       {label && <label className="ac-label">{label}</label>}
-      <div className={"ac-field" + (showList ? " ac-field--open" : "")}>
+      <div
+        className={
+          "ac-field" +
+          (showList ? " ac-field--open" : "") +
+          (prefix ? " ac-field--tags" : "")
+        }
+      >
         {icon && (
           <span className="ac-icon" aria-hidden="true">
             {icon}
           </span>
         )}
+        {prefix}
         <input
           className="ac-input"
           type="text"

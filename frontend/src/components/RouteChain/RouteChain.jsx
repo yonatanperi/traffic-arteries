@@ -1,4 +1,4 @@
-import { IconChevron } from "../icons.jsx";
+import { IconChevron } from "../icons";
 import "./RouteChain.css";
 
 /**

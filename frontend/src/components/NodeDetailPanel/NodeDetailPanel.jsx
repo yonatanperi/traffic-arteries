@@ -1,5 +1,5 @@
-import { IconClose, IconHub } from "./icons.jsx";
-import "./FloatingPanel.css";
+import { IconClose, IconHub } from "../icons";
+import "../../styles/FloatingPanel.css";
 
 /**
  * Floating card describing the pinned node: its degree and the list of places

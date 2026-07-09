@@ -34,6 +34,17 @@
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
+/* Tag mode: selected pills sit inside the field and wrap, the input taking the
+   remaining space on its row. */
+.ac-field--tags {
+  flex-wrap: wrap;
+  padding-block: var(--s-2);
+}
+.ac-field--tags .ac-input {
+  flex: 1 1 6ch;
+  min-width: 6ch;
+  padding-block: var(--s-1);
+}
 
 .ac-icon {
   display: flex;

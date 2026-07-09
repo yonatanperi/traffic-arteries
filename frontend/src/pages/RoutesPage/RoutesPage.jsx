@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import RouteEditor from "../components/RouteEditor.jsx";
-import Loader from "../components/Loader.jsx";
-import { getRoutes, saveRoutes } from "../api/client.js";
+import RouteEditor from "../../components/RouteEditor";
+import Loader from "../../components/Loader";
+import { getRoutes, saveRoutes } from "../../api/client.js";
 import "./RoutesPage.css";
 
 export default function RoutesPage() {

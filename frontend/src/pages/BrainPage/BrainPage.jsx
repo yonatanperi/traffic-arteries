@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import GraphView from "../components/GraphView.jsx";
-import BrainToolbar from "../components/BrainToolbar.jsx";
-import NodeDetailPanel from "../components/NodeDetailPanel.jsx";
-import InsightsPanel from "../components/InsightsPanel.jsx";
-import Loader from "../components/Loader.jsx";
-import EmptyState from "../components/EmptyState.jsx";
-import { IconAlert, IconNetwork } from "../components/icons.jsx";
-import { getGraph, findPaths } from "../api/client.js";
-import { computeMetrics, edgeKey } from "../utils/graphMetrics.js";
+import GraphView from "../../components/GraphView";
+import BrainToolbar from "../../components/BrainToolbar";
+import NodeDetailPanel from "../../components/NodeDetailPanel";
+import InsightsPanel from "../../components/InsightsPanel";
+import Loader from "../../components/Loader";
+import EmptyState from "../../components/EmptyState";
+import { IconAlert, IconNetwork } from "../../components/icons";
+import { getGraph, findPaths } from "../../api/client.js";
+import { computeMetrics, edgeKey } from "../../utils/graphMetrics.js";
 import "./BrainPage.css";
 
 export default function BrainPage() {

@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { IconCopy, IconCheck } from "./icons.jsx";
-import { RouteChain } from "./RouteChain";
-import { classifyPlace } from "../utils/placeTypes.js";
+import { IconCopy, IconCheck } from "../icons";
+import { RouteChain } from "../RouteChain";
+import { classifyPlace } from "../../utils/placeTypes.js";
 import "./PathResults.css";
 
 const ORDINALS = ["הציר הקצר ביותר", "ציר חלופי", "ציר חלופי נוסף"];

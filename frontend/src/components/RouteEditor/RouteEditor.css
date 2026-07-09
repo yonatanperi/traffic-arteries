@@ -19,6 +19,21 @@
   white-space: nowrap;
 }
 
+/* Filter pill: the whole pill is the remove control — click it to drop the
+   filter. Hover tints it toward danger to signal the click removes it. */
+.stop--filter {
+  cursor: pointer;
+  transition:
+    color 0.14s var(--ease),
+    background 0.14s var(--ease),
+    border-color 0.14s var(--ease);
+}
+.stop--filter:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
 .editor-list {
   display: flex;
   flex-direction: column;
@@ -80,9 +95,9 @@
 
 .route-remove {
   margin-inline-start: auto;
-  padding: var(--s-1) var(--s-3);
+  padding: var(--s-2) var(--s-3);
   font-size: 0.85rem;
-  gap: 6px;
+  gap: var(--s-2);
 }
 
 /* Stop rendering (chips) replaced by the shared <EditableRouteChain>; its

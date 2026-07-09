@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import Autocomplete from "../components/Autocomplete.jsx";
-import PathResults from "../components/PathResults.jsx";
-import EmptyState from "../components/EmptyState.jsx";
-import Loader from "../components/Loader.jsx";
+import Autocomplete from "../../components/Autocomplete";
+import PathResults from "../../components/PathResults";
+import EmptyState from "../../components/EmptyState";
+import Loader from "../../components/Loader";
 import {
   IconOrigin,
   IconDestination,
@@ -14,9 +14,9 @@ import {
   IconPlus,
   IconClose,
   IconFilter,
-} from "../components/icons.jsx";
-import { getPlaces, findPaths } from "../api/client.js";
-import { PLACE_TYPES, classifyPlace } from "../utils/placeTypes.js";
+} from "../../components/icons";
+import { getPlaces, findPaths } from "../../api/client.js";
+import { PLACE_TYPES, classifyPlace } from "../../utils/placeTypes.js";
 import "./HomePage.css";
 
 export default function HomePage() {

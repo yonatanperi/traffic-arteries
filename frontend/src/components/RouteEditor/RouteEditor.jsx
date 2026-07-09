@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import Autocomplete from "./Autocomplete.jsx";
-import { EditableRouteChain } from "./RouteChain";
-import { IconPlus, IconTrash, IconSearch, IconAlert } from "./icons.jsx";
+import Autocomplete from "../Autocomplete";
+import ConfirmModal from "../ConfirmModal";
+import { EditableRouteChain } from "../RouteChain";
+import { IconPlus, IconTrash, IconSearch, IconAlert } from "../icons";
 import "./RouteEditor.css";
 
 /**
@@ -66,7 +67,9 @@ function analyzeConnectivity(routes) {
  *   suggestions  list of known place names (feeds the add-stop dropdown)
  */
 export default function RouteEditor({ routes, onChange, suggestions }) {
-  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState([]); // filter destinations (pills)
+  const [pendingRename, setPendingRename] = useState(null); // { oldValue, newValue }
 
   function updateRoute(index, nextRoute) {
     const next = routes.slice();
@@ -82,29 +85,93 @@ export default function RouteEditor({ routes, onChange, suggestions }) {
     onChange(routes.filter((_, i) => i !== index));
   }
 
+  function addFilter(place) {
+    const p = place.trim();
+    if (!p) return;
+    setSelected((s) => (s.includes(p) ? s : [...s, p]));
+    setQuery("");
+  }
+  function removeFilter(place) {
+    setSelected((s) => s.filter((x) => x !== place));
+  }
+
+  // A stop was renamed in one route. If that name appears elsewhere too, offer
+  // to change every instance. The single edit has already been emitted, so the
+  // still-current `routes` prop holds exactly one extra copy (the edited spot).
+  function requestRename(oldValue, newValue) {
+    if (oldValue === newValue) return;
+    const total = routes.reduce(
+      (n, r) => n + r.filter((p) => p === oldValue).length,
+      0,
+    );
+    if (total - 1 > 0) setPendingRename({ oldValue, newValue });
+  }
+  function confirmRename() {
+    const { oldValue, newValue } = pendingRename;
+    setPendingRename(null);
+    onChange(routes.map((r) => r.map((p) => (p === oldValue ? newValue : p))));
+  }
+
   const { find, mainRoot, componentCount } = useMemo(
     () => analyzeConnectivity(routes),
     [routes],
   );
 
-  const query = search.trim().toLowerCase();
+  const q = query.trim().toLowerCase();
+  const terms = selected.map((s) => s.toLowerCase());
+  const highlight = q ? [...terms, q] : terms;
+  const filtering = selected.length > 0 || q;
   const visibleIndices = routes
     .map((_, i) => i)
-    .filter(
-      (i) => !query || routes[i].some((p) => p.toLowerCase().includes(query)),
-    );
+    .filter((i) => {
+      const route = routes[i];
+      // Every selected destination must appear somewhere in the route (any
+      // order), and the live-typed text further narrows the list.
+      const hasAll = selected.every((s) =>
+        route.some((p) => p.toLowerCase().includes(s.toLowerCase())),
+      );
+      const hasQuery = !q || route.some((p) => p.toLowerCase().includes(q));
+      return hasAll && hasQuery;
+    });
 
   return (
     <div className="editor">
       <div className="editor-search">
         <Autocomplete
           options={suggestions}
-          value={search}
-          onChange={setSearch}
+          value={query}
+          onChange={setQuery}
+          onSelect={addFilter}
+          onSubmit={addFilter}
           icon={<IconSearch size={16} />}
-          placeholder="חפש תחנה בצירים…"
+          placeholder={selected.length ? "הוסף עוד…" : "סנן צירים לפי תחנות…"}
+          prefix={
+            selected.length
+              ? selected.map((p) => (
+                  // A pill styled like a route's start/end destination; clicking
+                  // it removes the filter (no separate remove button).
+                  <span
+                    key={p}
+                    className="stop stop--start stop--filter"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => removeFilter(p)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        removeFilter(p);
+                      }
+                    }}
+                    aria-label={`הסר ${p} מהסינון`}
+                    title="הסר מהסינון"
+                  >
+                    {p}
+                  </span>
+                ))
+              : null
+          }
         />
-        {query && (
+        {filtering && (
           <span className="editor-search-count">
             {visibleIndices.length
               ? `נמצאו ${visibleIndices.length} צירים`
@@ -126,10 +193,11 @@ export default function RouteEditor({ routes, onChange, suggestions }) {
               index={i}
               route={route}
               suggestions={suggestions}
-              highlight={query}
+              highlight={highlight}
               disconnected={disconnected}
               onChangeRoute={(next) => updateRoute(i, next)}
               onRemoveRoute={() => removeRoute(i)}
+              onRenameStop={requestRename}
             />
           );
         })}
@@ -138,6 +206,17 @@ export default function RouteEditor({ routes, onChange, suggestions }) {
       <button type="button" className="btn add-route-btn" onClick={addRoute}>
         <IconPlus size={16} /> הוסף ציר חדש
       </button>
+
+      {pendingRename && (
+        <ConfirmModal
+          title="שינוי שם תחנה"
+          message={`התחנה "${pendingRename.oldValue}" מופיעה בצירים נוספים. לשנות את כל המופעים ל"${pendingRename.newValue}"?`}
+          confirmLabel="שנה בכל הצירים"
+          cancelLabel="רק כאן"
+          onConfirm={confirmRename}
+          onCancel={() => setPendingRename(null)}
+        />
+      )}
     </div>
   );
 }
@@ -150,6 +229,7 @@ function RouteRow({
   disconnected,
   onChangeRoute,
   onRemoveRoute,
+  onRenameStop,
 }) {
   const tooShort = route.length < 2;
 
@@ -188,6 +268,7 @@ function RouteRow({
         onChange={onChangeRoute}
         suggestions={suggestions}
         highlight={highlight}
+        onRenameStop={onRenameStop}
       />
     </div>
   );

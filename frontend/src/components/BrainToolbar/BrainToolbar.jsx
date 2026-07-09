@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import Autocomplete from "./Autocomplete.jsx";
+import Autocomplete from "../Autocomplete";
 import {
   IconSearch,
   IconFocus,
@@ -15,7 +15,7 @@ import {
   IconSwap,
   IconClose,
   IconAlert,
-} from "./icons.jsx";
+} from "../icons";
 import "./BrainToolbar.css";
 
 const ORDINALS = ["הקצר ביותר", "חלופי", "חלופי נוסף"];

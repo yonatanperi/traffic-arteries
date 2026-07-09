@@ -1,8 +1,8 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import NavBar from "./components/NavBar.jsx";
-import HomePage from "./pages/HomePage.jsx";
-import RoutesPage from "./pages/RoutesPage.jsx";
-import BrainPage from "./pages/BrainPage.jsx";
+import NavBar from "./components/NavBar";
+import HomePage from "./pages/HomePage";
+import RoutesPage from "./pages/RoutesPage";
+import BrainPage from "./pages/BrainPage";
 
 export default function App() {
   return (

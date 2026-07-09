@@ -1,5 +1,5 @@
-import { IconClose, IconBulb } from "./icons.jsx";
-import "./FloatingPanel.css";
+import { IconClose, IconBulb } from "../icons";
+import "../../styles/FloatingPanel.css";
 
 /**
  * Floating card of structural insights into the network: size, busiest hubs,

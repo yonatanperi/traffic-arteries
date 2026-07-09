@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import ForceGraph2D from "react-force-graph-2d";
-import { linkEnds, edgeKey } from "../utils/graphMetrics.js";
+import { linkEnds, edgeKey } from "../../utils/graphMetrics.js";
 import "./GraphView.css";
 
 const ACCENT = "#d5ff40";
