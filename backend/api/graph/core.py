@@ -77,6 +77,23 @@ class Graph:
 
         return cls(adjacency, edge_routes)
 
+    @classmethod
+    def from_edge_routes(cls, records):
+        """Build a graph from persisted ``[[a, b, [route indices]], ...]`` records.
+
+        These records (see :attr:`edge_routes_records`) are the single derived
+        representation of the graph: the adjacency is reconstructed from the
+        edges. Every connected place appears on at least one edge, so nothing
+        routable is lost.
+        """
+        adjacency = {}
+        edge_routes = {}
+        for a, b, routes in records:
+            adjacency.setdefault(a, set()).add(b)
+            adjacency.setdefault(b, set()).add(a)
+            edge_routes[edge_key(a, b)] = routes
+        return cls(adjacency, edge_routes)
+
     @property
     def adjacency(self):
         """JSON-friendly adjacency dict (``place -> sorted neighbour list``).
@@ -88,15 +105,14 @@ class Graph:
 
     @property
     def edge_routes_records(self):
-        """JSON-friendly edge membership: ``[[a, b, [route indices]], ...]``."""
+        """JSON-friendly graph: ``[[a, b, [route indices]], ...]``.
+
+        Both the topology (edges) and the authored-route provenance in one
+        structure — persisted as the sole derived graph file.
+        """
         return [
             [a, b, list(routes)] for (a, b), routes in sorted(self._edge_routes.items())
         ]
-
-    @staticmethod
-    def parse_edge_routes(records):
-        """Inverse of :attr:`edge_routes_records` — parse persisted records."""
-        return {edge_key(a, b): routes for a, b, routes in records}
 
     def routes_on(self, a, b):
         """Sorted tuple of authored route indices that use edge ``(a, b)``."""

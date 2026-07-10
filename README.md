@@ -14,10 +14,10 @@ added through the editor.
 
 ```
 backend/                     Django + DRF (function views)
-  api/graph.py               adjacency build + BFS k-shortest-paths (the core)
-  api/db.py                  filesystem DB: routes.json (truth) -> graph.json (derived)
+  api/graph/                 graph build + merge-minimising route search (the core)
+  api/db.py                  filesystem DB: routes.json (truth) -> edge_routes.json (derived)
   api/views.py / urls.py     @api_view endpoints
-  data/                      routes.json + graph.json (generated on first run)
+  data/                      routes.json + edge_routes.json (generated on first run)
 frontend/                    React + Vite (raw CSS)
   src/pages/                 HomePage, RoutesPage, BrainPage
   src/components/            NavBar, Autocomplete, PathResults, RouteEditor, GraphView, ...
@@ -26,11 +26,13 @@ frontend/                    React + Vite (raw CSS)
 ### How it works
 
 - **routes.json** is the source of truth (a list of routes; each a list of place names).
-- On every save it is validated and **graph.json** — an adjacency list — is
-  regenerated with an atomic write, so the graph loads straight from disk.
-- **Path search** (`api/graph.py:k_shortest_paths`) is a BFS that expands partial
-  simple paths in FIFO order; since the graph is unweighted, results come out
-  shortest-first. It returns up to 3 distinct paths.
+- On every save it is validated and **edge_routes.json** — the derived graph, each
+  edge tagged with the authored routes that use it — is regenerated with an atomic
+  write, so the graph (adjacency reconstructed from the edges) loads straight from
+  disk.
+- **Route search** (`api/graph/`) searches over `(node, active-route)` state to
+  find the route that **merges the fewest authored routes** (tiebreak: fewest
+  intersections), returning up to 3 distinct alternatives best-first.
 
 ## API
 

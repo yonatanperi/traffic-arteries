@@ -22,7 +22,7 @@ def places(request):
 def routes(request):
     """GET the full routes list, or PUT a replacement list.
 
-    A successful PUT re-validates the payload and regenerates graph.json.
+    A successful PUT re-validates the payload and regenerates the derived graph.
     """
     if request.method == "GET":
         return Response(database.load_routes())

@@ -2,14 +2,16 @@
 
 A :class:`Database` owns two JSON files under ``backend/data``:
 
-  * ``routes.json`` — the source of truth: the routes exactly as authored (lists
-    of place names).
-  * ``graph.json``  — derived adjacency list, rebuilt on every save so the graph
-    can be loaded straight from disk without recomputation. Before the graph is
-    built the routes are run through :meth:`Database.fill_missing_destinations`,
-    so a route that skips stops another route spells out doesn't fabricate a
-    direct edge — ``routes.json`` keeps the originals, the graph sees the filled
-    version.
+  * ``routes.json``      — the source of truth: the routes exactly as authored
+    (lists of place names).
+  * ``edge_routes.json`` — the derived graph, rebuilt on every save so it can be
+    loaded straight from disk without recomputation. Each record is
+    ``[place_a, place_b, [authored route indices on that edge]]``: it carries both
+    the topology (the adjacency is reconstructed from the edges) and the route
+    provenance the router needs to find the fewest-merged-routes path. Before it
+    is built the routes are run through :meth:`Database.fill_missing_destinations`,
+    so a route that skips stops another spells out doesn't fabricate a direct
+    edge — ``routes.json`` keeps the originals, the graph sees the filled version.
 
 Writes are atomic (temp file + ``os.replace``) so a crash mid-write can never
 leave a half-written file. On first access an empty store is initialised.
@@ -53,9 +55,9 @@ class Database:
     def __init__(self, data_dir=None):
         base = data_dir if data_dir is not None else settings.DATA_DIR
         self.routes_file = os.path.join(base, "routes.json")
-        self.graph_file = os.path.join(base, "graph.json")
-        # Per-edge authored-route membership, derived alongside graph.json. Lets
-        # the router find the route that merges the fewest authored routes.
+        # The derived graph: edges with their authored-route membership. Lets the
+        # router find the route that merges the fewest authored routes, and the
+        # adjacency is reconstructed from it — no separate adjacency file needed.
         self.edge_routes_file = os.path.join(base, "edge_routes.json")
 
     # --- persistence primitives -------------------------------------------
@@ -115,8 +117,8 @@ class Database:
             # Start empty; routes are added through the editor.
             self._atomic_write_json(self.routes_file, [])
             self._rebuild_graph([])
-        elif not (os.path.exists(self.graph_file) and os.path.exists(self.edge_routes_file)):
-            # routes exist but a derived file is missing/stale — rebuild both.
+        elif not os.path.exists(self.edge_routes_file):
+            # routes exist but the derived graph is missing/stale — rebuild it.
             self._rebuild_graph(self._read_json(self.routes_file))
 
     def _rebuild_graph(self, routes, lazy_gap=LAZY_GAP, confirmed_gap=CONFIRMED_GAP):
@@ -124,13 +126,12 @@ class Database:
 
         The routes are first passed through :meth:`fill_missing_destinations` so
         the graph is built from the *filled* routes, while ``routes.json`` (the
-        caller's responsibility) keeps the originals. Both the adjacency and the
-        per-edge authored-route membership are written; filled route indices match
-        ``routes.json`` (filling preserves route order and endpoints).
+        caller's responsibility) keeps the originals. The edges are persisted with
+        their authored-route membership; filled route indices match ``routes.json``
+        (filling preserves route order and endpoints).
         """
         filled = self.fill_missing_destinations(routes, lazy_gap, confirmed_gap)
         graph = Graph.from_routes(filled)
-        self._atomic_write_json(self.graph_file, graph.adjacency)
         self._atomic_write_json(self.edge_routes_file, graph.edge_routes_records)
         return graph
 
@@ -239,11 +240,9 @@ class Database:
         return self._read_json(self.routes_file)
 
     def load_graph(self):
-        """Load the pre-built graph (with edge→route membership) from disk."""
+        """Load the pre-built graph (edges + route membership) from disk."""
         self._ensure_files()
-        adjacency = self._read_json(self.graph_file)
-        edge_routes = Graph.parse_edge_routes(self._read_json(self.edge_routes_file))
-        return Graph(adjacency, edge_routes=edge_routes)
+        return Graph.from_edge_routes(self._read_json(self.edge_routes_file))
 
     def save_routes(self, routes):
         """Validate, persist routes, and regenerate the derived graph.
