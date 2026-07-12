@@ -1,0 +1,61 @@
+.user-mgmt-stats {
+  display: flex;
+  gap: var(--s-4);
+  margin-bottom: var(--s-5);
+}
+
+.user-mgmt-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-4) var(--s-5);
+}
+
+.user-mgmt-stat-value {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.user-mgmt-stat-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.user-mgmt-toolbar {
+  margin-bottom: var(--s-4);
+}
+
+.user-mgmt-search {
+  width: 100%;
+  max-width: 320px;
+}
+
+.user-mgmt-table {
+  padding: var(--s-2);
+}
+
+.user-mgmt-row {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 0.9fr 1fr;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.user-mgmt-row:last-child {
+  border-bottom: none;
+}
+
+.user-mgmt-row--head {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.user-mgmt-actions {
+  display: flex;
+  justify-content: flex-end;
+}

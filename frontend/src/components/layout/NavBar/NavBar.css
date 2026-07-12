@@ -14,8 +14,33 @@
   padding: var(--s-3) var(--s-5);
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: var(--s-5);
+}
+
+.navbar-links {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.navbar-auth {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  white-space: nowrap;
+}
+
+.navbar-hello {
+  font-weight: 700;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.navbar-auth-btn {
+  padding: var(--s-2) var(--s-4);
+  font-size: 0.9rem;
 }
 
 .brand {

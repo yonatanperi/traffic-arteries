@@ -1,52 +1,34 @@
-// Thin fetch wrappers around the Django API. All requests go through the Vite
-// dev proxy at /api, so no base URL or CORS handling is required.
+// Thin axios wrappers around the Django API. All requests go through the
+// Vite dev proxy at /api, so no base URL or CORS handling is required.
+// The shared axios instance transparently attaches the auth header and
+// retries on token refresh — see httpClient.js.
 
-async function request(url, options = {}) {
-  const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const message = (data && data.detail) || "אירעה שגיאה בשרת.";
-    throw new Error(message);
-  }
-  return data;
-}
+import { http, unwrap } from "./httpClient.js";
 
 export function getPlaces() {
-  return request("/api/places/");
+  return unwrap(http.get("/places/"));
 }
 
 export function getRoutes() {
-  return request("/api/routes/");
+  return unwrap(http.get("/routes/"));
 }
 
 export function saveRoutes(routes) {
-  return request("/api/routes/", {
-    method: "PUT",
-    body: JSON.stringify(routes),
-  });
+  return unwrap(http.put("/routes/", routes));
 }
 
 export function getCompromised() {
-  return request("/api/compromised/");
+  return unwrap(http.get("/compromised/"));
 }
 
 export function saveCompromised(groups) {
-  return request("/api/compromised/", {
-    method: "PUT",
-    body: JSON.stringify(groups),
-  });
+  return unwrap(http.put("/compromised/", groups));
 }
 
 export function getGraph() {
-  return request("/api/graph/");
+  return unwrap(http.get("/graph/"));
 }
 
 export function findPaths(start, end, via = []) {
-  return request("/api/path/", {
-    method: "POST",
-    body: JSON.stringify({ start, end, via }),
-  });
+  return unwrap(http.post("/path/", { start, end, via }));
 }

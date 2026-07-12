@@ -4,8 +4,10 @@ Function views with @api_view + rest_framework.response.Response, per spec.
 """
 
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+
+from accounts.permissions import IsEditorOrAdmin
 
 from .db import ValidationError, database
 from .graph import RouteFinder
@@ -21,6 +23,7 @@ def places(request):
 
 
 @api_view(["GET", "PUT"])
+@permission_classes([IsEditorOrAdmin])
 def routes(request):
     """GET the full routes list, or PUT a replacement list.
 
@@ -37,6 +40,7 @@ def routes(request):
 
 
 @api_view(["GET", "PUT"])
+@permission_classes([IsEditorOrAdmin])
 def compromised(request):
     """GET the compromised-destination groups, or PUT a replacement list.
 
@@ -55,6 +59,7 @@ def compromised(request):
 
 
 @api_view(["GET"])
+@permission_classes([IsEditorOrAdmin])
 def network(request):
     """Graph as {nodes, links} for react-force-graph-2d (read-only view).
 

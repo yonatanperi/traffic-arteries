@@ -3,6 +3,10 @@ import NavBar from "./components/layout/NavBar";
 import HomePage from "./pages/HomePage";
 import RoutesPage from "./pages/RoutesPage";
 import BrainPage from "./pages/BrainPage";
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import UserManagementPage from "./pages/UserManagementPage";
+import { ProtectedRoute } from "./components/auth";
 import "./App.css";
 
 export default function App() {
@@ -12,8 +16,32 @@ export default function App() {
       <main style={{ flex: 1 }}>
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/routes" element={<RoutesPage />} />
-          <Route path="/brain" element={<BrainPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/routes"
+            element={
+              <ProtectedRoute roles={["editor", "admin"]}>
+                <RoutesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/brain"
+            element={
+              <ProtectedRoute roles={["editor", "admin"]}>
+                <BrainPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute roles={["editor", "admin"]}>
+                <UserManagementPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
