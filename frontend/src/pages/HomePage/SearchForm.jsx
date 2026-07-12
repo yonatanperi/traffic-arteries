@@ -1,6 +1,7 @@
 import Autocomplete from "../../components/ui/Autocomplete";
 import SwapButton from "../../components/ui/SwapButton";
 import IconButton from "../../components/ui/IconButton";
+import Button from "../../components/ui/Button";
 import {
   IconOrigin,
   IconDestination,
@@ -82,16 +83,21 @@ export default function SearchForm({
           </div>
         ))}
 
-        <button type="button" className="btn btn-dashed waypoint-add" onClick={onAddVia}>
+        <Button variant="dashed" className="waypoint-add" onClick={onAddVia}>
           <IconPlus size={16} />
           הוסף עצירת ביניים
-        </button>
+        </Button>
       </div>
 
-      <button type="submit" className="btn btn-primary search-submit" disabled={loading}>
+      <Button
+        type="submit"
+        variant="primary"
+        className="search-submit"
+        disabled={loading}
+      >
         <IconSearch size={18} />
         {loading ? "מחפש…" : "בניית ציר תנועה"}
-      </button>
+      </Button>
     </form>
   );
 }

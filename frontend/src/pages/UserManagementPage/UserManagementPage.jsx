@@ -1,6 +1,7 @@
 import PageHeader from "../../components/ui/PageHeader";
 import Page from "../../components/layout/Page";
 import Pill from "../../components/ui/Pill";
+import Button from "../../components/ui/Button";
 import Loader from "../../components/ui/Loader/Loader.jsx";
 import EmptyState from "../../components/ui/EmptyState";
 import { useUserManagement } from "./useUserManagement.js";
@@ -78,20 +79,14 @@ export default function UserManagementPage() {
               </span>
               <span className="user-mgmt-actions">
                 {u.role === "user" && (
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => promote(u.personal_id)}
-                  >
+                  <Button variant="primary" onClick={() => promote(u.personal_id)}>
                     הפוך לעורך
-                  </button>
+                  </Button>
                 )}
                 {u.role === "editor" && (
-                  <button
-                    className="btn btn-danger"
-                    onClick={() => demote(u.personal_id)}
-                  >
+                  <Button variant="danger" onClick={() => demote(u.personal_id)}>
                     בטל הרשאת עורך
-                  </button>
+                  </Button>
                 )}
               </span>
             </div>

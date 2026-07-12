@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import PageHeader from "../../components/ui/PageHeader";
 import Page from "../../components/layout/Page";
+import Button from "../../components/ui/Button";
 import { useAuth } from "../../hooks/useAuth.js";
 import "./LoginPage.css";
 
@@ -68,13 +69,14 @@ export default function LoginPage() {
           </p>
         )}
 
-        <button
+        <Button
           type="submit"
-          className="btn btn-primary auth-submit"
+          variant="primary"
+          className="auth-submit"
           disabled={loading}
         >
           {loading ? "מתחבר…" : "התחברות"}
-        </button>
+        </Button>
 
         <p className="auth-alt">
           אין לך חשבון? <Link to="/register">הרשמה</Link>

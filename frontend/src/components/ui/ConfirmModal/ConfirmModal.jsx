@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import Button from "../Button";
 import "./ConfirmModal.css";
 
 /**
@@ -39,17 +40,12 @@ export default function ConfirmModal({
         {title && <h3 className="confirm-title">{title}</h3>}
         {message && <p className="confirm-message">{message}</p>}
         <div className="confirm-actions">
-          <button type="button" className="btn confirm-cancel" onClick={onCancel}>
+          <Button className="confirm-cancel" onClick={onCancel}>
             {cancelLabel}
-          </button>
-          <button
-            type="button"
-            ref={confirmRef}
-            className="btn btn-primary"
-            onClick={onConfirm}
-          >
+          </Button>
+          <Button ref={confirmRef} variant="primary" onClick={onConfirm}>
             {confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

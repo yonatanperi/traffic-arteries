@@ -3,6 +3,7 @@ import Autocomplete from "../../ui/Autocomplete";
 import { SegmentedControl } from "../../ui/SegmentedControl";
 import SwapButton from "../../ui/SwapButton";
 import Pill from "../../ui/Pill";
+import Button from "../../ui/Button";
 import { useOriginDestination } from "../../../hooks/useOriginDestination.js";
 import {
   IconSearch,
@@ -119,67 +120,62 @@ export default function BrainToolbar({
           </div>
 
           <div className="bt-controls">
-            <button
-              type="button"
-              className="btn btn-ghost bt-icon"
+            <Button
+              variant="ghost"
+              className="bt-icon"
               onClick={onZoomFit}
               title="התאם לתצוגה"
               aria-label="התאם לתצוגה"
             >
               <IconFit size={18} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost bt-icon"
+            </Button>
+            <Button
+              variant="ghost"
+              className="bt-icon"
               onClick={onReset}
               title="סדר מחדש"
               aria-label="סדר מחדש"
             >
               <IconReset size={18} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost bt-icon"
+            </Button>
+            <Button
+              variant="ghost"
+              className="bt-icon"
               onClick={onTogglePause}
               title={paused ? "המשך תנועה" : "השהה תנועה"}
               aria-label={paused ? "המשך תנועה" : "השהה תנועה"}
             >
               {paused ? <IconPlay size={18} /> : <IconPause size={18} />}
-            </button>
-            <button
-              type="button"
-              className={
-                "btn btn-ghost bt-icon" +
-                (highlightDeadEnds ? " bt-icon--on" : "")
-              }
+            </Button>
+            <Button
+              variant="ghost"
+              className={"bt-icon" + (highlightDeadEnds ? " bt-icon--on" : "")}
               onClick={onToggleDeadEnds}
               title="הדגש קצוות מבודדים"
               aria-label="הדגש קצוות מבודדים"
               aria-pressed={highlightDeadEnds}
             >
               <IconAlert size={18} />
-            </button>
-            <button
-              type="button"
-              className={
-                "btn btn-ghost bt-icon" + (showInsights ? " bt-icon--on" : "")
-              }
+            </Button>
+            <Button
+              variant="ghost"
+              className={"bt-icon" + (showInsights ? " bt-icon--on" : "")}
               onClick={onToggleInsights}
               title="תובנות על הרשת"
               aria-label="תובנות על הרשת"
               aria-pressed={showInsights}
             >
               <IconBulb size={18} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost bt-icon"
+            </Button>
+            <Button
+              variant="ghost"
+              className="bt-icon"
               onClick={onExport}
               title="שמור כתמונה"
               aria-label="שמור כתמונה"
             >
               <IconDownload size={18} />
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -204,14 +200,15 @@ export default function BrainToolbar({
             />
           </div>
 
-          <button
+          <Button
             type="submit"
-            className="btn btn-primary bt-find"
+            variant="primary"
+            className="bt-find"
             disabled={pathLoading}
           >
             <IconRoute size={17} />
             {pathLoading ? "מחשב…" : "הצג ציר"}
-          </button>
+          </Button>
 
           {paths && paths.length > 0 && (
             <div className="bt-path-chips">

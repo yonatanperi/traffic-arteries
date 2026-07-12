@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { SegmentedNav } from "../../ui/SegmentedControl";
+import Button from "../../ui/Button";
 import { useAuth } from "../../../hooks/useAuth.js";
 import "./NavBar.css";
 
@@ -25,18 +26,18 @@ export default function NavBar() {
           {isAuthenticated ? (
             <>
               <span className="navbar-hello">שלום, {user.first_name}</span>
-              <button type="button" className="btn btn-ghost navbar-auth-btn" onClick={logout}>
+              <Button variant="ghost" className="navbar-auth-btn" onClick={logout}>
                 התנתקות
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <NavLink to="/login" className="btn btn-ghost navbar-auth-btn">
+              <Button as={NavLink} to="/login" variant="ghost" className="navbar-auth-btn">
                 התחברות
-              </NavLink>
-              <NavLink to="/register" className="btn btn-primary navbar-auth-btn">
+              </Button>
+              <Button as={NavLink} to="/register" variant="primary" className="navbar-auth-btn">
                 הרשמה
-              </NavLink>
+              </Button>
             </>
           )}
         </div>

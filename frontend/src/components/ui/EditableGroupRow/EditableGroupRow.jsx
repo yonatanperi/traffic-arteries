@@ -1,3 +1,4 @@
+import Button from "../Button";
 import { IconTrash } from "../icons";
 import "./EditableGroupRow.css";
 
@@ -22,14 +23,14 @@ export default function EditableGroupRow({
       <div className="route-row-head">
         {badge}
         {warning}
-        <button
-          type="button"
-          className="btn btn-danger route-remove"
+        <Button
+          variant="danger"
+          className="route-remove"
           onClick={onRemove}
           aria-label={removeLabel}
         >
           <IconTrash size={15} /> {removeText}
-        </button>
+        </Button>
       </div>
       {children}
     </div>

@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import Autocomplete from "../../ui/Autocomplete";
+import Button from "../../ui/Button";
 import IconButton from "../../ui/IconButton";
 import { IconChevron, IconPlus, IconTrash, IconClose } from "../../ui/icons";
 import "./RouteChain.css";
@@ -176,13 +177,13 @@ export default function EditableRouteChain({
         <ol className={"chain" + (dragging ? " chain--dragging" : "")}>
           {items.length === 0 ? (
             <li className="chain-item">
-              <button
-                type="button"
-                className="btn btn-dashed chain-empty-add"
+              <Button
+                variant="dashed"
+                className="chain-empty-add"
                 onClick={() => openInsert(0)}
               >
                 <IconPlus size={15} /> הוסף תחנה
-              </button>
+              </Button>
             </li>
           ) : (
             <>
