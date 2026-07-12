@@ -1,0 +1,22 @@
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.add-route-btn {
+  align-self: flex-start;
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+}
+.add-route-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}

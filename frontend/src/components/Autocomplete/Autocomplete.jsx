@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconClose } from "../icons";
+import IconButton from "../IconButton";
 import "./Autocomplete.css";
 
 /**
@@ -123,17 +124,17 @@ export default function Autocomplete({
           onKeyDown={onKeyDown}
         />
         {value && (
-          <button
-            type="button"
+          <IconButton
+            size="sm"
             className="ac-clear"
-            aria-label="נקה"
+            ariaLabel="נקה"
             onClick={() => {
               onChange("");
               setOpen(true);
             }}
           >
             <IconClose size={15} />
-          </button>
+          </IconButton>
         )}
       </div>
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { IconCopy, IconCheck } from "../icons";
 import { RouteChain } from "../RouteChain";
+import Pill from "../Pill";
 import { classifyPlace } from "../../utils/placeTypes.js";
 import "./PathResults.css";
 
@@ -46,8 +47,9 @@ function CopyButton({ path }) {
   }
 
   return (
-    <button
-      type="button"
+    <Pill
+      as="button"
+      size="md"
       className={"copy-btn" + (copied ? " copy-btn--done" : "")}
       onClick={copy}
       aria-label="העתק ציר"
@@ -55,7 +57,7 @@ function CopyButton({ path }) {
     >
       {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
       {copied ? "הועתק" : "העתק"}
-    </button>
+    </Pill>
   );
 }
 
@@ -68,9 +70,12 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
         const info = meta?.[i];
         const merge = mergeLabel(info?.routeCount);
         const match = info?.match;
+
         return (
           <article
-            className={"result-card" + (i === 0 ? " result-card--best" : "")}
+            className={
+              "card result-card" + (i === 0 ? " result-card--best" : "")
+            }
             key={i}
             style={{ animationDelay: `${i * 70}ms` }}
           >
@@ -80,9 +85,15 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                   {ORDINALS[i] || `ציר ${i + 1}`}
                 </h3>
                 <span className="result-hops">
-                  {merge && <span className="merge-badge">{merge}</span>}
+                  {merge && (
+                    <Pill size="sm" className="merge-badge">
+                      {merge}
+                    </Pill>
+                  )}
                   {typeof match === "number" && (
-                    <span className="match-badge">התאמה {match}%</span>
+                    <Pill size="sm" className="match-badge">
+                      התאמה {match}%
+                    </Pill>
                   )}
                   <span>
                     {path.length} תחנות
@@ -97,12 +108,12 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
               <div className="merge-routes">
                 <span className="merge-routes-label">צירים:</span>
                 {info.routes.map((r, j) => (
-                  <span className="merge-route-chip" key={j}>
+                  <Pill size="sm" className="merge-route-chip" key={j}>
                     {r.label}
                     {typeof r.share === "number" && (
                       <span className="merge-route-share">{r.share}%</span>
                     )}
-                  </span>
+                  </Pill>
                 ))}
               </div>
             )}

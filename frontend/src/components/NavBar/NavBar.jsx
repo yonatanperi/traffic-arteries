@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { SegmentedNav } from "../SegmentedControl";
 import "./NavBar.css";
 
 const LINKS = [
@@ -11,20 +11,7 @@ export default function NavBar() {
   return (
     <header className="navbar">
       <div className="navbar-inner">
-        <nav className="nav-links">
-          {LINKS.map((link) => (
-            <NavLink
-              key={link.to}
-              to={link.to}
-              end={link.end}
-              className={({ isActive }) =>
-                "nav-link" + (isActive ? " nav-link--active" : "")
-              }
-            >
-              {link.label}
-            </NavLink>
-          ))}
-        </nav>
+        <SegmentedNav items={LINKS} activeExtraClassName="nav-link--active" />
       </div>
     </header>
   );

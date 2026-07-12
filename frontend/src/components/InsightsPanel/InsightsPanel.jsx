@@ -1,5 +1,5 @@
-import { IconClose, IconBulb } from "../icons";
-import "../../styles/FloatingPanel.css";
+import { IconBulb } from "../icons";
+import FloatingPanel, { FloatingPanelList, FloatingPanelListItem } from "../FloatingPanel";
 
 /**
  * Floating card of structural insights into the network: size, busiest hubs,
@@ -20,22 +20,13 @@ export default function InsightsPanel({
   const deadEndCount = deadEnds.isolated.length + deadEnds.leaves.length;
 
   return (
-    <div className="fp fp--end" role="dialog" aria-label="תובנות על הרשת">
-      <header className="fp-head">
-        <div className="fp-title-wrap">
-          <IconBulb size={17} />
-          <h3 className="fp-title">תובנות</h3>
-        </div>
-        <button
-          type="button"
-          className="fp-close"
-          onClick={onClose}
-          aria-label="סגור"
-        >
-          <IconClose size={16} />
-        </button>
-      </header>
-
+    <FloatingPanel
+      side="end"
+      icon={<IconBulb size={17} />}
+      title="תובנות"
+      onClose={onClose}
+      ariaLabel="תובנות על הרשת"
+    >
       <div className="fp-stat-grid">
         <div className="fp-stat">
           <strong>{nodeCount}</strong>
@@ -54,21 +45,13 @@ export default function InsightsPanel({
       {hubs.length > 0 && (
         <section className="fp-section">
           <h4 className="fp-section-title">צמתים מרכזיים</h4>
-          <ul className="fp-list">
+          <FloatingPanelList>
             {hubs.map((h) => (
-              <li key={h.id}>
-                <button
-                  type="button"
-                  className="fp-list-btn"
-                  onClick={() => onFocus(h.id)}
-                >
-                  <span className="fp-dot" aria-hidden="true" />
-                  {h.id}
-                  <span className="fp-list-meta">{h.degree}</span>
-                </button>
-              </li>
+              <FloatingPanelListItem key={h.id} onClick={() => onFocus(h.id)} meta={h.degree}>
+                {h.id}
+              </FloatingPanelListItem>
             ))}
-          </ul>
+          </FloatingPanelList>
         </section>
       )}
 
@@ -78,20 +61,13 @@ export default function InsightsPanel({
             צמתים קריטיים
             <span className="fp-section-hint">נקודות תורפה ברשת</span>
           </h4>
-          <ul className="fp-list">
+          <FloatingPanelList>
             {critical.map((id) => (
-              <li key={id}>
-                <button
-                  type="button"
-                  className="fp-list-btn"
-                  onClick={() => onFocus(id)}
-                >
-                  <span className="fp-dot fp-dot--warn" aria-hidden="true" />
-                  {id}
-                </button>
-              </li>
+              <FloatingPanelListItem key={id} onClick={() => onFocus(id)} warn>
+                {id}
+              </FloatingPanelListItem>
             ))}
-          </ul>
+          </FloatingPanelList>
         </section>
       )}
 
@@ -108,6 +84,6 @@ export default function InsightsPanel({
             : `${deadEndCount} קצוות מבודדים — הדגש`}
         </button>
       </section>
-    </div>
+    </FloatingPanel>
   );
 }

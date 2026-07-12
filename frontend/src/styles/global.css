@@ -34,8 +34,12 @@
   /* Feedback */
   --success: #a6e22e;
   --danger: #f85149;
+  --danger-rgb: 248, 81, 73;
   --danger-soft: rgba(248, 81, 73, 0.12);
+  --danger-text: #ff7b72; /* lighter on-dark red, for text on dark warn surfaces */
   --warning: #e2c541;
+  --warning-rgb: 226, 197, 65;
+  --accent-rgb: 213, 255, 64;
 
   /* Radii */
   --r-sm: 8px;
@@ -98,12 +102,12 @@ body::before {
   background:
     radial-gradient(
       900px 600px at 85% -10%,
-      rgba(213, 255, 64, 0.08),
+      rgba(var(--accent-rgb), 0.08),
       transparent 60%
     ),
     radial-gradient(
       800px 500px at 10% 0%,
-      rgba(213, 255, 64, 0.05),
+      rgba(var(--accent-rgb), 0.05),
       transparent 55%
     );
   pointer-events: none;
@@ -139,7 +143,7 @@ input {
 }
 
 ::selection {
-  background: rgba(213, 255, 64, 0.3);
+  background: rgba(var(--accent-rgb), 0.3);
   color: var(--on-accent);
 }
 
@@ -263,6 +267,11 @@ input {
   color: var(--danger);
   background: var(--danger-soft);
   border-color: rgba(232, 131, 126, 0.3);
+}
+
+.btn-dashed {
+  background: transparent;
+  border-style: dashed;
 }
 
 /* Card */

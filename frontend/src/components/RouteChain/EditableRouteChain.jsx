@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import Autocomplete from "../Autocomplete";
+import IconButton from "../IconButton";
 import { IconChevron, IconPlus, IconTrash, IconClose } from "../icons";
 import "./RouteChain.css";
 
@@ -177,7 +178,7 @@ export default function EditableRouteChain({
             <li className="chain-item">
               <button
                 type="button"
-                className="chain-empty-add"
+                className="btn btn-dashed chain-empty-add"
                 onClick={() => openInsert(0)}
               >
                 <IconPlus size={15} /> הוסף תחנה
@@ -347,15 +348,16 @@ function StopEditor({ initial, suggestions, onCommit, onCancel }) {
         onSubmit={(v) => finish(v, true)}
         placeholder="שם תחנה…"
       />
-      <button
-        type="button"
+      <IconButton
+        size="md"
+        danger
         className="stop-edit-delete"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => finish("", false)}
-        aria-label="מחק תחנה"
+        ariaLabel="מחק תחנה"
       >
         <IconTrash size={15} />
-      </button>
+      </IconButton>
     </span>
   );
 }

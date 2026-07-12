@@ -7,35 +7,7 @@
 
 /* Mode toggle (segmented control) */
 .bt-modes {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
   align-self: flex-start;
-}
-.bt-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-weight: 600;
-  font-size: 0.92rem;
-  border-radius: var(--r-pill);
-  transition:
-    color 0.2s var(--ease),
-    background 0.2s var(--ease);
-}
-.bt-mode:not(.bt-mode--on):hover {
-  color: var(--text);
-}
-.bt-mode--on {
-  background: var(--accent-fill);
-  color: var(--on-accent);
 }
 
 /* Explore row */
@@ -88,29 +60,6 @@
   padding: var(--s-3) var(--s-5);
 }
 
-.swap-btn {
-  width: 42px;
-  height: 42px;
-  flex: none;
-  border-radius: 50%;
-  border: 1.5px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  display: grid;
-  place-items: center;
-  transition:
-    transform 0.3s var(--ease),
-    color 0.2s,
-    border-color 0.2s,
-    background 0.2s;
-}
-.swap-btn:hover {
-  color: var(--text);
-  border-color: var(--accent);
-  background: var(--surface-hover);
-  transform: rotate(180deg);
-}
-
 /* Path chips */
 .bt-path-chips {
   display: flex;
@@ -119,16 +68,10 @@
   flex-basis: 100%;
 }
 .bt-chip {
-  display: inline-flex;
-  align-items: center;
   gap: var(--s-2);
-  padding: var(--s-2) var(--s-3);
-  border-radius: var(--r-pill);
   border: 1px solid var(--border);
   background: var(--surface);
-  color: var(--text-muted);
   font-weight: 600;
-  font-size: 0.85rem;
   transition:
     color 0.2s,
     border-color 0.2s,

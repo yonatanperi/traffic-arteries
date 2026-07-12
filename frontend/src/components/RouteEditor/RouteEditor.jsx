@@ -2,7 +2,11 @@ import { useMemo, useState } from "react";
 import Autocomplete from "../Autocomplete";
 import ConfirmModal from "../ConfirmModal";
 import { EditableRouteChain } from "../RouteChain";
-import { IconPlus, IconTrash, IconSearch, IconAlert } from "../icons";
+import RemovableChip from "../RemovableChip";
+import Pill from "../Pill";
+import EditableList from "../EditableList";
+import EditableGroupRow from "../EditableGroupRow";
+import { IconSearch, IconAlert } from "../icons";
 import "./RouteEditor.css";
 
 /**
@@ -156,23 +160,15 @@ export default function RouteEditor({
               ? selected.map((p) => (
                   // A pill styled like a route's start/end destination; clicking
                   // it removes the filter (no separate remove button).
-                  <span
+                  <RemovableChip
                     key={p}
                     className="stop stop--start stop--filter"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => removeFilter(p)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        removeFilter(p);
-                      }
-                    }}
-                    aria-label={`הסר ${p} מהסינון`}
+                    onRemove={() => removeFilter(p)}
+                    ariaLabel={`הסר ${p} מהסינון`}
                     title="הסר מהסינון"
                   >
                     {p}
-                  </span>
+                  </RemovableChip>
                 ))
               : null
           }
@@ -186,7 +182,7 @@ export default function RouteEditor({
         )}
       </div>
 
-      <div className="editor-list">
+      <EditableList onAdd={addRoute} addLabel="הוסף ציר חדש">
         {visibleIndices.map((i) => {
           const route = routes[i];
           const disconnected =
@@ -208,11 +204,7 @@ export default function RouteEditor({
             />
           );
         })}
-      </div>
-
-      <button type="button" className="btn add-route-btn" onClick={addRoute}>
-        <IconPlus size={16} /> הוסף ציר חדש
-      </button>
+      </EditableList>
 
       {pendingRename && (
         <ConfirmModal
@@ -241,43 +233,42 @@ function RouteRow({
 }) {
   const tooShort = route.length < 2;
   const hasCompromised = route.some((p) => compromisedPlaces?.has(p));
+  const extraClassName = [
+    disconnected && "route-row--disconnected",
+    hasCompromised && "route-row--compromised",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div
-      className={
-        "route-row" +
-        (tooShort ? " route-row--warn" : "") +
-        (disconnected ? " route-row--disconnected" : "") +
-        (hasCompromised ? " route-row--compromised" : "")
-      }
-    >
-      <div className="route-row-head">
-        {route.length >= 2 && (
-          <span className="route-badge">
+    <EditableGroupRow
+      warn={tooShort}
+      extraClassName={extraClassName || undefined}
+      badge={
+        route.length >= 2 && (
+          <Pill size="sm" className="route-badge">
             {`${route[0]} - ${route[route.length - 1]}`}
-          </span>
-        )}
-        {tooShort && <span className="route-warn">דרושות לפחות שתי תחנות</span>}
-        {!tooShort && disconnected && (
-          <span className="route-warn route-warn--danger">
-            <IconAlert size={14} /> ציר מנותק מהרשת הראשית
-          </span>
-        )}
-        {!tooShort && hasCompromised && (
-          <span className="route-warn route-warn--danger">
-            <IconAlert size={14} /> כולל יעד מושבת
-          </span>
-        )}
-        <button
-          type="button"
-          className="btn btn-danger route-remove"
-          onClick={onRemoveRoute}
-          aria-label={`מחק ציר ${index + 1}`}
-        >
-          <IconTrash size={15} /> מחק
-        </button>
-      </div>
-
+          </Pill>
+        )
+      }
+      warning={
+        <>
+          {tooShort && <span className="route-warn">דרושות לפחות שתי תחנות</span>}
+          {!tooShort && disconnected && (
+            <span className="route-warn route-warn--danger">
+              <IconAlert size={14} /> ציר מנותק מהרשת הראשית
+            </span>
+          )}
+          {!tooShort && hasCompromised && (
+            <span className="route-warn route-warn--danger">
+              <IconAlert size={14} /> כולל יעד מושבת
+            </span>
+          )}
+        </>
+      }
+      onRemove={onRemoveRoute}
+      removeLabel={`מחק ציר ${index + 1}`}
+    >
       <EditableRouteChain
         stops={route}
         onChange={onChangeRoute}
@@ -286,6 +277,6 @@ function RouteRow({
         onRenameStop={onRenameStop}
         compromisedPlaces={compromisedPlaces}
       />
-    </div>
+    </EditableGroupRow>
   );
 }

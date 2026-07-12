@@ -122,7 +122,7 @@ def path(request):
         origin, dest = run_endpoints(run)
         return {
             "id": run.route_id if isinstance(run.route_id, int) else -1,
-            "label": f"{origin} → {dest}",
+            "label": f"{origin} - {dest}",
             "share": round(run.hops / total_hops * 100) if total_hops else 100,
         }
 

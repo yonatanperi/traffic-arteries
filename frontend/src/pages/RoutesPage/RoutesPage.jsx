@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import RouteEditor from "../../components/RouteEditor";
 import CompromisedEditor from "../../components/CompromisedEditor";
 import Loader from "../../components/Loader";
+import PageHeader from "../../components/PageHeader";
+import { SegmentedControl } from "../../components/SegmentedControl";
 import { IconRoute, IconAlert } from "../../components/icons";
 import {
   getRoutes,
@@ -121,26 +123,19 @@ export default function RoutesPage() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <h1 className="page-title">{tab.title}</h1>
-        <p className="page-subtitle">{tab.subtitle}</p>
-      </div>
+      <PageHeader title={tab.title} subtitle={tab.subtitle} />
 
-      <div className="page-tabs" role="tablist" aria-label="עמוד עריכה">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === id}
-            className={"page-tab" + (activeTab === id ? " page-tab--on" : "")}
-            onClick={() => setActiveTab(id)}
-          >
-            <Icon size={16} />
-            {label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        ariaLabel="עמוד עריכה"
+        value={activeTab}
+        onChange={setActiveTab}
+        className="page-tabs"
+        items={TABS.map(({ id, label, icon: Icon }) => ({
+          value: id,
+          icon: <Icon size={16} />,
+          label,
+        }))}
+      />
 
       {activeTab === "routes" ? (
         <RouteEditor

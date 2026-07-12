@@ -1,0 +1,38 @@
+.icon-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 50%;
+  transition:
+    color 0.2s var(--ease),
+    background 0.2s var(--ease);
+}
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.icon-btn--danger:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.icon-btn--xs {
+  width: 18px;
+  height: 18px;
+}
+.icon-btn--sm {
+  width: 24px;
+  height: 24px;
+}
+.icon-btn--md {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+}
+.icon-btn--lg {
+  width: 42px;
+  height: 42px;
+}

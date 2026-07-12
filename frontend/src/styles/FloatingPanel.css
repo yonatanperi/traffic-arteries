@@ -15,8 +15,6 @@
   padding: var(--s-4);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
   box-shadow: var(--shadow-lg);
   animation: fp-in 0.28s var(--ease) both;
 }
@@ -59,33 +57,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fp-close {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r-sm);
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  transition: color 0.2s, background 0.2s;
-}
-.fp-close:hover {
-  color: var(--text);
-  background: var(--surface-hover);
-}
-
 .fp-badge-row {
   display: flex;
   gap: var(--s-2);
 }
 .fp-badge {
-  padding: var(--s-1) var(--s-3);
-  border-radius: var(--r-pill);
-  background: var(--accent-soft);
+  padding-block: var(--s-1);
   color: var(--text-muted);
-  font-size: 0.85rem;
 }
 .fp-badge strong {
   color: var(--accent);

@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import Autocomplete from "../Autocomplete";
+import { SegmentedControl } from "../SegmentedControl";
+import SwapButton from "../SwapButton";
+import Pill from "../Pill";
 import {
   IconSearch,
-  IconFocus,
   IconFit,
   IconReset,
   IconPause,
@@ -12,9 +14,9 @@ import {
   IconRoute,
   IconOrigin,
   IconDestination,
-  IconSwap,
   IconClose,
   IconAlert,
+  IconFocus,
 } from "../icons";
 import "./BrainToolbar.css";
 
@@ -98,28 +100,16 @@ export default function BrainToolbar({
 
   return (
     <div className="brain-toolbar">
-      <div className="bt-modes" role="tablist" aria-label="מצב תצוגה">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "explore"}
-          className={"bt-mode" + (mode === "explore" ? " bt-mode--on" : "")}
-          onClick={() => onModeChange("explore")}
-        >
-          <IconSearch size={16} />
-          חקירה
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === "path"}
-          className={"bt-mode" + (mode === "path" ? " bt-mode--on" : "")}
-          onClick={() => onModeChange("path")}
-        >
-          <IconRoute size={16} />
-          ציר
-        </button>
-      </div>
+      <SegmentedControl
+        ariaLabel="מצב תצוגה"
+        value={mode}
+        onChange={onModeChange}
+        className="bt-modes"
+        items={[
+          { value: "explore", icon: <IconSearch size={16} />, label: "חקירה" },
+          { value: "path", icon: <IconRoute size={16} />, label: "ציר" },
+        ]}
+      />
 
       {mode === "explore" && (
         <div className="bt-explore">
@@ -209,15 +199,7 @@ export default function BrainToolbar({
               value={start}
               onChange={setStart}
             />
-            <button
-              type="button"
-              className="swap-btn"
-              onClick={swap}
-              aria-label="החלף מוצא ויעד"
-              title="החלף מוצא ויעד"
-            >
-              <IconSwap size={18} />
-            </button>
+            <SwapButton onClick={swap} />
             <Autocomplete
               icon={<IconDestination size={17} />}
               placeholder="יעד"
@@ -239,9 +221,10 @@ export default function BrainToolbar({
           {paths && paths.length > 0 && (
             <div className="bt-path-chips">
               {paths.map((p, i) => (
-                <button
+                <Pill
+                  as="button"
+                  size="md"
                   key={i}
-                  type="button"
                   className={
                     "bt-chip" + (i === activePathIndex ? " bt-chip--on" : "")
                   }
@@ -251,17 +234,18 @@ export default function BrainToolbar({
                   <span className="bt-chip-hops">
                     {chipLabel(meta?.[i], p.length)}
                   </span>
-                </button>
+                </Pill>
               ))}
-              <button
-                type="button"
+              <Pill
+                as="button"
+                size="md"
                 className="bt-chip bt-chip--clear"
                 onClick={clearPath}
                 aria-label="נקה ציר"
                 title="נקה ציר"
               >
                 <IconClose size={15} />
-              </button>
+              </Pill>
             </div>
           )}
 

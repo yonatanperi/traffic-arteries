@@ -12,27 +12,6 @@
   gap: var(--s-3);
 }
 
-.swap-btn {
-  width: 44px;
-  height: 44px;
-  flex: none;
-  border-radius: 50%;
-  border: 1.5px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  display: grid;
-  place-items: center;
-  transition: transform 0.3s var(--ease), color 0.2s, border-color 0.2s,
-    background 0.2s;
-  margin-bottom: 2px;
-}
-.swap-btn:hover {
-  color: var(--text);
-  border-color: var(--accent);
-  background: var(--surface-hover);
-  transform: rotate(180deg);
-}
-
 .waypoints {
   display: flex;
   flex-direction: column;
@@ -68,34 +47,24 @@
 }
 
 .waypoint-remove {
-  width: 40px;
-  height: 40px;
-  flex: none;
-  border-radius: 50%;
   border: 1.5px solid var(--border);
   background: var(--surface-2);
-  color: var(--text-muted);
-  display: grid;
-  place-items: center;
   transition: color 0.2s, border-color 0.2s, background 0.2s;
 }
 .waypoint-remove:hover {
-  color: #ff7b72;
-  border-color: rgba(248, 81, 73, 0.5);
+  color: var(--danger-text);
+  border-color: rgba(var(--danger-rgb), 0.5);
   background: var(--surface-hover);
 }
 
 .waypoint-add {
   align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
   padding: var(--s-2) var(--s-3);
   border-radius: var(--r-md);
-  border: 1.5px dashed var(--border);
-  background: transparent;
+  border-width: 1.5px;
+  border-color: var(--border);
   color: var(--text-muted);
-  font-weight: 600;
   transition: color 0.2s, border-color 0.2s, background 0.2s;
 }
 .waypoint-add:hover {
@@ -115,9 +84,9 @@
   margin: var(--s-4) 0 0;
   padding: var(--s-3) var(--s-4);
   border-radius: var(--r-md);
-  background: rgba(248, 81, 73, 0.1);
-  border: 1px solid rgba(248, 81, 73, 0.35);
-  color: #ff7b72;
+  background: rgba(var(--danger-rgb), 0.1);
+  border: 1px solid rgba(var(--danger-rgb), 0.35);
+  color: var(--danger-text);
   font-weight: 600;
 }
 
@@ -143,12 +112,11 @@
 
 .type-filter-chip {
   padding: var(--s-2) var(--s-4);
-  border-radius: var(--r-pill);
-  border: 1.5px solid var(--border);
+  border-width: 1.5px;
+  border-color: var(--border);
   background: var(--surface-2);
   color: var(--text);
   font-weight: 600;
-  font-size: 0.85rem;
   transition: color 0.2s var(--ease), border-color 0.2s var(--ease),
     background 0.2s var(--ease), opacity 0.2s var(--ease);
 }

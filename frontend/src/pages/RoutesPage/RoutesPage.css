@@ -2,33 +2,5 @@
    RouteEditor / CompromisedEditor components. */
 
 .page-tabs {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
   margin-bottom: var(--s-5);
-}
-.page-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-weight: 600;
-  font-size: 0.92rem;
-  border-radius: var(--r-pill);
-  transition:
-    color 0.2s var(--ease),
-    background 0.2s var(--ease);
-}
-.page-tab:not(.page-tab--on):hover {
-  color: var(--text);
-}
-.page-tab--on {
-  background: var(--accent-fill);
-  color: var(--on-accent);
 }

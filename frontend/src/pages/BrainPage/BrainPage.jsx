@@ -5,6 +5,7 @@ import NodeDetailPanel from "../../components/NodeDetailPanel";
 import InsightsPanel from "../../components/InsightsPanel";
 import Loader from "../../components/Loader";
 import EmptyState from "../../components/EmptyState";
+import PageHeader from "../../components/PageHeader";
 import { IconAlert, IconNetwork } from "../../components/icons";
 import { getGraph, findPaths } from "../../api/client.js";
 import { computeMetrics, edgeKey } from "../../utils/graphMetrics.js";
@@ -99,13 +100,10 @@ export default function BrainPage() {
 
   return (
     <div className="page brain-page">
-      <div className="page-header">
-        <h1 className="page-title">הצצה למוח</h1>
-        <p className="page-subtitle">
-          רשת הצמתים החיה של המערכת. חפשו מקום, סמנו צומת לפרטים, או שרטטו ציר
-          בין שתי נקודות — והציצו במבנה הפנימי של הרשת.
-        </p>
-      </div>
+      <PageHeader
+        title="הצצה למוח"
+        subtitle="רשת הצמתים החיה של המערכת. חפשו מקום, סמנו צומת לפרטים, או שרטטו ציר בין שתי נקודות — והציצו במבנה הפנימי של הרשת."
+      />
 
       {hasGraph && (
         <BrainToolbar

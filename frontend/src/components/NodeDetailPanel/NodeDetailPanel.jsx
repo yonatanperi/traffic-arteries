@@ -1,5 +1,6 @@
-import { IconClose, IconHub } from "../icons";
-import "../../styles/FloatingPanel.css";
+import { IconHub } from "../icons";
+import Pill from "../Pill";
+import FloatingPanel, { FloatingPanelList, FloatingPanelListItem } from "../FloatingPanel";
 
 /**
  * Floating card describing the pinned node: its degree and the list of places
@@ -12,46 +13,30 @@ export default function NodeDetailPanel({ id, adjacency, onClose, onFocus }) {
   );
 
   return (
-    <div className="fp fp--start" role="dialog" aria-label={`פרטי ${id}`}>
-      <header className="fp-head">
-        <div className="fp-title-wrap">
-          <IconHub size={17} />
-          <h3 className="fp-title">{id}</h3>
-        </div>
-        <button
-          type="button"
-          className="fp-close"
-          onClick={onClose}
-          aria-label="סגור"
-        >
-          <IconClose size={16} />
-        </button>
-      </header>
-
+    <FloatingPanel
+      side="start"
+      icon={<IconHub size={17} />}
+      title={id}
+      onClose={onClose}
+      ariaLabel={`פרטי ${id}`}
+    >
       <div className="fp-badge-row">
-        <span className="fp-badge">
+        <Pill size="md" tone="accent" className="fp-badge">
           <strong>{neighbours.length}</strong> חיבורים ישירים
-        </span>
+        </Pill>
       </div>
 
       {neighbours.length > 0 ? (
-        <ul className="fp-list">
+        <FloatingPanelList>
           {neighbours.map((n) => (
-            <li key={n}>
-              <button
-                type="button"
-                className="fp-list-btn"
-                onClick={() => onFocus(n)}
-              >
-                <span className="fp-dot" aria-hidden="true" />
-                {n}
-              </button>
-            </li>
+            <FloatingPanelListItem key={n} onClick={() => onFocus(n)}>
+              {n}
+            </FloatingPanelListItem>
           ))}
-        </ul>
+        </FloatingPanelList>
       ) : (
         <p className="fp-empty">מקום מבודד — ללא חיבורים.</p>
       )}
-    </div>
+    </FloatingPanel>
   );
 }

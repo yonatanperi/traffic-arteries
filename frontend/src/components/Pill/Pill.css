@@ -1,0 +1,37 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.pill--sm {
+  padding: 2px var(--s-2);
+  font-size: 0.78rem;
+  gap: 4px;
+}
+.pill--md {
+  padding: var(--s-2) var(--s-3);
+  font-size: 0.85rem;
+  gap: 6px;
+}
+.pill--lg {
+  padding: var(--s-2) var(--s-4);
+  font-size: 0.92rem;
+  gap: var(--s-2);
+}
+
+.pill--default {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.pill--accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.pill--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}

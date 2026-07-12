@@ -3,10 +3,13 @@ import Autocomplete from "../../components/Autocomplete";
 import PathResults from "../../components/PathResults";
 import EmptyState from "../../components/EmptyState";
 import Loader from "../../components/Loader";
+import PageHeader from "../../components/PageHeader";
+import SwapButton from "../../components/SwapButton";
+import IconButton from "../../components/IconButton";
+import Pill from "../../components/Pill";
 import {
   IconOrigin,
   IconDestination,
-  IconSwap,
   IconSearch,
   IconCompass,
   IconAlert,
@@ -97,12 +100,7 @@ export default function HomePage() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <h1 className="page-title">לאן ניסע היום?</h1>
-        <p className="page-subtitle">
-          בחרו נקודת מוצא ויעד, נבנה את ציר התנועה עבורכם.
-        </p>
-      </div>
+      <PageHeader title="לאן ניסע היום?" subtitle="בחרו נקודת מוצא ויעד, נבנה את ציר התנועה עבורכם." />
 
       <form className="search-panel card" onSubmit={onSubmit}>
         <div className="search-fields">
@@ -115,15 +113,7 @@ export default function HomePage() {
             onChange={setStart}
           />
 
-          <button
-            type="button"
-            className="swap-btn"
-            onClick={swap}
-            aria-label="החלף מוצא ויעד"
-            title="החלף מוצא ויעד"
-          >
-            <IconSwap size={18} />
-          </button>
+          <SwapButton onClick={swap} />
 
           <Autocomplete
             label="יעד"
@@ -157,19 +147,19 @@ export default function HomePage() {
                 value={v}
                 onChange={(val) => setVia(i, val)}
               />
-              <button
-                type="button"
+              <IconButton
+                size="lg"
                 className="waypoint-remove"
                 onClick={() => removeVia(i)}
-                aria-label="הסר עצירה"
+                ariaLabel="הסר עצירה"
                 title="הסר עצירה"
               >
                 <IconClose size={16} />
-              </button>
+              </IconButton>
             </div>
           ))}
 
-          <button type="button" className="waypoint-add" onClick={addVia}>
+          <button type="button" className="btn btn-dashed waypoint-add" onClick={addVia}>
             <IconPlus size={16} />
             הוסף עצירת ביניים
           </button>
@@ -213,9 +203,10 @@ export default function HomePage() {
                 {PLACE_TYPES.filter((t) => presentTypes.has(t.key)).map((t) => {
                   const active = !hiddenTypes.has(t.key);
                   return (
-                    <button
+                    <Pill
+                      as="button"
+                      size="md"
                       key={t.key}
-                      type="button"
                       className={
                         "type-filter-chip" +
                         (active ? "" : " type-filter-chip--off")
@@ -224,7 +215,7 @@ export default function HomePage() {
                       onClick={() => toggleType(t.key)}
                     >
                       {t.label}
-                    </button>
+                    </Pill>
                   );
                 })}
               </div>

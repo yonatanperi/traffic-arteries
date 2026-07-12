@@ -5,7 +5,7 @@
   overflow: hidden;
   background: radial-gradient(
       120% 120% at 50% 0%,
-      rgba(213, 255, 64, 0.07),
+      rgba(var(--accent-rgb), 0.07),
       transparent 60%
     ),
     var(--bg-elevated);

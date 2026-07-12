@@ -1,0 +1,24 @@
+.swap-btn {
+  border: 1.5px solid var(--border);
+  background: var(--surface-2);
+  transition:
+    transform 0.3s var(--ease),
+    color 0.2s,
+    border-color 0.2s,
+    background 0.2s;
+}
+.swap-btn:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  transform: rotate(180deg);
+}
+
+@media (max-width: 620px) {
+  .swap-btn {
+    transform: rotate(90deg);
+    justify-self: center;
+  }
+  .swap-btn:hover {
+    transform: rotate(270deg);
+  }
+}

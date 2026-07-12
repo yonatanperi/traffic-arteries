@@ -70,23 +70,7 @@
 }
 
 .ac-clear {
-  border: none;
-  background: transparent;
   color: var(--text-faint);
-  font-size: 1.3rem;
-  line-height: 1;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  transition:
-    color 0.15s,
-    background 0.15s;
-}
-.ac-clear:hover {
-  color: var(--text);
-  background: var(--surface-hover);
 }
 
 .ac-list {

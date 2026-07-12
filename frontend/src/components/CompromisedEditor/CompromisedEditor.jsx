@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import Autocomplete from "../Autocomplete";
-import { IconPlus, IconTrash, IconAlert } from "../icons";
-import "../RouteEditor/RouteEditor.css";
+import RemovableChip from "../RemovableChip";
+import Pill from "../Pill";
+import EditableList from "../EditableList";
+import EditableGroupRow from "../EditableGroupRow";
+import { IconPlus, IconAlert } from "../icons";
 import "../RouteChain/RouteChain.css";
 import "./CompromisedEditor.css";
 
@@ -33,7 +36,7 @@ export default function CompromisedEditor({ groups, onChange, suggestions }) {
 
   return (
     <div className="editor">
-      <div className="editor-list">
+      <EditableList onAdd={addGroup} addLabel="הוסף קבוצה">
         {groups.map((group, i) => (
           <CompromisedGroupRow
             key={i}
@@ -45,11 +48,7 @@ export default function CompromisedEditor({ groups, onChange, suggestions }) {
             onRemoveGroup={() => removeGroup(i)}
           />
         ))}
-      </div>
-
-      <button type="button" className="btn add-route-btn" onClick={addGroup}>
-        <IconPlus size={16} /> הוסף קבוצה
-      </button>
+      </EditableList>
     </div>
   );
 }
@@ -83,50 +82,40 @@ function CompromisedGroupRow({
   }
 
   return (
-    <div className={"route-row" + (empty ? " route-row--warn" : "")}>
-      <div className="route-row-head">
-        {!empty && (
-          <span className="route-badge">
+    <EditableGroupRow
+      warn={empty}
+      badge={
+        !empty && (
+          <Pill size="sm" className="route-badge">
             {group.length === 1
               ? "יעד אחד מושבת"
               : `${group.length} יעדים מושבתים`}
-          </span>
-        )}
-        {empty && (
+          </Pill>
+        )
+      }
+      warning={
+        empty && (
           <span className="route-warn">
             <IconAlert size={14} /> קבוצה ריקה — הוסיפו יעד אחד לפחות
           </span>
-        )}
-        <button
-          type="button"
-          className="btn btn-danger route-remove"
-          onClick={onRemoveGroup}
-          aria-label={`מחק קבוצה ${index + 1}`}
-        >
-          <IconTrash size={15} /> מחק קבוצה
-        </button>
-      </div>
-
+        )
+      }
+      onRemove={onRemoveGroup}
+      removeLabel={`מחק קבוצה ${index + 1}`}
+      removeText="מחק קבוצה"
+    >
       {!empty && (
         <ol className="chain compromised-chips">
           {group.map((place) => (
             <li className="chain-item" key={place}>
-              <span
+              <RemovableChip
                 className="stop stop--compromised"
-                role="button"
-                tabIndex={0}
-                onClick={() => removeDestination(place)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    removeDestination(place);
-                  }
-                }}
-                aria-label={`הסר את ${place} מהקבוצה`}
+                onRemove={() => removeDestination(place)}
+                ariaLabel={`הסר את ${place} מהקבוצה`}
                 title="הסר מהקבוצה"
               >
                 {place}
-              </span>
+              </RemovableChip>
             </li>
           ))}
         </ol>
@@ -140,6 +129,6 @@ function CompromisedGroupRow({
         icon={<IconPlus size={16} />}
         placeholder="הוסף יעד לקבוצה…"
       />
-    </div>
+    </EditableGroupRow>
   );
 }

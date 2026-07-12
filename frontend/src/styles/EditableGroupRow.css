@@ -1,0 +1,51 @@
+.route-row {
+  padding: var(--s-4) var(--s-5);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.2s var(--ease);
+  animation: rise 0.35s var(--ease) both;
+}
+.route-row:hover {
+  border-color: var(--border-strong);
+}
+/* Lift the row being edited so its open add-stop dropdown sits above the
+   route cards that follow it in the list. */
+.route-row:focus-within {
+  position: relative;
+  z-index: 20;
+}
+.route-row--warn {
+  border-color: rgba(var(--warning-rgb), 0.4);
+}
+
+.route-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-3);
+}
+
+.route-badge {
+  padding: var(--s-1) var(--s-3);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: white;
+}
+
+.route-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--warning);
+  font-weight: 600;
+}
+.route-warn--danger {
+  color: var(--danger);
+}
+
+.route-remove {
+  margin-inline-start: auto;
+  padding: var(--s-2) var(--s-3);
+  font-size: 0.85rem;
+  gap: var(--s-2);
+}

@@ -38,33 +38,7 @@
   letter-spacing: 0.02em;
 }
 
-.nav-links {
-  display: flex;
-  gap: var(--s-1);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  padding: var(--s-1);
-  border-radius: var(--r-pill);
-}
-
-.nav-link {
-  padding: var(--s-2) var(--s-4);
-  border-radius: var(--r-pill);
-  font-weight: 600;
-  font-size: 0.92rem;
-  color: var(--text-muted);
-  transition:
-    color 0.2s var(--ease),
-    background 0.2s var(--ease);
-  white-space: nowrap;
-}
-.nav-link:not(.nav-link--active):hover {
-  color: var(--text);
-}
-
 .nav-link--active {
-  color: var(--on-accent);
-  background: var(--accent-fill);
   font-weight: 800;
   box-shadow: var(--shadow-sm);
 }
@@ -72,9 +46,5 @@
 @media (max-width: 640px) {
   .brand-text small {
     display: none;
-  }
-  .nav-link {
-    padding: var(--s-2) var(--s-3);
-    font-size: 0.85rem;
   }
 }
