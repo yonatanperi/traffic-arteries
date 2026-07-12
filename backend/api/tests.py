@@ -1,8 +1,11 @@
 """Algorithm correctness tests, anchored on the spec's own example."""
 
+import tempfile
+
 from django.test import SimpleTestCase
 
-from .graph import Graph, RouteFinder
+from .db import Database, ValidationError
+from .graph import Graph, LengthMode, RouteFinder, evaluate
 
 # The example from the spec.
 SPEC_ROUTES = [
@@ -23,10 +26,10 @@ class KShortestPathsTests(SimpleTestCase):
         self.assertEqual(paths[0], ["K", "J", "E", "G", "N", "M"])
 
     def test_results_are_best_first(self):
-        # Best-first now means fewest merged routes, then fewest intersections.
+        # Best-first now means highest concentration first (non-increasing HHI).
         routes = self.finder.find_routes("A", "R", k=3)
-        keys = [(r.route_count, r.crossroad_hops) for r in routes]
-        self.assertEqual(keys, sorted(keys))
+        hhis = [r.hhi for r in routes]
+        self.assertEqual(hhis, sorted(hhis, reverse=True))
 
     def test_at_most_k_distinct_paths(self):
         paths = self.finder.k_shortest_paths("A", "R", k=3)
@@ -214,12 +217,16 @@ class MergeTests(SimpleTestCase):
         self.assertEqual(best.route_count, 2)  # merges routes 1 and 2
         self.assertEqual(best.route_ids, [1, 2])
 
-    def test_equal_merge_tiebreak_by_crossroad_hops(self):
-        # A->R: both corridors merge 2 routes; the one crossing fewer
-        # intersections (only E) wins.
-        best = self.finder.find_routes("A", "R", k=3)[0]
-        self.assertEqual(best.stops, ["A", "L", "K", "J", "E", "R"])
+    def test_more_concentrated_corridor_wins(self):
+        # A->R: both corridors merge 2 routes, but concentration decides. Riding
+        # route 1 for the bulk (A-B-C then C..R) is more concentrated than the
+        # balanced 50/50 [A, L, K, J, E, R], so it is the best route.
+        routes = self.finder.find_routes("A", "R", k=3)
+        best = routes[0]
+        self.assertEqual(best.stops, ["A", "B", "C", "M", "N", "G", "E", "R"])
         self.assertEqual(best.route_count, 2)
+        self.assertIn(["A", "L", "K", "J", "E", "R"], [r.stops for r in routes])
+        self.assertGreater(best.hhi, routes[1].hhi)
 
     def test_via_still_works_with_merges(self):
         routes = self.finder.find_routes("K", "M", via=["E"])
@@ -236,6 +243,110 @@ class MergeTests(SimpleTestCase):
         self.assertTrue(all(isinstance(p, list) for p in paths))
 
 
+# A graph with two S->T corridors: a long artery (route 0) reached by brief hops
+# (routes 1, 2) — three merged routes but perfectly concentrated — and a balanced
+# two-route blend (routes 6, 7). Stubs make the interior nodes crossroads.
+CONCENTRATION_ROUTES = [
+    ["x", "a1", "a2", "a3", "y"],   # 0: the artery
+    ["S", "x"],                      # 1: entry hop onto the artery
+    ["y", "T"],                      # 2: exit hop off the artery
+    ["a1", "p1"],                    # 3: stub -> a1 becomes a crossroad
+    ["a2", "p2"],                    # 4: stub -> a2 crossroad
+    ["a3", "p3"],                    # 5: stub -> a3 crossroad
+    ["S", "b1", "m"],                # 6: balanced corridor, first half
+    ["m", "b2", "T"],                # 7: balanced corridor, second half
+    ["b1", "q1"],                    # 8: stub -> b1 crossroad
+    ["b2", "q2"],                    # 9: stub -> b2 crossroad
+]
+
+CORRIDOR_A = ["S", "x", "a1", "a2", "a3", "y", "T"]  # merges 3, HHI 1.0
+CORRIDOR_B = ["S", "b1", "m", "b2", "T"]             # merges 2, HHI 0.5
+
+
+class ConcentrationTests(SimpleTestCase):
+    """"Best" = riding one authored route as far as possible (max concentration)."""
+
+    def setUp(self):
+        self.graph = Graph.from_routes(CONCENTRATION_ROUTES)
+        self.finder = RouteFinder(self.graph)
+
+    def test_evaluate_single_route_is_perfect(self):
+        hhi, runs = evaluate(self.graph, ["x", "a1", "a2", "a3", "y"])
+        self.assertAlmostEqual(hhi, 1.0)
+        self.assertEqual([r.route_id for r in runs], [0])
+
+    def test_evaluate_balanced_blend(self):
+        hhi, runs = evaluate(self.graph, CORRIDOR_B)
+        self.assertAlmostEqual(hhi, 0.5)  # (1/2)^2 + (1/2)^2
+        # Runs are in travel order (route 6 then 7), each with equal length.
+        self.assertEqual([r.route_id for r in runs], [6, 7])
+        self.assertEqual([r.length for r in runs], [2, 2])
+
+    def test_runs_are_travel_ordered_with_boundary_nodes(self):
+        _, runs = evaluate(self.graph, CORRIDOR_B)
+        self.assertEqual([(r.start, r.end) for r in runs], [("S", "m"), ("m", "T")])
+        self.assertEqual([r.hops for r in runs], [2, 2])  # shares over 4 hops -> 50/50
+
+    def test_evaluate_no_crossroads_falls_back(self):
+        # A chain crossing no crossroads has L == 0; score falls back to 1/n.
+        g = Graph.from_routes([["X", "A", "B"], ["B", "C", "Y"]])
+        hhi, runs = evaluate(g, ["X", "A", "B", "C", "Y"])
+        self.assertAlmostEqual(hhi, 0.5)
+        self.assertEqual(sorted({r.route_id for r in runs}), [0, 1])
+
+    def test_best_maximises_concentration_even_with_more_merges(self):
+        # Non-monotonic: the 3-route artery corridor (HHI 1.0) beats the balanced
+        # 2-route blend (HHI 0.5) — best may merge MORE routes to stay concentrated.
+        routes = self.finder.find_routes("S", "T", k=3)
+        self.assertEqual(routes[0].stops, CORRIDOR_A)
+        self.assertAlmostEqual(routes[0].hhi, 1.0)
+        self.assertEqual(routes[0].route_count, 3)
+
+        self.assertEqual(len(routes), 2)
+        self.assertEqual(routes[1].stops, CORRIDOR_B)
+        self.assertEqual(routes[1].route_count, 2)
+        self.assertGreater(routes[0].route_count, routes[1].route_count)
+        self.assertGreater(routes[0].hhi, routes[1].hhi)
+
+    def test_alternatives_are_distinct_corridors(self):
+        # Real alternatives ride different arteries, not one-hop variants.
+        routes = self.finder.find_routes("S", "T", k=3)
+        self.assertGreaterEqual(len(routes), 2)
+        self.assertTrue(
+            set(routes[0].route_ids).isdisjoint(routes[1].route_ids),
+            "alternatives share a dominant route",
+        )
+
+    def test_length_mode_flag_changes_score(self):
+        # Crossroads-only, the brief end-hops are length-0 so the artery is a
+        # perfect ride; counting every hop, they weigh in and the score drops.
+        self.assertAlmostEqual(evaluate(self.graph, CORRIDOR_A)[0], 1.0)
+        LengthMode.CROSSROADS_ONLY = False
+        try:
+            hhi = evaluate(self.graph, CORRIDOR_A)[0]
+        finally:
+            LengthMode.CROSSROADS_ONLY = True
+        self.assertAlmostEqual(hhi, 0.5)  # runs 1,4,1 -> (1+16+1)/36
+
+    def test_evaluate_is_direction_independent(self):
+        # The objective must be identical for a chain and its reverse.
+        for chain in (CORRIDOR_A, CORRIDOR_B, ["S", "b1", "m", "b2", "T"]):
+            self.assertAlmostEqual(
+                evaluate(self.graph, chain)[0],
+                evaluate(self.graph, chain[::-1])[0],
+            )
+
+    def test_find_routes_is_symmetric(self):
+        # A route and its reverse are equally good, so the best match a query
+        # yields must not depend on which endpoint is the start.
+        for a, b in [("S", "T"), ("S", "b2"), ("x", "T")]:
+            fwd = self.finder.find_routes(a, b, k=3)
+            rev = self.finder.find_routes(b, a, k=3)
+            self.assertAlmostEqual(fwd[0].hhi, rev[0].hhi)
+            # same corridor, just walked the other way
+            self.assertEqual(fwd[0].stops, rev[0].stops[::-1])
+
+
 class GraphShapeTests(SimpleTestCase):
     def test_edges_are_bidirectional(self):
         graph = Graph.from_routes([["X", "Y", "Z"]])
@@ -249,3 +360,69 @@ class GraphShapeTests(SimpleTestCase):
         net = graph.to_network()
         self.assertEqual(len(net["links"]), 1)
         self.assertEqual({n["id"] for n in net["nodes"]}, {"X", "Y"})
+
+    def test_without_places_drops_node_and_incident_edges(self):
+        graph = Graph.from_routes([["A", "B", "C"], ["B", "D"]])
+        trimmed = graph.without_places(["B"])
+        self.assertNotIn("B", trimmed)
+        self.assertIn("A", trimmed)
+        self.assertIn("C", trimmed)
+        self.assertIn("D", trimmed)
+        self.assertEqual(trimmed.neighbors("A"), [])
+        self.assertEqual(trimmed.neighbors("C"), [])
+        self.assertEqual(trimmed.neighbors("D"), [])
+
+    def test_without_places_leaves_other_edges_intact(self):
+        graph = Graph.from_routes([["A", "B", "C"]])
+        trimmed = graph.without_places(["Z"])  # nothing to remove
+        self.assertEqual(trimmed.neighbors("A"), ["B"])
+        self.assertEqual(trimmed.neighbors("B"), ["A", "C"])
+
+
+class CompromisedDestinationsTests(SimpleTestCase):
+    """Compromised destinations are excluded from routing/place-picking but
+    never removed from routes.json/edge_routes.json themselves."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = Database(data_dir=self.tmp.name)
+        self.db.save_routes([["A", "B", "C"], ["C", "D", "E"]])
+
+    def test_defaults_to_empty(self):
+        self.assertEqual(self.db.load_compromised(), [])
+        self.assertEqual(self.db.compromised_places(), set())
+
+    def test_save_and_load_roundtrip(self):
+        saved = self.db.save_compromised([["B"], ["D", "E"]])
+        self.assertEqual(saved, [["B"], ["D", "E"]])
+        self.assertEqual(self.db.load_compromised(), [["B"], ["D", "E"]])
+        self.assertEqual(self.db.compromised_places(), {"B", "D", "E"})
+
+    def test_rejects_unknown_destination(self):
+        with self.assertRaises(ValidationError):
+            self.db.save_compromised([["ZZZ"]])
+
+    def test_rejects_empty_group(self):
+        with self.assertRaises(ValidationError):
+            self.db.save_compromised([[]])
+
+    def test_routable_graph_excludes_compromised_places(self):
+        self.db.save_compromised([["C"]])
+        graph = self.db.load_routable_graph()
+        self.assertNotIn("C", graph)
+        self.assertIn("A", graph)
+        self.assertIn("D", graph)
+
+    def test_full_graph_still_includes_compromised_places(self):
+        self.db.save_compromised([["C"]])
+        graph = self.db.load_graph()
+        self.assertIn("C", graph)
+
+    def test_routing_avoids_compromised_destination(self):
+        self.db.save_compromised([["C"]])
+        graph = self.db.load_routable_graph()
+        finder = RouteFinder(graph)
+        # C was the only link between the two routes' halves, so it's now
+        # unreachable and A-E has no route.
+        self.assertEqual(finder.k_shortest_paths("A", "E"), [])

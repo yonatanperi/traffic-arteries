@@ -8,7 +8,8 @@ A :class:`Database` owns two JSON files under ``backend/data``:
     loaded straight from disk without recomputation. Each record is
     ``[place_a, place_b, [authored route indices on that edge]]``: it carries both
     the topology (the adjacency is reconstructed from the edges) and the route
-    provenance the router needs to find the fewest-merged-routes path. Before it
+    provenance the router needs to find the most-concentrated path (riding one
+    authored route as far as possible). Before it
     is built the routes are run through :meth:`Database.fill_missing_destinations`,
     so a route that skips stops another spells out doesn't fabricate a direct
     edge — ``routes.json`` keeps the originals, the graph sees the filled version.
@@ -56,9 +57,14 @@ class Database:
         base = data_dir if data_dir is not None else settings.DATA_DIR
         self.routes_file = os.path.join(base, "routes.json")
         # The derived graph: edges with their authored-route membership. Lets the
-        # router find the route that merges the fewest authored routes, and the
-        # adjacency is reconstructed from it — no separate adjacency file needed.
+        # router find the route that rides one authored route as far as possible,
+        # and the adjacency is reconstructed from it — no separate adjacency file.
         self.edge_routes_file = os.path.join(base, "edge_routes.json")
+        # Destinations temporarily marked unavailable, grouped (e.g. one group per
+        # closure event): a list of lists of place names. Filtered out at read
+        # time for routing/place-picking — routes.json/edge_routes.json never
+        # change because of this.
+        self.compromised_file = os.path.join(base, "compromised.json")
 
     # --- persistence primitives -------------------------------------------
 
@@ -110,6 +116,39 @@ class Database:
             cleaned.append(places)
         return cleaned
 
+    @staticmethod
+    def validate_compromised(groups, known_places):
+        """Validate and normalise compromised-destination groups.
+
+        Rules: ``groups`` is a list; each group is a list of at least one
+        non-empty string; every destination must be a member of
+        ``known_places`` (the closed list — every place appearing in any
+        route), so an editor can't mark a nonexistent place unavailable.
+        """
+        if not isinstance(groups, list):
+            raise ValidationError("הנתונים חייבים להיות רשימה של קבוצות.")
+
+        cleaned = []
+        for index, group in enumerate(groups):
+            if not isinstance(group, list):
+                raise ValidationError(f"קבוצה מספר {index + 1} אינה רשימה.")
+            places = []
+            for place in group:
+                if not isinstance(place, str) or not place.strip():
+                    raise ValidationError(
+                        f"קבוצה מספר {index + 1} מכילה שם יעד ריק או לא תקין."
+                    )
+                p = place.strip()
+                if p not in known_places:
+                    raise ValidationError(f'היעד "{p}" אינו קיים ברשימת היעדים.')
+                places.append(p)
+            if not places:
+                raise ValidationError(
+                    f"קבוצה מספר {index + 1} חייבת לכלול לפחות יעד אחד."
+                )
+            cleaned.append(places)
+        return cleaned
+
     # --- store lifecycle ---------------------------------------------------
 
     def _ensure_files(self):
@@ -120,6 +159,8 @@ class Database:
         elif not os.path.exists(self.edge_routes_file):
             # routes exist but the derived graph is missing/stale — rebuild it.
             self._rebuild_graph(self._read_json(self.routes_file))
+        if not os.path.exists(self.compromised_file):
+            self._atomic_write_json(self.compromised_file, [])
 
     def _rebuild_graph(self, routes, lazy_gap=LAZY_GAP, confirmed_gap=CONFIRMED_GAP):
         """Derive and persist the graph from ``routes``.
@@ -253,6 +294,35 @@ class Database:
         self._atomic_write_json(self.routes_file, cleaned)
         self._rebuild_graph(cleaned)
         return cleaned
+
+    def load_compromised(self):
+        self._ensure_files()
+        return self._read_json(self.compromised_file)
+
+    def compromised_places(self):
+        """Flattened set of every destination marked unavailable, across all groups."""
+        return {place for group in self.load_compromised() for place in group}
+
+    def save_compromised(self, groups):
+        """Validate against the closed list of known destinations and persist.
+
+        Returns the cleaned groups that were saved.
+        """
+        known = set(self.load_graph().places())
+        cleaned = self.validate_compromised(groups, known)
+        self._atomic_write_json(self.compromised_file, cleaned)
+        return cleaned
+
+    def load_routable_graph(self):
+        """The graph with compromised destinations (and their edges) removed.
+
+        Used anywhere a route may actually be planned or a destination picked
+        for planning — the derived graph itself (``load_graph``) stays the full
+        network, unaffected by compromised state.
+        """
+        compromised = self.compromised_places()
+        graph = self.load_graph()
+        return graph.without_places(compromised) if compromised else graph
 
 
 # The instance the app uses, backed by ``settings.DATA_DIR``.

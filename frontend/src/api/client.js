@@ -29,6 +29,17 @@ export function saveRoutes(routes) {
   });
 }
 
+export function getCompromised() {
+  return request("/api/compromised/");
+}
+
+export function saveCompromised(groups) {
+  return request("/api/compromised/", {
+    method: "PUT",
+    body: JSON.stringify(groups),
+  });
+}
+
 export function getGraph() {
   return request("/api/graph/");
 }

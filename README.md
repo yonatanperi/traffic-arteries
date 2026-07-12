@@ -30,9 +30,13 @@ frontend/                    React + Vite (raw CSS)
   edge tagged with the authored routes that use it — is regenerated with an atomic
   write, so the graph (adjacency reconstructed from the edges) loads straight from
   disk.
-- **Route search** (`api/graph/`) searches over `(node, active-route)` state to
-  find the route that **merges the fewest authored routes** (tiebreak: fewest
-  intersections), returning up to 3 distinct alternatives best-first.
+- **Route search** (`api/graph/`) finds the route that **rides one authored route
+  as far as possible** — the highest _concentration_ (Herfindahl) score over how
+  the route's length is split across the authored routes it stitches. Since that
+  objective is non-additive, it generates candidate corridors (one biased toward
+  each artery) and scores each exactly, returning up to 3 distinct alternatives
+  best-first. Whether "length" counts every hop or only crossroads (`degree > 2`)
+  is a togglable flag (`graph.LengthMode`).
 
 ## API
 
@@ -42,7 +46,7 @@ frontend/                    React + Vite (raw CSS)
 | GET    | `/api/routes/` | current routes list                               |
 | PUT    | `/api/routes/` | replace routes, regenerate graph (400 on invalid) |
 | GET    | `/api/graph/`  | `{nodes, links}` for the graph view               |
-| POST   | `/api/path/`   | `{start, end}` → `{paths: [...]}`                 |
+| POST   | `/api/path/`   | `{start, end}` → `{paths: [...], meta: [...]}`    |
 
 ## Running locally
 

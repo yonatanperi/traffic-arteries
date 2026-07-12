@@ -1,4 +1,4 @@
-"""Graph construction and merge-minimising route search.
+"""Graph construction and concentration-maximising route search.
 
 The public objects:
 
@@ -6,15 +6,19 @@ The public objects:
     (:meth:`Graph.from_routes`) or wrapped around a persisted adjacency dict.
     Every edge remembers which authored routes traverse it.
   * :class:`RouteFinder` — diverse route search over a ``Graph`` whose "best"
-    route merges the fewest authored routes.
-  * :class:`Route`       — one result: stops plus the authored routes it merges.
+    route rides one authored route as far as possible (highest concentration).
+  * :class:`Route`       — one result: stops, concentration, and the merged routes.
+  * :class:`LengthMode`  — static flag toggling how a run's length is measured
+    (crossroad hops only vs. every hop); :func:`evaluate` scores a chain.
 
 Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.search`
-(single-route strategies over ``(node, active-route)`` state), :mod:`.routing`
-(the diversity layer).
+(single-route generator strategies over ``(node, active-route)`` state),
+:mod:`.concentration` (the exact per-chain objective), :mod:`.routing` (candidate
+generation, scoring and diverse selection).
 """
 
+from .concentration import LengthMode, evaluate
 from .core import Graph
 from .routing import Route, RouteFinder
 
-__all__ = ["Graph", "Route", "RouteFinder"]
+__all__ = ["Graph", "Route", "RouteFinder", "LengthMode", "evaluate"]

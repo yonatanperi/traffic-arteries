@@ -20,10 +20,15 @@ import "./BrainToolbar.css";
 
 const ORDINALS = ["המיטבי", "חלופי", "חלופי נוסף"];
 
-// Compact merge-count label for a path chip ("best" = fewest merged routes).
-function mergeShort(count) {
-  if (!count) return null;
-  return count === 1 ? "ציר יחיד" : `${count} צירים`;
+// Compact label for a path chip. "Best" rides one authored route as far as
+// possible, so prefer the match (concentration) score, falling back to the
+// merge count and then the stop count.
+function chipLabel(info, stopCount) {
+  if (info?.match != null) return `התאמה ${info.match}%`;
+  if (info?.routeCount) {
+    return info.routeCount === 1 ? "ציר יחיד" : `${info.routeCount} צירים`;
+  }
+  return `${stopCount} תחנות`;
 }
 
 /**
@@ -244,7 +249,7 @@ export default function BrainToolbar({
                 >
                   {ORDINALS[i] || `ציר ${i + 1}`}
                   <span className="bt-chip-hops">
-                    {mergeShort(meta?.[i]?.routeCount) ?? `${p.length} תחנות`}
+                    {chipLabel(meta?.[i], p.length)}
                   </span>
                 </button>
               ))}

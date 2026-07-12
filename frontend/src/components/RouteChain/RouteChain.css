@@ -48,6 +48,17 @@
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+/* A destination that's part of a compromised (temporarily unavailable) group. */
+.stop--compromised {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.stop--compromised.stop--editable:hover {
+  background: rgba(248, 81, 73, 0.2);
+  border-color: var(--danger);
+}
+
 /* ---- Editable chain additions ---- */
 
 .stop--editable {

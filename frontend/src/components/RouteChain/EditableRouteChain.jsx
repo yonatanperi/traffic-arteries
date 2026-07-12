@@ -47,6 +47,8 @@ function isMatch(value, highlight) {
  *   highlight     optional lowercased query / array of queries for highlighting
  *   onRenameStop  (oldValue, newValue) => void — fired when an existing stop is
  *                 renamed, so the parent can offer to propagate the change.
+ *   compromisedPlaces  optional Set of destination names currently marked
+ *                 unavailable, painted red
  */
 export default function EditableRouteChain({
   stops,
@@ -54,6 +56,7 @@ export default function EditableRouteChain({
   suggestions,
   highlight,
   onRenameStop,
+  compromisedPlaces,
 }) {
   // Internal id-keyed model so dnd-kit and the inline editor stay stable across
   // reorders (stop values can duplicate, so they can't be used as keys).
@@ -202,6 +205,7 @@ export default function EditableRouteChain({
                         count={items.length}
                         highlight={highlight}
                         dragging={dragging}
+                        compromised={compromisedPlaces?.has(it.value)}
                         onEdit={() => setEditingId(it.id)}
                         onRemove={() => removeStop(it.id)}
                       />
@@ -227,6 +231,7 @@ function SortableStop({
   count,
   highlight,
   dragging,
+  compromised,
   onEdit,
   onRemove,
 }) {
@@ -261,7 +266,8 @@ function SortableStop({
         (index === 0 ? " stop--start" : "") +
         (index === count - 1 ? " stop--end" : "") +
         (matched ? " stop--match" : "") +
-        (isDragging ? " stop--dragging" : "")
+        (isDragging ? " stop--dragging" : "") +
+        (compromised ? " stop--compromised" : "")
       }
       {...attributes}
       {...listeners}

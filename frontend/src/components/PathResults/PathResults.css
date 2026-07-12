@@ -87,6 +87,18 @@
   font-weight: 700;
 }
 
+/* How well the route rides a single authored route (the concentration score). */
+.match-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--s-2);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 /* Which authored routes this result stitches together. */
 .merge-routes {
   display: flex;
@@ -101,6 +113,9 @@
   font-weight: 600;
 }
 .merge-route-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: var(--s-1) var(--s-2);
   border-radius: var(--r-pill);
   border: 1px solid var(--border);
@@ -108,6 +123,12 @@
   color: var(--text-muted);
   font-size: 0.78rem;
   white-space: nowrap;
+}
+
+/* The sub-route's share of the whole route's length. */
+.merge-route-share {
+  font-weight: 700;
+  color: var(--text);
 }
 
 /* Chain rendering (.chain / .stop / .chain-arrow) now lives in

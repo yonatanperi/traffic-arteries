@@ -1,13 +1,17 @@
 """Single-route search strategies over a :class:`~.core.Graph`.
 
-The objective is **merge-minimising**: a route is a stitch of authored routes,
-and we want the one that merges the *fewest* of them. Each strategy answers the
-same question in a different way: *given a map of edge penalties, what is the
-single best route right now?* — where "best" is lexicographic
-``(route transfers, crossroad hops)``. Exposing that behind a common
-:meth:`RouteStrategy.find` interface lets the diversity layer in :mod:`.routing`
-stay ignorant of whether it is finding a plain point-to-point route or one that
-must pass through required stops.
+Each strategy answers the same question in a different way: *given a map of edge
+penalties, what is the single best route right now?* — where "best" is
+lexicographic ``(route transfers, crossroad hops)``. Exposing that behind a
+common :meth:`RouteStrategy.find` interface lets the candidate-generation layer
+in :mod:`.routing` stay ignorant of whether it is finding a plain point-to-point
+route or one that must pass through required stops.
+
+These strategies are **generators**: they minimise route transfers (a good, cheap
+proxy), and the actual objective — riding one authored route as far as possible —
+is scored *exactly* per candidate in :mod:`.concentration` and used to rank them.
+Feeding a strategy a :func:`prefer_route_penalty` map biases it toward one
+artery, which is how :mod:`.routing` enumerates genuinely different corridors.
 
 A *transfer* happens whenever an edge is traversed on a different authored route
 than the previous edge — which may be at any node, transparent or not — so the
@@ -61,6 +65,22 @@ def _routes_on(graph, a, b):
     distinct synthetic route and merge-minimising degrades to fewest-edges.
     """
     return graph.routes_on(a, b) or (edge_key(a, b),)
+
+
+def prefer_route_penalty(graph, route_id, bias=TRANSFER_WEIGHT):
+    """Penalty map biasing any strategy toward *riding* ``route_id``.
+
+    Every edge whose membership excludes ``route_id`` gets ``bias`` added, so a
+    ``strategy.find(...)`` prefers to stay on ``route_id`` and only leaves it when
+    it must. Enumerating this for each authored route is how :mod:`.routing`
+    produces one candidate per dominant artery — the diversity axis that matters
+    under the concentration objective.
+    """
+    return {
+        edge_key(a, b): bias
+        for a, b, routes in graph.edge_routes_records
+        if route_id not in routes
+    }
 
 
 class RouteStrategy:

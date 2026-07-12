@@ -118,6 +118,17 @@ class Graph:
         """Sorted tuple of authored route indices that use edge ``(a, b)``."""
         return self._edge_routes.get(edge_key(a, b), ())
 
+    def route_ids(self):
+        """Sorted authored-route indices present on any edge.
+
+        The set of arteries the router can bias toward when enumerating diverse
+        alternatives (one candidate per dominant route). See :mod:`.routing`.
+        """
+        ids = set()
+        for routes in self._edge_routes.values():
+            ids.update(routes)
+        return sorted(ids)
+
     def __contains__(self, place):
         return place in self._adjacency
 
@@ -147,6 +158,21 @@ class Graph:
     def places(self):
         """Sorted list of every place in the graph (autocomplete source)."""
         return sorted(self._adjacency)
+
+    def without_places(self, places):
+        """A copy of this graph with ``places`` (and their incident edges) removed."""
+        exclude = set(places)
+        adjacency = {
+            place: [n for n in neighbours if n not in exclude]
+            for place, neighbours in self._adjacency.items()
+            if place not in exclude
+        }
+        edge_routes = {
+            edge: routes
+            for edge, routes in self._edge_routes.items()
+            if edge[0] not in exclude and edge[1] not in exclude
+        }
+        return Graph(adjacency, edge_routes)
 
     def to_network(self):
         """Shape the graph for react-force-graph-2d: ``{nodes, links}``.

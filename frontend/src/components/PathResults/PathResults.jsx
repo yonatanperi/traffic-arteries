@@ -6,7 +6,8 @@ import "./PathResults.css";
 
 const ORDINALS = ["הציר המיטבי", "ציר חלופי", "ציר חלופי נוסף"];
 
-// "Best" is the route merging the fewest authored routes, so surface that count.
+// "Best" rides one authored route as far as possible; surface how many routes it
+// stitches and the match (concentration) score.
 function mergeLabel(count) {
   if (!count) return null;
   return count === 1 ? "משלב ציר אחד" : `משלב ${count} צירים`;
@@ -66,6 +67,7 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
         const filtered = shown.length !== path.length;
         const info = meta?.[i];
         const merge = mergeLabel(info?.routeCount);
+        const match = info?.match;
         return (
           <article
             className={"result-card" + (i === 0 ? " result-card--best" : "")}
@@ -79,6 +81,9 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                 </h3>
                 <span className="result-hops">
                   {merge && <span className="merge-badge">{merge}</span>}
+                  {typeof match === "number" && (
+                    <span className="match-badge">התאמה {match}%</span>
+                  )}
                   <span>
                     {path.length} תחנות
                     {filtered && ` (${shown.length} מוצגות)`}
@@ -91,9 +96,12 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
             {info?.routes?.length > 0 && (
               <div className="merge-routes">
                 <span className="merge-routes-label">צירים:</span>
-                {info.routes.map((r) => (
-                  <span className="merge-route-chip" key={r.id}>
+                {info.routes.map((r, j) => (
+                  <span className="merge-route-chip" key={j}>
                     {r.label}
+                    {typeof r.share === "number" && (
+                      <span className="merge-route-share">{r.share}%</span>
+                    )}
                   </span>
                 ))}
               </div>

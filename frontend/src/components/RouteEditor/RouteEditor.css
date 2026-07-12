@@ -61,8 +61,16 @@
 .route-row--warn {
   border-color: rgba(251, 191, 36, 0.4);
 }
-.route-row--disconnected {
+.route-row--disconnected,
+.route-row--compromised {
   border-color: var(--danger);
+}
+/* A little extra warmth when a route includes an unavailable destination, so
+   it reads distinctly even next to a merely-disconnected route. */
+.route-row--compromised {
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px rgba(248, 81, 73, 0.18);
 }
 
 .route-row-head {

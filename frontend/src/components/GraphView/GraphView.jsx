@@ -16,6 +16,7 @@ const ACCENT_2 = "#eaff8f";
 const DIM = "#40412f";
 const TEXT = "#ffffff";
 const WARNING = "#e2c541";
+const COMPROMISED = "#f85149"; // --danger: destinations temporarily unavailable.
 const EXPORT_BG = "#141510"; // --bg-elevated, so exported PNGs aren't transparent.
 
 // Minimum screen-space gap enforced between neighbouring labels.
@@ -39,6 +40,7 @@ const GraphView = forwardRef(function GraphView(
     pathEdges = null,
     deadEndIds = null,
     highlightDeadEnds = false,
+    compromisedIds = null,
     paused = false,
   },
   ref
@@ -164,6 +166,11 @@ const GraphView = forwardRef(function GraphView(
         alpha = 0.3;
       }
 
+      // A compromised (temporarily unavailable) destination always reads red,
+      // regardless of interaction tier — only the tier's alpha still applies,
+      // so it still dims correctly when off-path/off-component.
+      if (compromisedIds?.has(node.id)) fill = COMPROMISED;
+
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
       ctx.fillStyle = fill;
@@ -190,7 +197,7 @@ const GraphView = forwardRef(function GraphView(
         ctx.stroke();
       }
     },
-    [tierOf, degree, highlightDeadEnds, deadEndIds, pathActive]
+    [tierOf, degree, highlightDeadEnds, deadEndIds, pathActive, compromisedIds]
   );
 
   /**

@@ -65,8 +65,14 @@ function analyzeConnectivity(routes) {
  *   routes     array of arrays of place names
  *   onChange   (nextRoutes) => void
  *   suggestions  list of known place names (feeds the add-stop dropdown)
+ *   compromisedPlaces  Set of destination names currently marked unavailable
  */
-export default function RouteEditor({ routes, onChange, suggestions }) {
+export default function RouteEditor({
+  routes,
+  onChange,
+  suggestions,
+  compromisedPlaces,
+}) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState([]); // filter destinations (pills)
   const [pendingRename, setPendingRename] = useState(null); // { oldValue, newValue }
@@ -195,6 +201,7 @@ export default function RouteEditor({ routes, onChange, suggestions }) {
               suggestions={suggestions}
               highlight={highlight}
               disconnected={disconnected}
+              compromisedPlaces={compromisedPlaces}
               onChangeRoute={(next) => updateRoute(i, next)}
               onRemoveRoute={() => removeRoute(i)}
               onRenameStop={requestRename}
@@ -227,18 +234,21 @@ function RouteRow({
   suggestions,
   highlight,
   disconnected,
+  compromisedPlaces,
   onChangeRoute,
   onRemoveRoute,
   onRenameStop,
 }) {
   const tooShort = route.length < 2;
+  const hasCompromised = route.some((p) => compromisedPlaces?.has(p));
 
   return (
     <div
       className={
         "route-row" +
         (tooShort ? " route-row--warn" : "") +
-        (disconnected ? " route-row--disconnected" : "")
+        (disconnected ? " route-row--disconnected" : "") +
+        (hasCompromised ? " route-row--compromised" : "")
       }
     >
       <div className="route-row-head">
@@ -251,6 +261,11 @@ function RouteRow({
         {!tooShort && disconnected && (
           <span className="route-warn route-warn--danger">
             <IconAlert size={14} /> ציר מנותק מהרשת הראשית
+          </span>
+        )}
+        {!tooShort && hasCompromised && (
+          <span className="route-warn route-warn--danger">
+            <IconAlert size={14} /> כולל יעד מושבת
           </span>
         )}
         <button
@@ -269,6 +284,7 @@ function RouteRow({
         suggestions={suggestions}
         highlight={highlight}
         onRenameStop={onRenameStop}
+        compromisedPlaces={compromisedPlaces}
       />
     </div>
   );

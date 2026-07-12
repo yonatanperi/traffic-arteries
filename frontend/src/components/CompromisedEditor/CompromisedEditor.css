@@ -1,0 +1,7 @@
+.compromised-chips {
+  margin-bottom: var(--s-4);
+}
+
+.route-row .ac {
+  max-width: 320px;
+}

@@ -46,6 +46,12 @@ export default function BrainPage() {
     [data],
   );
 
+  // Destinations temporarily marked unavailable — still shown, painted red.
+  const compromisedIds = useMemo(
+    () => new Set(data ? data.nodes.filter((n) => n.compromised).map((n) => n.id) : []),
+    [data],
+  );
+
   // Nodes / edges of the currently highlighted path (path mode only).
   const { pathNodes, pathEdges } = useMemo(() => {
     const path = pathResult?.paths?.[activePathIndex];
@@ -155,6 +161,7 @@ export default function BrainPage() {
               pathEdges={pathEdges}
               deadEndIds={metrics.deadEndIds}
               highlightDeadEnds={highlightDeadEnds}
+              compromisedIds={compromisedIds}
               paused={paused}
             />
 
