@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import RouteEditor from "../../components/RouteEditor";
-import CompromisedEditor from "../../components/CompromisedEditor";
-import Loader from "../../components/Loader";
-import PageHeader from "../../components/PageHeader";
-import { SegmentedControl } from "../../components/SegmentedControl";
-import { IconRoute, IconAlert } from "../../components/icons";
+import { useEffect, useMemo, useState } from "react";
+import RouteEditor from "../../components/routes/RouteEditor";
+import CompromisedEditor from "../../components/routes/CompromisedEditor";
+import Loader from "../../components/ui/Loader";
+import PageHeader from "../../components/ui/PageHeader";
+import Page from "../../components/layout/Page";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
+import { IconRoute, IconAlert } from "../../components/ui/icons";
+import { useAutoSave } from "../../hooks/useAutoSave.js";
 import {
   getRoutes,
   saveRoutes,
@@ -29,35 +31,33 @@ const TABS = [
     icon: IconAlert,
     title: "יעדים מושבתים",
     subtitle:
-      "סמנו יעדים שאינם זמינים באופן זמני, מקובצים לפי אירוע. יעד מושבת " +
-      "לא יילקח בחשבון בחיפוש צירים, אך יישאר גלוי (מסומן באדום) במפת הרשת. " +
+      "סמנו יעדים שאינם זמינים באופן זמני, מקובצים לפי אירוע / סיבה. " +
       "השינויים נשמרים אוטומטית.",
   },
 ];
 
 export default function RoutesPage() {
   const [activeTab, setActiveTab] = useState("routes");
-
-  const [routes, setRoutes] = useState(null);
-  const [originalRoutes, setOriginalRoutes] = useState(null);
-  const savingRoutesRef = useRef(Promise.resolve());
-
-  const [compromised, setCompromised] = useState(null);
-  const [originalCompromised, setOriginalCompromised] = useState(null);
-  const savingCompromisedRef = useRef(Promise.resolve());
-
   const [loading, setLoading] = useState(true);
+
+  // Auto-save on every edit action. Each editor calls the hook's `apply`
+  // instead of a plain setState, so each add/remove immediately persists
+  // (when the result is valid). Invalid intermediate states are held locally
+  // and saved as soon as they become valid again.
+  const routesState = useAutoSave(saveRoutes, (r) => r.every((route) => route.length >= 2));
+  const compromisedState = useAutoSave(saveCompromised, (g) => g.every((group) => group.length >= 1));
 
   useEffect(() => {
     Promise.all([getRoutes(), getCompromised()])
       .then(([routesData, compromisedData]) => {
-        setRoutes(routesData);
-        setOriginalRoutes(JSON.stringify(routesData));
-        setCompromised(compromisedData);
-        setOriginalCompromised(JSON.stringify(compromisedData));
+        routesState.seed(routesData);
+        compromisedState.seed(compromisedData);
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const routes = routesState.value;
+  const compromised = compromisedState.value;
 
   // Known place names across all routes -> autocomplete suggestions, and the
   // closed list of destinations the compromised tab picks from.
@@ -73,56 +73,18 @@ export default function RoutesPage() {
     return new Set(compromised.flat());
   }, [compromised]);
 
-  // Auto-save on every edit action. Each editor calls this instead of a plain
-  // setState, so each add/remove immediately persists (when the result is
-  // valid). Invalid intermediate states are held locally and saved as soon as
-  // they become valid again.
-  function applyRoutesChange(next) {
-    setRoutes(next);
-
-    const snapshot = JSON.stringify(next);
-    if (snapshot === originalRoutes) return; // no net change vs. what's persisted
-    if (next.some((r) => r.length < 2)) return; // wait until valid
-
-    savingRoutesRef.current = savingRoutesRef.current
-      .catch(() => {})
-      .then(async () => {
-        const saved = await saveRoutes(next);
-        setOriginalRoutes(snapshot);
-        setRoutes((cur) => (JSON.stringify(cur) === snapshot ? saved : cur));
-      });
-  }
-
-  function applyCompromisedChange(next) {
-    setCompromised(next);
-
-    const snapshot = JSON.stringify(next);
-    if (snapshot === originalCompromised) return;
-    if (next.some((g) => g.length < 1)) return; // wait until every group has a destination
-
-    savingCompromisedRef.current = savingCompromisedRef.current
-      .catch(() => {})
-      .then(async () => {
-        const saved = await saveCompromised(next);
-        setOriginalCompromised(snapshot);
-        setCompromised((cur) =>
-          JSON.stringify(cur) === snapshot ? saved : cur,
-        );
-      });
-  }
-
   if (loading) {
     return (
-      <div className="page">
+      <Page>
         <Loader label="טוען נתונים…" />
-      </div>
+      </Page>
     );
   }
 
   const tab = TABS.find((t) => t.id === activeTab);
 
   return (
-    <div className="page">
+    <Page>
       <PageHeader title={tab.title} subtitle={tab.subtitle} />
 
       <SegmentedControl
@@ -140,17 +102,17 @@ export default function RoutesPage() {
       {activeTab === "routes" ? (
         <RouteEditor
           routes={routes}
-          onChange={applyRoutesChange}
+          onChange={routesState.apply}
           suggestions={suggestions}
           compromisedPlaces={compromisedPlaces}
         />
       ) : (
         <CompromisedEditor
           groups={compromised}
-          onChange={applyCompromisedChange}
+          onChange={compromisedState.apply}
           suggestions={suggestions}
         />
       )}
-    </div>
+    </Page>
   );
 }

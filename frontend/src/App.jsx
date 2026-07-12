@@ -1,8 +1,9 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import NavBar from "./components/NavBar";
+import NavBar from "./components/layout/NavBar";
 import HomePage from "./pages/HomePage";
 import RoutesPage from "./pages/RoutesPage";
 import BrainPage from "./pages/BrainPage";
+import "./App.css";
 
 export default function App() {
   return (

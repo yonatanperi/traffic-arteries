@@ -1,0 +1,63 @@
+import Loader from "../../components/ui/Loader";
+import EmptyState from "../../components/ui/EmptyState";
+import PathResults from "../../components/home/PathResults";
+import Pill from "../../components/ui/Pill";
+import { IconAlert, IconCompass } from "../../components/ui/icons";
+import { PLACE_TYPES } from "../../utils/placeTypes.js";
+
+export default function ResultsArea({
+  loading,
+  error,
+  result,
+  presentTypes,
+  hiddenTypes,
+  onToggleType,
+}) {
+  return (
+    <section className="results-area">
+      {loading && <Loader label="מחשב צירים…" />}
+
+      {!loading && result && result.paths.length === 0 && (
+        <EmptyState
+          icon={<IconAlert size={60} />}
+          tone="warning"
+          title="לא נמצא ציר בין הנקודות"
+          message="שתי הנקודות אינן מחוברות ברשת הצירים הקיימת. נסו יעד אחר, או הוסיפו ציר מקשר בעמוד עריכת הצירים."
+        />
+      )}
+
+      {!loading && result && result.paths.length > 0 && (
+        <>
+          {presentTypes.size > 0 && (
+            <div className="type-filters">
+              {PLACE_TYPES.filter((t) => presentTypes.has(t.key)).map((t) => {
+                const active = !hiddenTypes.has(t.key);
+                return (
+                  <Pill
+                    as="button"
+                    size="md"
+                    key={t.key}
+                    className={"type-filter-chip" + (active ? "" : " type-filter-chip--off")}
+                    aria-pressed={active}
+                    onClick={() => onToggleType(t.key)}
+                  >
+                    {t.label}
+                  </Pill>
+                );
+              })}
+            </div>
+          )}
+          <PathResults paths={result.paths} meta={result.meta} hiddenTypes={hiddenTypes} />
+        </>
+      )}
+
+      {!loading && !result && !error && (
+        <EmptyState
+          icon={<IconCompass size={60} />}
+          title="מוכנים לצאת לדרך"
+          message="הזינו שתי נקודות למעלה כדי לגלות את הצירים האפשריים ביניהן."
+        />
+      )}
+    </section>
+  );
+}

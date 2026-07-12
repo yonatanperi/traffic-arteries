@@ -1,20 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import GraphView from "../../components/GraphView";
-import BrainToolbar from "../../components/BrainToolbar";
-import NodeDetailPanel from "../../components/NodeDetailPanel";
-import InsightsPanel from "../../components/InsightsPanel";
-import Loader from "../../components/Loader";
-import EmptyState from "../../components/EmptyState";
-import PageHeader from "../../components/PageHeader";
-import { IconAlert, IconNetwork } from "../../components/icons";
-import { getGraph, findPaths } from "../../api/client.js";
-import { computeMetrics, edgeKey } from "../../utils/graphMetrics.js";
+import { useRef, useState } from "react";
+import GraphView from "../../components/brain/GraphView";
+import BrainToolbar from "../../components/brain/BrainToolbar";
+import NodeDetailPanel from "../../components/brain/NodeDetailPanel";
+import InsightsPanel from "../../components/brain/InsightsPanel";
+import Loader from "../../components/ui/Loader";
+import EmptyState from "../../components/ui/EmptyState";
+import PageHeader from "../../components/ui/PageHeader";
+import Page from "../../components/layout/Page";
+import { IconAlert, IconNetwork } from "../../components/ui/icons";
+import { useGraphData } from "./useGraphData.js";
+import { usePathSearch } from "./usePathSearch.js";
 import "./BrainPage.css";
 
 export default function BrainPage() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { data, loading, error, hasGraph, metrics, placeOptions, compromisedIds } =
+    useGraphData();
+  const path = usePathSearch();
 
   const graphRef = useRef(null);
 
@@ -25,81 +26,19 @@ export default function BrainPage() {
   const [highlightDeadEnds, setHighlightDeadEnds] = useState(false);
   const [paused, setPaused] = useState(false);
 
-  // Path mode state
-  const [pathResult, setPathResult] = useState(null); // { paths } | null
-  const [pathLoading, setPathLoading] = useState(false);
-  const [pathError, setPathError] = useState("");
-  const [activePathIndex, setActivePathIndex] = useState(0);
-
-  useEffect(() => {
-    getGraph()
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const hasGraph = !loading && !error && data && data.nodes.length > 0;
-
-  const metrics = useMemo(() => (data ? computeMetrics(data) : null), [data]);
-
-  const placeOptions = useMemo(
-    () => (data ? data.nodes.map((n) => n.id) : []),
-    [data],
-  );
-
-  // Destinations temporarily marked unavailable — still shown, painted red.
-  const compromisedIds = useMemo(
-    () => new Set(data ? data.nodes.filter((n) => n.compromised).map((n) => n.id) : []),
-    [data],
-  );
-
-  // Nodes / edges of the currently highlighted path (path mode only).
-  const { pathNodes, pathEdges } = useMemo(() => {
-    const path = pathResult?.paths?.[activePathIndex];
-    if (!path) return { pathNodes: null, pathEdges: null };
-    const nodes = new Set(path);
-    const edges = new Set();
-    for (let i = 0; i < path.length - 1; i += 1) {
-      edges.add(edgeKey(path[i], path[i + 1]));
-    }
-    return { pathNodes: nodes, pathEdges: edges };
-  }, [pathResult, activePathIndex]);
-
   function focusNode(id) {
     setPinnedId(id);
     graphRef.current?.centerNode(id);
   }
 
-  async function submitPath(start, end) {
-    setPathError("");
-    setPathLoading(true);
-    setPathResult(null);
-    setPinnedId(null);
-    try {
-      const res = await findPaths(start, end);
-      setPathResult(res);
-      setActivePathIndex(0);
-    } catch (e) {
-      setPathError(e.message);
-    } finally {
-      setPathLoading(false);
-    }
-  }
-
-  function clearPath() {
-    setPathResult(null);
-    setPathError("");
-    setActivePathIndex(0);
-  }
-
   function changeMode(next) {
     setMode(next);
-    if (next === "explore") clearPath();
+    if (next === "explore") path.clearPath();
     else setPinnedId(null);
   }
 
   return (
-    <div className="page brain-page">
+    <Page className="brain-page">
       <PageHeader
         title="הצצה למוח"
         subtitle="רשת הצמתים החיה של המערכת. חפשו מקום, סמנו צומת לפרטים, או שרטטו ציר בין שתי נקודות — והציצו במבנה הפנימי של הרשת."
@@ -120,13 +59,13 @@ export default function BrainPage() {
           showInsights={showInsights}
           onToggleInsights={() => setShowInsights((v) => !v)}
           onExport={() => graphRef.current?.exportPng()}
-          onSubmitPath={submitPath}
-          onClearPath={clearPath}
-          onSelectPathIndex={setActivePathIndex}
-          pathLoading={pathLoading}
-          pathError={pathError}
-          pathResult={pathResult}
-          activePathIndex={activePathIndex}
+          onSubmitPath={path.submitPath}
+          onClearPath={path.clearPath}
+          onSelectPathIndex={path.setActivePathIndex}
+          pathLoading={path.pathLoading}
+          pathError={path.pathError}
+          pathResult={path.pathResult}
+          activePathIndex={path.activePathIndex}
         />
       )}
 
@@ -155,8 +94,8 @@ export default function BrainPage() {
               pinnedId={pinnedId}
               onPinNode={setPinnedId}
               componentOf={metrics.componentOf}
-              pathNodes={pathNodes}
-              pathEdges={pathEdges}
+              pathNodes={path.pathNodes}
+              pathEdges={path.pathEdges}
               deadEndIds={metrics.deadEndIds}
               highlightDeadEnds={highlightDeadEnds}
               compromisedIds={compromisedIds}
@@ -185,6 +124,6 @@ export default function BrainPage() {
           </>
         )}
       </div>
-    </div>
+    </Page>
   );
 }
