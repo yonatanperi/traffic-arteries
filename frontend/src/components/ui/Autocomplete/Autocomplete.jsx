@@ -91,7 +91,7 @@ export default function Autocomplete({
   const showList = open && matches.length > 0;
 
   return (
-    <div className="ac" ref={wrapRef}>
+    <div className={"ac" + (showList ? " ac--open" : "")} ref={wrapRef}>
       {label && <label className="ac-label">{label}</label>}
       <div
         className={

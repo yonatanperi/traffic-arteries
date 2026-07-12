@@ -3,6 +3,13 @@
   width: 100%;
   z-index: 1;
 }
+/* While its own dropdown is open, outrank sibling .ac instances (which all
+   sit at the shared baseline z-index above) regardless of DOM order —
+   otherwise a later-in-document sibling's box can paint over an earlier
+   one's open list. */
+.ac--open {
+  z-index: 20;
+}
 
 .ac-label {
   display: block;

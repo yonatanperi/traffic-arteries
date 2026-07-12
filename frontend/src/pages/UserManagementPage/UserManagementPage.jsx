@@ -79,12 +79,20 @@ export default function UserManagementPage() {
               </span>
               <span className="user-mgmt-actions">
                 {u.role === "user" && (
-                  <Button variant="primary" onClick={() => promote(u.personal_id)}>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => promote(u.personal_id)}
+                  >
                     הפוך לעורך
                   </Button>
                 )}
                 {u.role === "editor" && (
-                  <Button variant="danger" onClick={() => demote(u.personal_id)}>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => demote(u.personal_id)}
+                  >
                     בטל הרשאת עורך
                   </Button>
                 )}

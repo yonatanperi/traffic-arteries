@@ -62,6 +62,8 @@ function CopyButton({ path }) {
 }
 
 export default function PathResults({ paths, meta, hiddenTypes }) {
+  const [hovered, setHovered] = useState(null); // { pathIndex, chipIndex, startIndex, endIndex } | null
+
   return (
     <div className="results">
       {paths.map((path, i) => {
@@ -70,6 +72,10 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
         const info = meta?.[i];
         const merge = mergeLabel(info?.routeCount);
         const match = info?.match;
+        const highlightedStops =
+          hovered && hovered.pathIndex === i
+            ? new Set(path.slice(hovered.startIndex, hovered.endIndex + 1))
+            : null;
 
         return (
           <article
@@ -105,19 +111,39 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
               {info?.routes?.length > 0 && (
                 <div className="merge-routes">
                   <span className="merge-routes-label">צירים:</span>
-                  {info.routes.map((r, j) => (
-                    <Pill size="sm" className="merge-route-chip" key={j}>
-                      {r.label}
-                      {typeof r.share === "number" && (
-                        <span className="merge-route-share">{r.share}%</span>
-                      )}
-                    </Pill>
-                  ))}
+                  {info.routes.map((r, j) => {
+                    const isChipHovered =
+                      hovered?.pathIndex === i && hovered?.chipIndex === j;
+                    return (
+                      <Pill
+                        size="sm"
+                        className={
+                          "merge-route-chip" +
+                          (isChipHovered ? " merge-route-chip--hovered" : "")
+                        }
+                        key={j}
+                        onMouseEnter={() =>
+                          setHovered({
+                            pathIndex: i,
+                            chipIndex: j,
+                            startIndex: r.startIndex,
+                            endIndex: r.endIndex,
+                          })
+                        }
+                        onMouseLeave={() => setHovered(null)}
+                      >
+                        {r.label}
+                        {typeof r.share === "number" && (
+                          <span className="merge-route-share">{r.share}%</span>
+                        )}
+                      </Pill>
+                    );
+                  })}
                 </div>
               )}
             </div>
 
-            <RouteChain stops={shown} />
+            <RouteChain stops={shown} highlightedStops={highlightedStops} />
           </article>
         );
       })}

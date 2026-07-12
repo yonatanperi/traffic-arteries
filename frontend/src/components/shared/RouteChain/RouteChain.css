@@ -48,6 +48,13 @@
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+/* A stop highlighted because its subroute chip (PathResults) is hovered. */
+.stop--info {
+  background: var(--info-soft);
+  border-color: var(--info);
+  color: var(--info-text);
+}
+
 /* A destination that's part of a compromised (temporarily unavailable) group. */
 .stop--compromised {
   background: var(--danger-soft);
@@ -99,7 +106,12 @@
     background 0.14s var(--ease),
     color 0.14s var(--ease);
 }
-.stop:hover .stop-remove,
+/* Driven by the JS-tracked .stop--hovered class rather than raw :hover — see
+   the comment in EditableRouteChain.jsx's SortableStop for why: raw :hover
+   flickers when growing this button pushes the pill across a flex-wrap
+   boundary. :focus-within is kept as-is since keyboard focus doesn't move
+   the element, so it isn't flicker-prone. */
+.stop--hovered .stop-remove,
 .stop:focus-within .stop-remove {
   width: 18px;
   margin-inline-start: var(--s-2);
@@ -124,7 +136,7 @@
   transition: none;
 }
 /* Never reveal (or reserve room for) the remove while dragging a stop. */
-.chain--dragging .stop:hover .stop-remove,
+.chain--dragging .stop--hovered .stop-remove,
 .chain--dragging .stop-remove {
   width: 0;
   margin-inline-start: 0;

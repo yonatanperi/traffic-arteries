@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import "./SegmentedControl.css";
 
 export default function SegmentedNav({
@@ -7,12 +7,14 @@ export default function SegmentedNav({
   className,
   activeExtraClassName,
 }) {
+  const location = useLocation();
+
   return (
     <nav className={`segmented segmented--${size}` + (className ? " " + className : "")}>
       {items.map((item) => (
         <NavLink
           key={item.to}
-          to={item.to}
+          to={{ pathname: item.to, search: location.search }}
           end={item.end}
           className={({ isActive }) =>
             "segmented-item" +

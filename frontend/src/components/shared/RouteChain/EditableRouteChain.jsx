@@ -259,18 +259,41 @@ function SortableStop({
 
   const matched = isMatch(item.value, highlight);
 
+  // The remove button's reveal is driven by this JS-tracked hover state (a
+  // class), not raw CSS :hover — hovering a pill right at a flex-wrap
+  // boundary grows it (via .stop-remove's width) onto the next line, moving
+  // it out from under the cursor. Raw :hover would drop instantly, shrink the
+  // pill back, re-wrap it under the cursor, and re-trigger :hover — an
+  // infinite flicker loop. A short grace period on mouseleave absorbs that
+  // transient, single-frame hover loss instead of reacting to it.
+  const [hovered, setHovered] = useState(false);
+  const leaveTimer = useRef(null);
+
+  useEffect(() => () => clearTimeout(leaveTimer.current), []);
+
+  function handleMouseEnter() {
+    clearTimeout(leaveTimer.current);
+    setHovered(true);
+  }
+  function handleMouseLeave() {
+    leaveTimer.current = setTimeout(() => setHovered(false), 100);
+  }
+
   return (
     <span
       ref={setNodeRef}
       style={style}
       className={
         "stop stop--editable" +
+        (hovered ? " stop--hovered" : "") +
         (index === 0 ? " stop--start" : "") +
         (index === count - 1 ? " stop--end" : "") +
         (matched ? " stop--match" : "") +
         (isDragging ? " stop--dragging" : "") +
         (compromised ? " stop--compromised" : "")
       }
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       {...attributes}
       {...listeners}
       onClick={onEdit}

@@ -18,6 +18,9 @@ export default function NavBar() {
   return (
     <header className="navbar">
       <div className="navbar-inner">
+        {isAuthenticated && (
+          <span className="navbar-hello">שלום, {user.first_name}</span>
+        )}
         <div className="navbar-links">
           <SegmentedNav items={links} activeExtraClassName="nav-link--active" />
         </div>
@@ -25,17 +28,33 @@ export default function NavBar() {
         <div className="navbar-auth">
           {isAuthenticated ? (
             <>
-              <span className="navbar-hello">שלום, {user.first_name}</span>
-              <Button variant="ghost" className="navbar-auth-btn" onClick={logout}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="navbar-auth-btn"
+                onClick={logout}
+              >
                 התנתקות
               </Button>
             </>
           ) : (
             <>
-              <Button as={NavLink} to="/login" variant="ghost" className="navbar-auth-btn">
+              <Button
+                size="sm"
+                as={NavLink}
+                to="/login"
+                variant="ghost"
+                className="navbar-auth-btn"
+              >
                 התחברות
               </Button>
-              <Button as={NavLink} to="/register" variant="primary" className="navbar-auth-btn">
+              <Button
+                size="sm"
+                as={NavLink}
+                to="/register"
+                variant="ghost"
+                className="navbar-auth-btn"
+              >
                 הרשמה
               </Button>
             </>

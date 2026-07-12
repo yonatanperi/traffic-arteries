@@ -40,6 +40,12 @@
   --warning: #e2c541;
   --warning-rgb: 226, 197, 65;
   --accent-rgb: 213, 255, 64;
+  /* Info — blue, used for hover-highlighted subroute stops (distinct from the
+     lime accent and from danger/warning/success). */
+  --info: #58a6ff;
+  --info-rgb: 88, 166, 255;
+  --info-soft: rgba(88, 166, 255, 0.12);
+  --info-text: #79c0ff; /* lighter on-dark blue, for text on dark info surfaces */
 
   /* Radii */
   --r-sm: 8px;

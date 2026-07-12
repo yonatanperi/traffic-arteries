@@ -7,6 +7,7 @@ import Pill from "../../ui/Pill";
 import EditableList from "../../ui/EditableList";
 import EditableGroupRow from "../../ui/EditableGroupRow";
 import { IconSearch, IconAlert } from "../../ui/icons";
+import { useUrlParam, useUrlListParam } from "../../../hooks/useUrlParam.js";
 import "./RouteEditor.css";
 
 /**
@@ -77,8 +78,8 @@ export default function RouteEditor({
   suggestions,
   compromisedPlaces,
 }) {
-  const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState([]); // filter destinations (pills)
+  const [query, setQuery] = useUrlParam("q");
+  const [selected, setSelected] = useUrlListParam("dest"); // filter destinations (pills)
   const [pendingRename, setPendingRename] = useState(null); // { oldValue, newValue }
 
   function updateRoute(index, nextRoute) {

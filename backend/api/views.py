@@ -88,7 +88,9 @@ def path(request):
     Response: ``{"paths": [[...], ...], "meta": [{"routeCount", "match",
     "routes"}, ...]}`` — ``paths`` are the stop chains; ``meta[i]`` gives the
     match percentage (concentration) and which authored routes route ``i`` merges
-    (labelled by their endpoints). Empty lists mean no route.
+    (labelled by their endpoints, each with a ``startIndex``/``endIndex`` pair —
+    inclusive, 0-based indices into ``paths[i]`` — for the stop range it covers).
+    Empty lists mean no route.
     """
     start = (request.data.get("start") or "").strip()
     end = (request.data.get("end") or "").strip()
@@ -123,13 +125,28 @@ def path(request):
             return route[-1], route[0]
         return route[0], route[-1]
 
-    def run_meta(run, total_hops):
+    def run_meta(run, total_hops, start_index):
+        """Metadata for one run, plus its inclusive [start_index, end_index]
+        stop range within the result's `stops` list. Runs are contiguous and
+        non-overlapping in travel order (adjacent runs share their boundary
+        stop), so the caller threads a running offset of `hops` through
+        successive runs — no need to touch concentration.py."""
         origin, dest = run_endpoints(run)
         return {
             "id": run.route_id if isinstance(run.route_id, int) else -1,
             "label": f"{origin} - {dest}",
             "share": round(run.hops / total_hops * 100) if total_hops else 100,
+            "startIndex": start_index,
+            "endIndex": start_index + run.hops,
         }
+
+    def routes_meta(runs, total_hops):
+        metas = []
+        offset = 0
+        for run in runs:
+            metas.append(run_meta(run, total_hops, offset))
+            offset += run.hops
+        return metas
 
     results = RouteFinder(graph).find_routes(start, end, k=3, via=via)
     paths = [r.stops for r in results]
@@ -137,7 +154,7 @@ def path(request):
         {
             "routeCount": r.route_count,
             "match": round(r.hhi * 100),
-            "routes": [run_meta(run, r.total_hops) for run in r.runs],
+            "routes": routes_meta(r.runs, r.total_hops),
         }
         for r in results
     ]

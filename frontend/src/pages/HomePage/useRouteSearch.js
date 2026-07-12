@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getPlaces, findPaths } from "../../api/client.js";
 import { classifyPlace } from "../../utils/placeTypes.js";
 import { useOriginDestination } from "../../hooks/useOriginDestination.js";
+import { useUrlListParam } from "../../hooks/useUrlParam.js";
 
 /**
  * Owns every piece of state behind the home page's search form and results:
@@ -11,7 +12,7 @@ import { useOriginDestination } from "../../hooks/useOriginDestination.js";
 export function useRouteSearch() {
   const [places, setPlaces] = useState([]);
   const { start, setStart, end, setEnd, swap } = useOriginDestination();
-  const [vias, setVias] = useState([]); // required intermediate stops
+  const [vias, setVias] = useUrlListParam("via"); // required intermediate stops
   const [result, setResult] = useState(null); // { paths } | null
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");

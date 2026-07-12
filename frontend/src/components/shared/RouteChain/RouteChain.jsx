@@ -7,14 +7,20 @@ import "./RouteChain.css";
  * canonical route rendering used by the path results.
  *
  * props:
- *   stops      array of place names
- *   highlight  optional lowercased query; matching stops get a subtle ring
+ *   stops             array of place names
+ *   highlight         optional lowercased query; matching stops get a subtle ring
+ *   highlightedStops  optional Set<string> of place names to ring in info-blue
+ *                     (distinct from `highlight`'s search ring) — used by
+ *                     PathResults when hovering a subroute chip. Matched by
+ *                     place name, not index, since `stops` may already be a
+ *                     type-filtered subset of the full path.
  */
-export default function RouteChain({ stops, highlight }) {
+export default function RouteChain({ stops, highlight, highlightedStops }) {
   return (
     <ol className="chain">
       {stops.map((place, j) => {
         const matched = highlight && place.toLowerCase().includes(highlight);
+        const infoMatched = highlightedStops && highlightedStops.has(place);
         return (
           <li className="chain-item" key={j}>
             <span
@@ -22,7 +28,8 @@ export default function RouteChain({ stops, highlight }) {
                 "stop" +
                 (j === 0 ? " stop--start" : "") +
                 (j === stops.length - 1 ? " stop--end" : "") +
-                (matched ? " stop--match" : "")
+                (matched ? " stop--match" : "") +
+                (infoMatched ? " stop--info" : "")
               }
             >
               {place}
