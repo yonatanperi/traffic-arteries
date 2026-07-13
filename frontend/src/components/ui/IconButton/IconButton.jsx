@@ -3,6 +3,7 @@ import "./IconButton.css";
 export default function IconButton({
   size = "md",
   danger,
+  info,
   onClick,
   ariaLabel,
   ariaPressed,
@@ -18,6 +19,7 @@ export default function IconButton({
       className={
         `icon-btn icon-btn--${size}` +
         (danger ? " icon-btn--danger" : "") +
+        (info ? " icon-btn--info" : "") +
         (className ? " " + className : "")
       }
       onClick={onClick}

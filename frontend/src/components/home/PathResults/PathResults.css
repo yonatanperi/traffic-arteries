@@ -99,6 +99,14 @@
   font-size: 0.82rem;
   font-weight: 600;
 }
+/* Groups a chip with its (conditional) "edit this route" button so the pair
+   wraps together and the button sits right next to its chip. */
+.merge-route-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .merge-route-chip {
   gap: 6px;
   padding-block: var(--s-1);
@@ -121,6 +129,11 @@
 .merge-route-share {
   font-weight: 700;
   color: var(--text);
+}
+
+/* "Edit this route" — appears next to a pinned (clicked) chip. */
+.merge-route-goto {
+  animation: rise 0.16s var(--ease) both;
 }
 
 /* Chain rendering (.chain / .stop / .chain-arrow) now lives in

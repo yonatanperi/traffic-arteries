@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { IconCopy, IconCheck } from "../../ui/icons";
+import { useNavigate } from "react-router-dom";
+import { IconCopy, IconCheck, IconRoute } from "../../ui/icons";
 import { RouteChain } from "../../shared/RouteChain";
 import Pill from "../../ui/Pill";
+import IconButton from "../../ui/IconButton";
 import { classifyPlace } from "../../../utils/placeTypes.js";
+import { useAuth } from "../../../hooks/useAuth.js";
 import "./PathResults.css";
 
 const ORDINALS = ["הציר המיטבי", "ציר חלופי", "ציר חלופי נוסף"];
@@ -12,6 +15,15 @@ const ORDINALS = ["הציר המיטבי", "ציר חלופי", "ציר חלופ
 function mergeLabel(count) {
   if (!count) return null;
   return count === 1 ? "משלב ציר אחד" : `משלב ${count} צירים`;
+}
+
+// `label` is built server-side as `${origin} - ${dest}` (the authored route's
+// endpoints, see backend/api/views.py:run_meta) — split it back apart so it
+// can feed the route editor's destination filter.
+function splitLabel(label) {
+  const i = label.indexOf(" - ");
+  if (i === -1) return [label, label];
+  return [label.slice(0, i), label.slice(i + 3)];
 }
 
 // Start and end are always kept; only interior stops are subject to filtering.
@@ -63,6 +75,18 @@ function CopyButton({ path }) {
 
 export default function PathResults({ paths, meta, hiddenTypes }) {
   const [hovered, setHovered] = useState(null); // { pathIndex, chipIndex, startIndex, endIndex } | null
+  const [pinned, setPinned] = useState(null); // same shape as hovered, but set by click and sticky
+  const navigate = useNavigate();
+  const { role } = useAuth();
+  const canEditRoutes = role === "editor" || role === "admin";
+
+  function goToRoute(label) {
+    const [origin, dest] = splitLabel(label);
+    const params = new URLSearchParams();
+    params.append("dest", origin);
+    params.append("dest", dest);
+    navigate(`/routes?${params.toString()}`);
+  }
 
   return (
     <div className="results">
@@ -72,10 +96,13 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
         const info = meta?.[i];
         const merge = mergeLabel(info?.routeCount);
         const match = info?.match;
-        const highlightedStops =
-          hovered && hovered.pathIndex === i
-            ? new Set(path.slice(hovered.startIndex, hovered.endIndex + 1))
-            : null;
+        // Hovering a chip previews it even while another is pinned; once the
+        // mouse leaves, the view falls back to whatever is pinned.
+        const active =
+          hovered?.pathIndex === i ? hovered : pinned?.pathIndex === i ? pinned : null;
+        const highlightedStops = active
+          ? new Set(path.slice(active.startIndex, active.endIndex + 1))
+          : null;
 
         return (
           <article
@@ -114,29 +141,59 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                   {info.routes.map((r, j) => {
                     const isChipHovered =
                       hovered?.pathIndex === i && hovered?.chipIndex === j;
+                    const isChipPinned =
+                      pinned?.pathIndex === i && pinned?.chipIndex === j;
                     return (
-                      <Pill
-                        size="sm"
-                        className={
-                          "merge-route-chip" +
-                          (isChipHovered ? " merge-route-chip--hovered" : "")
-                        }
-                        key={j}
-                        onMouseEnter={() =>
-                          setHovered({
-                            pathIndex: i,
-                            chipIndex: j,
-                            startIndex: r.startIndex,
-                            endIndex: r.endIndex,
-                          })
-                        }
-                        onMouseLeave={() => setHovered(null)}
-                      >
-                        {r.label}
-                        {typeof r.share === "number" && (
-                          <span className="merge-route-share">{r.share}%</span>
+                      <span className="merge-route-chip-group" key={j}>
+                        <Pill
+                          as="button"
+                          size="sm"
+                          className={
+                            "merge-route-chip" +
+                            (isChipHovered || isChipPinned
+                              ? " merge-route-chip--hovered"
+                              : "")
+                          }
+                          onMouseEnter={() =>
+                            setHovered({
+                              pathIndex: i,
+                              chipIndex: j,
+                              startIndex: r.startIndex,
+                              endIndex: r.endIndex,
+                            })
+                          }
+                          onMouseLeave={() => setHovered(null)}
+                          onClick={() =>
+                            setPinned(
+                              isChipPinned
+                                ? null
+                                : {
+                                    pathIndex: i,
+                                    chipIndex: j,
+                                    startIndex: r.startIndex,
+                                    endIndex: r.endIndex,
+                                  },
+                            )
+                          }
+                        >
+                          {r.label}
+                          {typeof r.share === "number" && (
+                            <span className="merge-route-share">{r.share}%</span>
+                          )}
+                        </Pill>
+                        {isChipPinned && canEditRoutes && (
+                          <IconButton
+                            size="sm"
+                            info
+                            className="merge-route-goto"
+                            ariaLabel={`ערוך את הציר ${r.label} בעריכת צירים`}
+                            title="ערוך ציר זה"
+                            onClick={() => goToRoute(r.label)}
+                          >
+                            <IconRoute size={13} />
+                          </IconButton>
                         )}
-                      </Pill>
+                      </span>
                     );
                   })}
                 </div>

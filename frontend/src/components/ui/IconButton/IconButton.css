@@ -18,6 +18,14 @@
   color: var(--danger);
   background: var(--danger-soft);
 }
+.icon-btn--info {
+  color: var(--info-text);
+  background: var(--info-soft);
+}
+.icon-btn--info:hover {
+  color: var(--info-text);
+  background: rgba(var(--info-rgb), 0.22);
+}
 
 .icon-btn--xs {
   width: 18px;
