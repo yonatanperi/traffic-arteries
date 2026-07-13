@@ -156,6 +156,15 @@ class WaypointStrategy(RouteStrategy):
       * a required stop may only be entered when it is the *next* one due;
       * among equal-cost frontiers the earliest-discovered wins (deterministic).
 
+    Like :class:`MinMergeStrategy`, dominated states are pruned via a ``best``
+    dict keyed on ``(node, active_route, reached)`` — the same approximation:
+    the *cheapest* way to reach a state wins even though, in principle, a
+    costlier arrival could have a different visited-node history that later
+    avoids a revisit the cheap one can't. Without this pruning the search
+    re-explores the same state once per distinct path prefix, which blows up
+    combinatorially (and reliably burns through :data:`SEARCH_STATE_CAP`)
+    whenever a required stop sits on a well-connected hub.
+
     :meth:`find` returns ``(nodes, route_seq)`` or ``(None, None)`` if no simple
     route visits every stop in order.
     """
@@ -172,6 +181,7 @@ class WaypointStrategy(RouteStrategy):
         counter = itertools.count()
         # Heap entries: (cost, tie, node, active_route, reached, nodes, route_seq).
         heap = [(0.0, next(counter), points[0], None, 1, (points[0],), ())]
+        best = {(points[0], None, 1): 0.0}
         explored = 0
 
         while heap:
@@ -182,6 +192,9 @@ class WaypointStrategy(RouteStrategy):
             explored += 1
             if explored > SEARCH_STATE_CAP:
                 break
+
+            if cost > best.get((node, active, reached), float("inf")):
+                continue  # a cheaper way to this state was already settled
 
             target = points[reached]
             for neighbour in graph.neighbors(node):
@@ -199,10 +212,13 @@ class WaypointStrategy(RouteStrategy):
                 for route in _routes_on(graph, node, neighbour):
                     transfer = 0.0 if route == active else 1.0
                     new_cost = cost + TRANSFER_WEIGHT * transfer + hop + pen
-                    heapq.heappush(
-                        heap,
-                        (new_cost, next(counter), neighbour, route, new_reached,
-                         nodes + (neighbour,), route_seq + (route,)),
-                    )
+                    state = (neighbour, route, new_reached)
+                    if new_cost < best.get(state, float("inf")):
+                        best[state] = new_cost
+                        heapq.heappush(
+                            heap,
+                            (new_cost, next(counter), neighbour, route, new_reached,
+                             nodes + (neighbour,), route_seq + (route,)),
+                        )
 
         return None, None
