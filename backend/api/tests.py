@@ -6,6 +6,7 @@ from django.test import SimpleTestCase
 
 from .db import Database, ValidationError
 from .graph import Graph, LengthMode, RouteFinder, evaluate
+from .views import _split_by_compromise
 
 # The example from the spec.
 SPEC_ROUTES = [
@@ -51,6 +52,21 @@ class KShortestPathsTests(SimpleTestCase):
         # Two disjoint components -> no path between them.
         finder = RouteFinder(Graph.from_routes([["X", "Y"], ["P", "Q"]]))
         self.assertEqual(finder.k_shortest_paths("X", "Q"), [])
+
+    def test_k_none_lifts_the_cap(self):
+        # Four fully disjoint S-T corridors (one per authored route): k=3 caps
+        # at 3, k=None returns all of them since none overlaps/detours.
+        parallel_routes = [
+            ["S", "a1", "a2", "T"],
+            ["S", "b1", "b2", "T"],
+            ["S", "c1", "c2", "T"],
+            ["S", "d1", "d2", "T"],
+        ]
+        finder = RouteFinder(Graph.from_routes(parallel_routes))
+        capped = finder.find_routes("S", "T", k=3)
+        uncapped = finder.find_routes("S", "T", k=None)
+        self.assertEqual(len(capped), 3)
+        self.assertEqual(len(uncapped), 4)
 
 
 class WaypointTests(SimpleTestCase):
@@ -426,3 +442,38 @@ class CompromisedDestinationsTests(SimpleTestCase):
         # C was the only link between the two routes' halves, so it's now
         # unreachable and A-E has no route.
         self.assertEqual(finder.k_shortest_paths("A", "E"), [])
+
+
+class DetourNoticeTests(SimpleTestCase):
+    """`_split_by_compromise` (backend/api/views.py) — computed from a single
+    RouteFinder run against the FULL graph: which compromised destinations the
+    natural, unfiltered top-3 would have used, and which of the ranked results
+    are actually clean (usable as the real response)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = Database(data_dir=self.tmp.name)
+        self.db.save_routes([["A", "B", "C"], ["C", "D", "E"]])
+
+    def test_sole_connector_compromised_shows_up_in_detour(self):
+        self.db.save_compromised([["C"]])
+        results = RouteFinder(self.db.load_graph()).find_routes("A", "E", k=None)
+        clean, detour = _split_by_compromise(results, self.db.compromised_places())
+        self.assertEqual(detour, ["C"])
+        self.assertEqual(clean, [])
+
+    def test_nothing_compromised_leaves_results_untouched(self):
+        results = RouteFinder(self.db.load_graph()).find_routes("A", "E", k=None)
+        clean, detour = _split_by_compromise(results, self.db.compromised_places())
+        self.assertEqual(detour, [])
+        self.assertEqual(clean, results)
+
+    def test_unrelated_compromise_does_not_trigger_detour(self):
+        # F is an unrelated branch off C; the natural A-E route never touches it.
+        self.db.save_routes([["A", "B", "C"], ["C", "D", "E"], ["C", "F"]])
+        self.db.save_compromised([["F"]])
+        results = RouteFinder(self.db.load_graph()).find_routes("A", "E", k=None)
+        clean, detour = _split_by_compromise(results, self.db.compromised_places())
+        self.assertEqual(detour, [])
+        self.assertEqual(clean, results)

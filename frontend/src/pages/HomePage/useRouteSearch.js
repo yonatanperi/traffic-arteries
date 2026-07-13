@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getPlaces, findPaths } from "../../api/client.js";
 import { classifyPlace } from "../../utils/placeTypes.js";
 import { useOriginDestination } from "../../hooks/useOriginDestination.js";
-import { useUrlListParam } from "../../hooks/useUrlParam.js";
+import { useGetUrlParams, useSetUrlParams } from "../../hooks/useUrlParams.js";
 
 /**
  * Owns every piece of state behind the home page's search form and results:
@@ -12,7 +12,9 @@ import { useUrlListParam } from "../../hooks/useUrlParam.js";
 export function useRouteSearch() {
   const [places, setPlaces] = useState([]);
   const { start, setStart, end, setEnd, swap } = useOriginDestination();
-  const [vias, setVias] = useUrlListParam("via"); // required intermediate stops
+  const { getParam } = useGetUrlParams();
+  const { setParams } = useSetUrlParams();
+  const vias = getParam("via", { list: true }); // required intermediate stops
   const [result, setResult] = useState(null); // { paths } | null
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -60,13 +62,13 @@ export function useRouteSearch() {
   }
 
   function addVia() {
-    setVias((v) => [...v, ""]);
+    setParams({ via: [...vias, ""] });
   }
   function setVia(index, value) {
-    setVias((v) => v.map((x, i) => (i === index ? value : x)));
+    setParams({ via: vias.map((x, i) => (i === index ? value : x)) });
   }
   function removeVia(index) {
-    setVias((v) => v.filter((_, i) => i !== index));
+    setParams({ via: vias.filter((_, i) => i !== index) });
   }
 
   function toggleType(key) {

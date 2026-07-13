@@ -7,7 +7,10 @@ import Pill from "../../ui/Pill";
 import EditableList from "../../ui/EditableList";
 import EditableGroupRow from "../../ui/EditableGroupRow";
 import { IconSearch, IconAlert } from "../../ui/icons";
-import { useUrlParam, useUrlListParam } from "../../../hooks/useUrlParam.js";
+import {
+  useGetUrlParams,
+  useSetUrlParams,
+} from "../../../hooks/useUrlParams.js";
 import "./RouteEditor.css";
 
 /**
@@ -78,8 +81,13 @@ export default function RouteEditor({
   suggestions,
   compromisedPlaces,
 }) {
-  const [query, setQuery] = useUrlParam("q");
-  const [selected, setSelected] = useUrlListParam("dest"); // filter destinations (pills)
+  const { getParam } = useGetUrlParams();
+  const { setParams } = useSetUrlParams();
+  const query = getParam("q");
+  const selected = getParam("dest", { list: true }); // filter destinations (pills)
+  function setQuery(value) {
+    setParams({ q: value });
+  }
   const [pendingRename, setPendingRename] = useState(null); // { oldValue, newValue }
 
   function updateRoute(index, nextRoute) {
@@ -99,11 +107,13 @@ export default function RouteEditor({
   function addFilter(place) {
     const p = place.trim();
     if (!p) return;
-    setSelected((s) => (s.includes(p) ? s : [...s, p]));
-    setQuery("");
+    setParams({
+      dest: selected.includes(p) ? selected : [...selected, p],
+      q: null,
+    });
   }
   function removeFilter(place) {
-    setSelected((s) => s.filter((x) => x !== place));
+    setParams({ dest: selected.filter((x) => x !== place) });
   }
 
   // A stop was renamed in one route. If that name appears elsewhere too, offer

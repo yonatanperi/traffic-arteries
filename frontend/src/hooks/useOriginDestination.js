@@ -1,4 +1,4 @@
-import { useUrlParam } from "./useUrlParam.js";
+import { useGetUrlParams, useSetUrlParams } from "./useUrlParams.js";
 
 /**
  * Controlled origin/destination pair with a swap action, persisted to the
@@ -8,12 +8,19 @@ import { useUrlParam } from "./useUrlParam.js";
  * carries over when navigating to the other.
  */
 export function useOriginDestination() {
-  const [start, setStart] = useUrlParam("start");
-  const [end, setEnd] = useUrlParam("end");
+  const { getParam } = useGetUrlParams();
+  const { setParams } = useSetUrlParams();
+  const start = getParam("start");
+  const end = getParam("end");
 
+  function setStart(value) {
+    setParams({ start: value });
+  }
+  function setEnd(value) {
+    setParams({ end: value });
+  }
   function swap() {
-    setStart(end);
-    setEnd(start);
+    setParams({ start: end, end: start });
   }
 
   return { start, setStart, end, setEnd, swap };

@@ -96,6 +96,19 @@
   font-weight: 600;
 }
 
+.detour-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-md);
+  background: rgba(var(--danger-rgb), 0.1);
+  border: 1px solid rgba(var(--danger-rgb), 0.35);
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
 .results-area {
   margin-top: var(--s-6);
 }

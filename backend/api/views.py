@@ -75,6 +75,18 @@ def network(request):
     return Response(payload)
 
 
+def _split_by_compromise(results, compromised):
+    """Split ranked results (best-first) into the routes that don't touch any
+    compromised destination, and which compromised destinations the natural
+    top-3 (before filtering) would have used. Both are unchanged/empty when
+    nothing is compromised."""
+    if not compromised:
+        return results, []
+    detour = sorted({stop for r in results[:3] for stop in r.stops} & compromised)
+    clean = [r for r in results if not (compromised & set(r.stops))]
+    return clean, detour
+
+
 @api_view(["POST"])
 def path(request):
     """Top 3 routes between two points, optionally via required stops.
@@ -86,11 +98,15 @@ def path(request):
     ``via`` is optional — required intermediate stops the route must pass
     through (visited in an optimised order).
     Response: ``{"paths": [[...], ...], "meta": [{"routeCount", "match",
-    "routes"}, ...]}`` — ``paths`` are the stop chains; ``meta[i]`` gives the
-    match percentage (concentration) and which authored routes route ``i`` merges
-    (labelled by their endpoints, each with a ``startIndex``/``endIndex`` pair —
-    inclusive, 0-based indices into ``paths[i]`` — for the stop range it covers).
-    Empty lists mean no route.
+    "routes"}, ...], "compromisedDetour": [...]}`` — ``paths`` are the stop
+    chains; ``meta[i]`` gives the match percentage (concentration) and which
+    authored routes route ``i`` merges (labelled by their endpoints, each with a
+    ``startIndex``/``endIndex`` pair — inclusive, 0-based indices into
+    ``paths[i]`` — for the stop range it covers). ``compromisedDetour`` lists
+    compromised destinations that the natural (unfiltered) top-3 routes would
+    have used, had they not been temporarily unavailable — empty unless
+    ``paths`` is non-empty and a detour actually happened. Empty ``paths`` means
+    no route.
     """
     start = (request.data.get("start") or "").strip()
     end = (request.data.get("end") or "").strip()
@@ -104,7 +120,8 @@ def path(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    graph = database.load_routable_graph()
+    compromised = database.compromised_places()
+    graph = database.load_graph()
     routes = database.load_routes()  # originals, for human-readable labels
 
     def run_endpoints(run):
@@ -148,14 +165,16 @@ def path(request):
             offset += run.hops
         return metas
 
-    results = RouteFinder(graph).find_routes(start, end, k=3, via=via)
-    paths = [r.stops for r in results]
+    results = RouteFinder(graph).find_routes(start, end, k=None, via=via)
+    clean, detour = _split_by_compromise(results, compromised)
+    top = clean[:3]
+    paths = [r.stops for r in top]
     meta = [
         {
             "routeCount": r.route_count,
             "match": round(r.hhi * 100),
             "routes": routes_meta(r.runs, r.total_hops),
         }
-        for r in results
+        for r in top
     ]
-    return Response({"paths": paths, "meta": meta})
+    return Response({"paths": paths, "meta": meta, "compromisedDetour": detour if paths else []})

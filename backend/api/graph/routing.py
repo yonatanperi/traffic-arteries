@@ -103,6 +103,13 @@ class RouteFinder:
         detours around an already-short connection). "Best" is the route with the
         highest concentration — the one riding a single authored route furthest.
 
+        ``k=None`` lifts the cap entirely, returning every diverse candidate the
+        pool contains (still subject to ``max_overlap``/``max_stretch`` — not
+        literally unbounded, just uncapped by count). This is effectively free
+        compared to a small ``k``: the whole pool is generated and scored before
+        ``k`` is ever consulted, so raising (or removing) the cap doesn't repeat
+        any work — it only changes how many already-ranked results are kept.
+
         Edge cases:
           * ``start == end`` (no ``via``) -> a single trivial ``Route([start])``
           * ``start``/``end``/``via`` absent from graph -> ``[]``
@@ -283,7 +290,8 @@ class RouteFinder:
         near-duplicate of an accepted route (``max_overlap`` of its edges) nor an
         excessive detour — more than ``max_stretch`` times the best route's stop
         count. If fewer than ``k`` distinct corridors exist, fewer are returned;
-        near-duplicates never pad the list.
+        near-duplicates never pad the list. ``k=None`` keeps every candidate that
+        survives those checks, uncapped by count.
         """
         routes = [self._make_route(nodes) for nodes in chains]
         routes.sort(
@@ -302,7 +310,7 @@ class RouteFinder:
         accepted = []
         accepted_edges = []  # edge set per accepted route, parallel to ``accepted``
         for route in routes:
-            if len(accepted) >= k:
+            if k is not None and len(accepted) >= k:
                 break
             edges = frozenset(path_edges(route.stops))
             if any(edges == prior for prior in accepted_edges):

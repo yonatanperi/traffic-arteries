@@ -5,6 +5,16 @@ import Pill from "../../components/ui/Pill";
 import { IconAlert, IconCompass } from "../../components/ui/icons";
 import { PLACE_TYPES } from "../../utils/placeTypes.js";
 
+function detourMessage(destinations) {
+  const list =
+    destinations.length === 1
+      ? destinations[0]
+      : `${destinations.slice(0, -1).join(", ")} ו-${destinations[destinations.length - 1]}`;
+  return destinations.length === 1
+    ? `בשל ביטול זמני של היעד ${list}, נמצא ציר חלופי.`
+    : `בשל ביטול זמני של היעדים ${list}, נמצאו צירים חלופיים.`;
+}
+
 export default function ResultsArea({
   loading,
   error,
@@ -28,6 +38,12 @@ export default function ResultsArea({
 
       {!loading && result && result.paths.length > 0 && (
         <>
+          {result.compromisedDetour?.length > 0 && (
+            <p className="detour-notice" role="status">
+              <IconAlert size={16} />
+              {detourMessage(result.compromisedDetour)}
+            </p>
+          )}
           {presentTypes.size > 0 && (
             <div className="type-filters">
               {PLACE_TYPES.filter((t) => presentTypes.has(t.key)).map((t) => {
