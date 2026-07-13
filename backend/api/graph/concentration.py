@@ -38,7 +38,7 @@ Run = namedtuple("Run", "route_id length hops start end")
 class LengthMode:
     """Static switch for what a run's *length* means (flip to experiment).
 
-    * ``CROSSROADS_ONLY = True`` (default) — length counts crossroads
+    * ``CROSSROADS_ONLY = True`` — length counts crossroads
       (``degree > 2``); transparent shape-points don't count, consistent with the
       rest of the routing model.
     * ``CROSSROADS_ONLY = False`` — length is the plain hop count (every edge).
@@ -51,7 +51,7 @@ class LengthMode:
     the property the exact-scoring DP relies on.
     """
 
-    CROSSROADS_ONLY = True
+    CROSSROADS_ONLY = False
 
 
 def _edge_unit(graph, a, b):
