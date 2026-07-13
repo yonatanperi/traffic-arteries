@@ -127,8 +127,12 @@
    snaps shut with no transition. This keeps the pill's size identical to what
    dnd-kit measures at drag start, so the drag ghost and reorder animation don't
    jump. It stays :active through the whole drag (pointer capture), so the size
-   never changes mid-drag either. */
-.stop--editable:active .stop-remove {
+   never changes mid-drag either. `:not(:has(.stop-remove:active))` excludes a
+   press that originates on the remove button itself — :active bubbles to this
+   ancestor on mousedown regardless of JS stopPropagation, and without this
+   guard the button would yank its own pointer-events out from under the
+   cursor before the click could register. */
+.stop--editable:active:not(:has(.stop-remove:active)) .stop-remove {
   width: 0;
   margin-inline-start: 0;
   opacity: 0;

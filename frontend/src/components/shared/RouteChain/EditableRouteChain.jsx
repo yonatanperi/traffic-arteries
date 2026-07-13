@@ -310,10 +310,10 @@ function SortableStop({
           changes no layout — but it removes the clipped (overflow:hidden) child
           that otherwise smears on every GPU-transformed pill during a drag. */}
       {!dragging && (
-        <button
-          type="button"
+        <IconButton
+          size="xs"
           className="stop-remove"
-          aria-label="הסר תחנה"
+          ariaLabel="הסר תחנה"
           // Don't let the pointer down start a drag or a click-to-edit.
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -322,7 +322,7 @@ function SortableStop({
           }}
         >
           <IconClose size={13} />
-        </button>
+        </IconButton>
       )}
     </span>
   );
