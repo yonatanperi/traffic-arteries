@@ -45,6 +45,13 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(TokenObtainPairSerializer):
+    # simplejwt ships a he_IL translation for this message, but its catalog
+    # is never loaded because "rest_framework_simplejwt" itself (as opposed
+    # to just its token_blacklist sub-app) isn't in INSTALLED_APPS — so
+    # Django never discovers that locale dir. Override directly instead,
+    # matching RegisterSerializer's approach to other untranslated defaults.
+    default_error_messages = {"no_active_account": "מספר אישי או סיסמה שגויים."}
+
     def validate(self, attrs):
         data = super().validate(attrs)
         data["user"] = UserSerializer(self.user).data
