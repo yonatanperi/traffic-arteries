@@ -3,6 +3,8 @@ import { useNavigate, Link } from "react-router-dom";
 import PageHeader from "../../components/ui/PageHeader";
 import Page from "../../components/layout/Page";
 import Button from "../../components/ui/Button";
+import AuthPasswordField from "../../components/shared/AuthPasswordField";
+import { IconUser } from "../../components/ui/icons";
 import { useAuth } from "../../hooks/useAuth.js";
 import "../LoginPage/LoginPage.css";
 
@@ -40,88 +42,96 @@ export default function RegisterPage() {
 
   return (
     <Page>
-      <PageHeader title="הרשמה" subtitle="פתחו חשבון כדי להתחיל." />
+      <div className="auth-shell-container">
+        <div className="auth-shell">
+          <PageHeader title="הרשמה" subtitle="פתחו חשבון כדי להתחיל." />
 
-      <form className="auth-form card" onSubmit={handleSubmit}>
-        <label className="auth-field">
-          <span className="auth-label">מספר אישי</span>
-          <input
-            className="auth-input"
-            type="text"
-            value={personalId}
-            onChange={(e) => setPersonalId(e.target.value)}
-            autoComplete="username"
-            required
-          />
-        </label>
+          <form className="auth-form card" onSubmit={handleSubmit}>
+            <label className="auth-field">
+              <span className="auth-label">מספר אישי</span>
+              <div className="auth-input-wrap">
+                <span className="auth-input-icon" aria-hidden="true">
+                  <IconUser size={17} />
+                </span>
+                <input
+                  className="auth-input"
+                  type="text"
+                  value={personalId}
+                  onChange={(e) => setPersonalId(e.target.value)}
+                  autoComplete="username"
+                  required
+                />
+              </div>
+            </label>
 
-        <label className="auth-field">
-          <span className="auth-label">שם פרטי</span>
-          <input
-            className="auth-input"
-            type="text"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-            autoComplete="given-name"
-            required
-          />
-        </label>
+            <div className="auth-field-row">
+              <label className="auth-field">
+                <span className="auth-label">שם פרטי</span>
+                <div className="auth-input-wrap">
+                  <input
+                    className="auth-input"
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    autoComplete="given-name"
+                    required
+                  />
+                </div>
+              </label>
 
-        <label className="auth-field">
-          <span className="auth-label">שם משפחה</span>
-          <input
-            className="auth-input"
-            type="text"
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-            autoComplete="family-name"
-            required
-          />
-        </label>
+              <label className="auth-field">
+                <span className="auth-label">שם משפחה</span>
+                <div className="auth-input-wrap">
+                  <input
+                    className="auth-input"
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    autoComplete="family-name"
+                    required
+                  />
+                </div>
+              </label>
+            </div>
 
-        <label className="auth-field">
-          <span className="auth-label">סיסמה</span>
-          <input
-            className="auth-input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-            required
-          />
-        </label>
+            <AuthPasswordField
+              label="סיסמה"
+              value={password}
+              onChange={setPassword}
+              autoComplete="new-password"
+            />
 
-        <label className="auth-field">
-          <span className="auth-label">אימות סיסמה</span>
-          <input
-            className="auth-input"
-            type="password"
-            value={password2}
-            onChange={(e) => setPassword2(e.target.value)}
-            autoComplete="new-password"
-            required
-          />
-        </label>
+            <AuthPasswordField
+              label="אימות סיסמה"
+              value={password2}
+              onChange={setPassword2}
+              autoComplete="new-password"
+            />
 
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
 
-        <Button
-          type="submit"
-          variant="primary"
-          className="auth-submit"
-          disabled={loading}
-        >
-          {loading ? "נרשם…" : "הרשמה"}
-        </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              className="auth-submit"
+              disabled={loading}
+            >
+              {loading ? "נרשם…" : "הרשמה"}
+            </Button>
 
-        <p className="auth-alt">
-          כבר יש לך חשבון? <Link to="/login">התחברות</Link>
-        </p>
-      </form>
+            <div className="auth-divider" />
+
+            <p className="auth-alt">
+              כבר יש לך חשבון? <Link to="/login">התחברות</Link>
+            </p>
+          </form>
+        </div>
+      </div>
     </Page>
   );
 }

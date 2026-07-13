@@ -3,6 +3,8 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import PageHeader from "../../components/ui/PageHeader";
 import Page from "../../components/layout/Page";
 import Button from "../../components/ui/Button";
+import AuthPasswordField from "../../components/shared/AuthPasswordField";
+import { IconUser } from "../../components/ui/icons";
 import { useAuth } from "../../hooks/useAuth.js";
 import "./LoginPage.css";
 
@@ -33,55 +35,62 @@ export default function LoginPage() {
 
   return (
     <Page>
-      <PageHeader
-        title="התחברות"
-        subtitle="התחברו עם תעודת הזהות והסיסמה שלכם."
-      />
-
-      <form className="auth-form card" onSubmit={handleSubmit}>
-        <label className="auth-field">
-          <span className="auth-label">מספר אישי</span>
-          <input
-            className="auth-input"
-            type="text"
-            value={personalId}
-            onChange={(e) => setPersonalId(e.target.value)}
-            autoComplete="username"
-            required
+      <div className="auth-shell-container">
+        <div className="auth-shell">
+          <PageHeader
+            title="התחברות"
+            subtitle="התחברו עם תעודת הזהות והסיסמה שלכם."
           />
-        </label>
 
-        <label className="auth-field">
-          <span className="auth-label">סיסמה</span>
-          <input
-            className="auth-input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
-        </label>
+          <form className="auth-form card" onSubmit={handleSubmit}>
+            <label className="auth-field">
+              <span className="auth-label">מספר אישי</span>
+              <div className="auth-input-wrap">
+                <span className="auth-input-icon" aria-hidden="true">
+                  <IconUser size={17} />
+                </span>
+                <input
+                  className="auth-input"
+                  type="text"
+                  value={personalId}
+                  onChange={(e) => setPersonalId(e.target.value)}
+                  autoComplete="username"
+                  required
+                />
+              </div>
+            </label>
 
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
+            <AuthPasswordField
+              label="סיסמה"
+              value={password}
+              onChange={setPassword}
+              autoComplete="current-password"
+            />
 
-        <Button
-          type="submit"
-          variant="primary"
-          className="auth-submit"
-          disabled={loading}
-        >
-          {loading ? "מתחבר…" : "התחברות"}
-        </Button>
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
 
-        <p className="auth-alt">
-          אין לך חשבון? <Link to="/register">הרשמה</Link>
-        </p>
-      </form>
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              className="auth-submit"
+              disabled={loading}
+            >
+              {loading ? "מתחבר…" : "התחברות"}
+            </Button>
+
+            <div className="auth-divider" />
+
+            <p className="auth-alt">
+              אין לך חשבון? <Link to="/register">הרשמה</Link>
+            </p>
+          </form>
+        </div>
+      </div>
     </Page>
   );
 }

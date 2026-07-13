@@ -93,7 +93,7 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-# LANGUAGE_CODE = "he"
+LANGUAGE_CODE = "he"
 TIME_ZONE = "Asia/Jerusalem"
 USE_I18N = True
 USE_TZ = True

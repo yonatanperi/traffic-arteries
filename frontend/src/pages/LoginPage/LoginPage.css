@@ -1,10 +1,28 @@
+.auth-shell-container {
+  display: flex;
+  justify-content: center;
+}
+
+.auth-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  max-width: 460px;
+}
+
+.auth-shell .page-header {
+  margin-bottom: var(--s-6);
+}
+
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
-  max-width: 380px;
-  margin: 0 auto;
-  padding: var(--s-6);
+  gap: var(--s-5);
+  width: 100%;
+  padding: var(--s-7);
+  text-align: right;
 }
 
 .auth-field {
@@ -13,33 +31,92 @@
   gap: var(--s-2);
 }
 
+.auth-field-row {
+  display: flex;
+  gap: var(--s-4);
+}
+
+.auth-field-row .auth-field {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .auth-field-row {
+    flex-direction: column;
+  }
+}
+
 .auth-label {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-muted);
 }
 
-.auth-input {
+.auth-input-wrap {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--s-2);
   background: var(--surface-2);
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--border);
   border-radius: var(--r-md);
-  padding: var(--s-3);
-  color: var(--text);
-  font-size: 0.98rem;
-  outline: none;
+  padding: 0 var(--s-3);
   transition:
     border-color 0.2s var(--ease),
-    box-shadow 0.2s var(--ease);
+    box-shadow 0.2s var(--ease),
+    background 0.2s var(--ease);
 }
 
-.auth-input:focus {
+.auth-input-wrap:focus-within {
   border-color: var(--accent);
   box-shadow: var(--ring);
+  background: var(--surface);
+}
+
+.auth-input-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.auth-input-wrap:focus-within .auth-input-icon {
+  color: var(--accent);
+}
+
+.auth-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.02rem;
+  padding: var(--s-3) 0;
+}
+
+.auth-input::placeholder {
+  color: var(--text-faint);
+}
+
+.auth-input-toggle {
+  color: var(--text-faint);
+  flex: none;
+}
+
+.auth-input-toggle:hover {
+  color: var(--text);
 }
 
 .auth-submit {
   justify-content: center;
   margin-top: var(--s-2);
+}
+
+.auth-divider {
+  height: 1px;
+  background: var(--border);
 }
 
 .auth-alt {
@@ -51,4 +128,8 @@
 .auth-alt a {
   color: var(--accent);
   font-weight: 600;
+}
+
+.auth-alt a:hover {
+  text-decoration: underline;
 }

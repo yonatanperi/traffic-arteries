@@ -236,6 +236,47 @@ export function IconFilter(props) {
   );
 }
 
+// User — for identity fields (login/register personal id).
+export function IconUser(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="8" r="3.6" />
+      <path d="M4.5 20c1.4-3.6 4.4-5.5 7.5-5.5s6.1 1.9 7.5 5.5" />
+    </Svg>
+  );
+}
+
+// Lock — for password fields.
+export function IconLock(props) {
+  return (
+    <Svg {...props}>
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7.5a4 4 0 0 1 8 0V11" />
+    </Svg>
+  );
+}
+
+// Eye — show password.
+export function IconEye(props) {
+  return (
+    <Svg {...props}>
+      <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </Svg>
+  );
+}
+
+// Eye off — hide password.
+export function IconEyeOff(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 5.7A9.8 9.8 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a15 15 0 0 1-3.5 4.2M6.6 6.7A15.4 15.4 0 0 0 2 12s3.6 6.5 10 6.5a9.7 9.7 0 0 0 4.4-1" />
+      <path d="M9.5 9.7A2.6 2.6 0 0 0 12 14.6" />
+    </Svg>
+  );
+}
+
 // Hub — a busy node, drawn as a star burst.
 export function IconHub(props) {
   return (
