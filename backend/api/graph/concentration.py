@@ -51,7 +51,7 @@ class LengthMode:
     the property the exact-scoring DP relies on.
     """
 
-    CROSSROADS_ONLY = False
+    CROSSROADS_ONLY = True
 
 
 def _edge_unit(graph, a, b):
