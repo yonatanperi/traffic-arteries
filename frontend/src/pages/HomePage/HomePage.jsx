@@ -31,6 +31,7 @@ export default function HomePage() {
         onAddVia={search.addVia}
         onSetVia={search.setVia}
         onRemoveVia={search.removeVia}
+        invalidPlaces={search.invalidPlaces}
         loading={search.loading}
         onSubmit={handleSubmit}
       />

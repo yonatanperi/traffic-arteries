@@ -9,15 +9,31 @@ place names, walked as bidirectional chains), find the top-3 best routes
 between two places. Full-stack Django REST Framework + React, with a
 filesystem JSON store (no SQL). The UI is Hebrew/RTL.
 
-**The routing objective is concentration, not shortest-path.** "Best" means the
-route that rides one authored route as far as possible — maximizing a
-Herfindahl (HHI) score over how the route's length splits across the authored
-routes it stitches — not fewest hops and not fewest merges. This is a
-non-additive objective, so it can't be optimized inside a single shortest-path
+**The routing objective is concentration, not shortest-path**, gated by a hard
+priority tier. Each authored route carries a `priority` (int `0..3`, `0` = best).
+Ranking is lexicographic:
+
+1. **Tier** — the worst priority a route is *forced* to touch (per-edge min of the
+   routes on it, maxed along the chain). A route that stays on well-rated arteries
+   beats one that dips into a badly-rated one **however long the detour**.
+2. **Concentration** — within a tier, a priority-weighted Herfindahl (HHI) score
+   over how the route's length splits across the authored routes it stitches
+   (`w(p) = 1 - 0.2p`). Not fewest hops, not fewest merges.
+
+Both are non-additive, so they can't be optimized inside a single shortest-path
 search; `backend/api/graph/routing.py` generates a pool of candidate corridors
-(one biased toward each authored route) and scores each exactly
-(`concentration.py`) before picking the top-3 diverse results. Read the
-module docstrings in `backend/api/graph/` (`core.py`, `search.py`,
+(one biased toward each authored route, one confined to each priority tier) and
+scores each exactly (`concentration.py`) before picking the top-3 diverse results.
+Two static flags exist to experiment with: `LengthMode.CROSSROADS_ONLY` and
+`PriorityMode.HARD_TIER` (both in `concentration.py`).
+
+Priority **ranks, it never filters** — the candidate list stays complete, merely
+tier-ordered, so alternatives fall through to worse tiers rather than the result
+list collapsing to one route. Because a longer route can therefore outrank a
+shorter one, the tier is returned in the API meta and **must** stay visible in the
+UI, or it reads as a bug.
+
+Read the module docstrings in `backend/api/graph/` (`core.py`, `search.py`,
 `concentration.py`, `routing.py`) before touching the algorithm — each lays
 out the reasoning in detail and is more current than the README's "shortest
 path" framing, which describes an earlier version.
@@ -105,6 +121,9 @@ etc. almost certainly already exists.**
   on.
 - `FloatingPanel` / `FloatingPanelList[Item]` — the floating card used by the
   brain page's node detail and insights panels.
+- `Select` — the generic dropdown (a native `<select>` in design tokens), for a
+  short *closed* set of values (e.g. the route-priority picker). `Autocomplete` is
+  the one for searching a long open list of places; don't confuse the two.
 - `ConfirmModal`, `EmptyState`, `Loader`, `PageHeader`, `SegmentedControl` /
   `SegmentedNav` (tabs vs. router-linked nav), `SwapButton` (start/end swap,
   pairs with `useOriginDestination`).
@@ -129,10 +148,12 @@ search form and the brain toolbar's path mode) — reuse rather than
 re-deriving this state logic per page.
 
 `utils/`: `graphMetrics.js` (pure helpers over `{nodes, links}` for the brain
-view — degree, components, etc.) and `placeTypes.js` (classifies a place name
+view — degree, components, etc.), `placeTypes.js` (classifies a place name
 into junction/base/interchange by naming convention, e.g. `"צ. "` prefix =
 junction) — the classification regexes are the single source of truth for
-place "type" anywhere in the UI.
+place "type" anywhere in the UI — and `priorities.js` (route priority is `0..3`
+on the wire but Hebrew letters `א׳..ד׳` in the UI; this is the only place the two
+vocabularies meet, so never hardcode a letter in a component).
 
 `styles/global.css` defines the whole design-token vocabulary (`--bg`,
 `--surface*`, `--accent*`, `--text*`, `--r-*` radii, `--s-*` spacing,
@@ -144,7 +165,11 @@ values. The theme is dark-only (no light-mode branch to maintain).
 
 ### The filesystem store (`backend/api/db.py`)
 
-- **`routes.json`** is the source of truth: routes exactly as authored.
+- **`routes.json`** is the source of truth: routes exactly as authored, each
+  `{"places": [...], "priority": 0..3}`. A bare `[...]` list (the pre-priority
+  shape) still loads, as priority 0, and is upgraded on the next save. Priority is
+  deliberately **not** copied into the derived graph file — `load_graph()`
+  re-attaches it from here, so this stays the one place it lives.
 - **`edge_routes.json`** is derived and rebuilt on every save:
   `[[place_a, place_b, [authored route indices]], ...]`. The adjacency is
   reconstructed from these edges — there's no separate adjacency file. This is

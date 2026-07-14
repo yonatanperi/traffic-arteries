@@ -8,7 +8,19 @@ adjacency dict, or derived from routes with :meth:`Graph.from_routes`.
 Every edge also remembers **which authored routes traverse it** (by index), so
 the router can find the route that merges the fewest authored routes rather than
 the shortest one. See :mod:`.search`.
+
+Each authored route also carries a **priority** (``0`` = best … ``3`` = worst),
+which is what makes some arteries worth riding more than others. The graph is
+where that lives, since both the scorer (:mod:`.concentration`) and the candidate
+generators (:mod:`.search`) need it per edge.
 """
+
+# Authored-route priority: 0 is best, WORST_PRIORITY is worst. A route with no
+# stated priority (and any edge with no authored-route provenance) is best by
+# default, so a graph that knows nothing about priorities behaves exactly as it
+# did before the feature existed.
+BEST_PRIORITY = 0
+WORST_PRIORITY = 3
 
 
 def edge_key(a, b):
@@ -19,6 +31,21 @@ def edge_key(a, b):
 def path_edges(path):
     """The set of undirected edge keys that make up a path."""
     return {edge_key(a, b) for a, b in zip(path, path[1:])}
+
+
+def _priority_map(priorities):
+    """``{route index: priority}`` from a sequence parallel to the routes.
+
+    Default-priority routes are left out, so a graph where nothing is rated
+    carries an empty map and every priority lookup short-circuits.
+    """
+    if not priorities:
+        return {}
+    return {
+        index: priority
+        for index, priority in enumerate(priorities)
+        if priority != BEST_PRIORITY
+    }
 
 
 class Graph:
@@ -32,14 +59,19 @@ class Graph:
     route indices that use it. It is optional: a graph loaded adjacency-only (or
     built without route provenance) simply has no membership, and the router then
     treats every edge as its own route.
+
+    ``route_priorities`` maps an authored route index to its priority
+    (:data:`BEST_PRIORITY` … :data:`WORST_PRIORITY`). Also optional — an unrated
+    route is :data:`BEST_PRIORITY`.
     """
 
-    def __init__(self, adjacency, edge_routes=None):
+    def __init__(self, adjacency, edge_routes=None, route_priorities=None):
         """Wrap a raw ``{place: iterable of neighbours}`` mapping.
 
         Neighbours are de-duplicated and sorted, so passing either a freshly
         built adjacency or one loaded from disk yields the same normalised graph.
-        ``edge_routes`` is an optional ``{edge_key: iterable of route indices}``.
+        ``edge_routes`` is an optional ``{edge_key: iterable of route indices}``,
+        and ``route_priorities`` an optional ``{route index: priority}``.
         """
         self._adjacency = {
             place: sorted(set(neighbours)) for place, neighbours in adjacency.items()
@@ -48,15 +80,19 @@ class Graph:
             edge_key(*edge): tuple(sorted(set(routes)))
             for edge, routes in (edge_routes or {}).items()
         }
+        self._route_priorities = dict(route_priorities or {})
 
     @classmethod
-    def from_routes(cls, routes):
+    def from_routes(cls, routes, priorities=None):
         """Build a graph from routes (lists of place names).
 
         Each pair of *consecutive* places in a route becomes an undirected edge,
         tagged with that route's index in ``edge_routes``. Every place that
         appears is guaranteed a node, even if it ends up isolated. Self-loops (a
         place adjacent to itself) are ignored.
+
+        ``priorities`` is an optional sequence parallel to ``routes``; omit it and
+        every route is :data:`BEST_PRIORITY`.
         """
         adjacency = {}
         edge_routes = {}
@@ -75,16 +111,20 @@ class Graph:
                 adjacency[b].add(a)
                 edge_routes.setdefault(edge_key(a, b), set()).add(index)
 
-        return cls(adjacency, edge_routes)
+        return cls(adjacency, edge_routes, _priority_map(priorities))
 
     @classmethod
-    def from_edge_routes(cls, records):
+    def from_edge_routes(cls, records, priorities=None):
         """Build a graph from persisted ``[[a, b, [route indices]], ...]`` records.
 
         These records (see :attr:`edge_routes_records`) are the single derived
         representation of the graph: the adjacency is reconstructed from the
         edges. Every connected place appears on at least one edge, so nothing
         routable is lost.
+
+        ``priorities`` is an optional sequence indexed by authored route — it is
+        *not* part of the derived records, it comes straight from the routes file,
+        which stays the single source of truth for it.
         """
         adjacency = {}
         edge_routes = {}
@@ -92,7 +132,7 @@ class Graph:
             adjacency.setdefault(a, set()).add(b)
             adjacency.setdefault(b, set()).add(a)
             edge_routes[edge_key(a, b)] = routes
-        return cls(adjacency, edge_routes)
+        return cls(adjacency, edge_routes, _priority_map(priorities))
 
     @property
     def adjacency(self):
@@ -128,6 +168,41 @@ class Graph:
         for routes in self._edge_routes.values():
             ids.update(routes)
         return sorted(ids)
+
+    def route_priority(self, route_id):
+        """Priority of authored route ``route_id`` (``0`` = best).
+
+        Anything unrated is :data:`BEST_PRIORITY` — including the synthetic
+        edge-key "routes" a provenance-less graph falls back on, which aren't
+        authored routes at all and so can't be rated.
+        """
+        return self._route_priorities.get(route_id, BEST_PRIORITY)
+
+    def edge_priority(self, a, b):
+        """The best priority available on edge ``(a, b)``.
+
+        An edge may be carried by several authored routes; travelling it commits
+        you to *at least* the best-rated of them, so the edge's priority is their
+        minimum. This is the per-edge term the route *tier* is a max over — see
+        :func:`~.concentration.tier`.
+        """
+        routes = self.routes_on(a, b)
+        if not routes:
+            return BEST_PRIORITY
+        return min(self.route_priority(route) for route in routes)
+
+    def has_priorities(self):
+        """Whether any authored route is rated worse than :data:`BEST_PRIORITY`.
+
+        When nothing is rated, priority cannot change any ranking, so the
+        priority-aware candidate passes in :mod:`.routing` are skipped entirely
+        and the search costs exactly what it did before the feature existed.
+        """
+        return bool(self._route_priorities)
+
+    def worst_priority(self):
+        """The worst priority any authored route carries (``0`` when none are rated)."""
+        return max(self._route_priorities.values(), default=BEST_PRIORITY)
 
     def __contains__(self, place):
         return place in self._adjacency
@@ -172,7 +247,7 @@ class Graph:
             for edge, routes in self._edge_routes.items()
             if edge[0] not in exclude and edge[1] not in exclude
         }
-        return Graph(adjacency, edge_routes)
+        return Graph(adjacency, edge_routes, self._route_priorities)
 
     def to_network(self):
         """Shape the graph for react-force-graph-2d: ``{nodes, links}``.

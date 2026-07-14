@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { findPaths } from "../../api/client.js";
 import { edgeKey } from "../../utils/graphMetrics.js";
+import { unknownPlaces, unknownPlacesMessage } from "../../utils/validatePlaces.js";
 import { useWaypoints } from "../../hooks/useWaypoints.js";
 
 /**
@@ -9,19 +10,29 @@ import { useWaypoints } from "../../hooks/useWaypoints.js";
  * the node/edge sets for whichever alternative is currently highlighted on
  * the canvas.
  */
-export function usePathSearch() {
+export function usePathSearch(placeOptions = []) {
   const [pathResult, setPathResult] = useState(null); // { paths } | null
   const [pathLoading, setPathLoading] = useState(false);
   const [pathError, setPathError] = useState("");
   const [activePathIndex, setActivePathIndex] = useState(0);
   const [waypointIds, setWaypointIds] = useState(null); // stops required by the last submitted search
+  const [invalidPlaces, setInvalidPlaces] = useState(() => new Set()); // unknown place names from the last submit attempt
   const { vias, addVia, setVia, removeVia } = useWaypoints();
+
+  const placeSet = useMemo(() => new Set(placeOptions), [placeOptions]);
 
   async function submitPath(start, end) {
     setPathError("");
+    setInvalidPlaces(new Set());
+    const via = vias.map((v) => v.trim()).filter(Boolean);
+    const unknown = unknownPlaces([start, end, ...via], placeSet);
+    if (unknown.length > 0) {
+      setInvalidPlaces(new Set(unknown));
+      setPathError(unknownPlacesMessage(unknown));
+      return;
+    }
     setPathLoading(true);
     setPathResult(null);
-    const via = vias.map((v) => v.trim()).filter(Boolean);
     setWaypointIds(via.length > 0 ? new Set(via) : null);
     try {
       const res = await findPaths(start, end, via);
@@ -39,6 +50,7 @@ export function usePathSearch() {
     setPathError("");
     setActivePathIndex(0);
     setWaypointIds(null);
+    setInvalidPlaces(new Set());
   }
 
   // Nodes / edges of the currently highlighted path.
@@ -62,6 +74,7 @@ export function usePathSearch() {
     pathNodes,
     pathEdges,
     waypointIds,
+    invalidPlaces,
     submitPath,
     clearPath,
     vias,

@@ -5,6 +5,11 @@ import { RouteChain } from "../../shared/RouteChain";
 import Pill from "../../ui/Pill";
 import IconButton from "../../ui/IconButton";
 import { classifyPlace } from "../../../utils/placeTypes.js";
+import {
+  isDowngraded,
+  priorityLabel,
+  priorityLetter,
+} from "../../../utils/priorities.js";
 import { useAuth } from "../../../hooks/useAuth.js";
 import "./PathResults.css";
 
@@ -129,6 +134,19 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                     התאמה {match}%
                   </Pill>
                 )}
+                {/* Ranking puts the best priority tier first, so a longer route
+                    can legitimately outrank a shorter one. Say so, or it reads
+                    as a bug. */}
+                {isDowngraded(info?.priority) && (
+                  <Pill
+                    size="sm"
+                    tone="warning"
+                    className="priority-badge"
+                    title="הציר עובר בציר מקור בעדיפות נמוכה — לא נמצאה חלופה טובה יותר"
+                  >
+                    {priorityLabel(info.priority)}
+                  </Pill>
+                )}
                 <span>
                   {path.length} תחנות
                   {filtered && ` (${shown.length} מוצגות)`}
@@ -148,10 +166,18 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                         <Pill
                           as="button"
                           size="sm"
+                          title={
+                            isDowngraded(r.priority)
+                              ? `ציר מקור ב${priorityLabel(r.priority)}`
+                              : undefined
+                          }
                           className={
                             "merge-route-chip" +
                             (isChipHovered || isChipPinned
                               ? " merge-route-chip--hovered"
+                              : "") +
+                            (isDowngraded(r.priority)
+                              ? " merge-route-chip--downgraded"
                               : "")
                           }
                           onMouseEnter={() =>
@@ -177,6 +203,11 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                           }
                         >
                           {r.label}
+                          {isDowngraded(r.priority) && (
+                            <span className="merge-route-priority">
+                              {priorityLetter(r.priority)}
+                            </span>
+                          )}
                           {typeof r.share === "number" && (
                             <span className="merge-route-share">{r.share}%</span>
                           )}

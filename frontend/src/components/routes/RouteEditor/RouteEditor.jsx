@@ -20,22 +20,25 @@ import Pill from "../../ui/Pill";
 import IconButton from "../../ui/IconButton";
 import EditableList from "../../ui/EditableList";
 import EditableGroupRow from "../../ui/EditableGroupRow";
-import {
-  IconSearch,
-  IconAlert,
-  IconDuplicate,
-  IconPin,
-} from "../../ui/icons";
+import Select from "../../ui/Select";
+import { IconSearch, IconAlert, IconDuplicate, IconPin } from "../../ui/icons";
 import {
   useGetUrlParams,
   useSetUrlParams,
 } from "../../../hooks/useUrlParams.js";
+import {
+  BEST_PRIORITY,
+  PRIORITY_OPTIONS,
+  isDowngraded,
+} from "../../../utils/priorities.js";
 import "./RouteEditor.css";
 
 // Anything inside a route card that owns the pointer: the stop pills (they have
 // their own drag), every control, and the inline editors. A press that starts on
 // one of these must not turn into a card drag.
-const NO_ROW_DRAG = "button, input, a, .stop, .stop-edit, .ac";
+// `.sel` covers the priority dropdown's *options* too: they render inside the card,
+// and the drag sensor fires on pointerdown — before the option's own mousedown.
+const NO_ROW_DRAG = "button, input, a, .stop, .stop-edit, .ac, .sel";
 
 // Per-row view state that `routes` itself can't carry: routes.json is a plain
 // array of arrays, with no id to key a React element, a drag item or a pin by.
@@ -89,10 +92,10 @@ function analyzeConnectivity(routes) {
     if (ra !== rb) parent.set(ra, rb);
   }
 
-  routes.forEach((route) => {
-    route.forEach((place) => find(place));
-    for (let i = 1; i < route.length; i++) {
-      union(route[i - 1], route[i]);
+  routes.forEach(({ places }) => {
+    places.forEach((place) => find(place));
+    for (let i = 1; i < places.length; i++) {
+      union(places[i - 1], places[i]);
     }
   });
 
@@ -118,7 +121,7 @@ function analyzeConnectivity(routes) {
  * Full editor for the routes list.
  *
  * props:
- *   routes     array of arrays of place names
+ *   routes     array of { places: [place names], priority: 0..3 } (0 = best)
  *   onChange   (nextRoutes) => void
  *   suggestions  list of known place names (feeds the add-stop dropdown)
  *   compromisedPlaces  Set of destination names currently marked unavailable
@@ -149,14 +152,16 @@ export default function RouteEditor({
     );
   }, [routes.length]);
 
-  function updateRoute(index, nextRoute) {
+  // Every route edit is a patch onto the route object, so the fields the edit
+  // doesn't touch (notably the priority) ride along untouched.
+  function patchRoute(index, patch) {
     const next = routes.slice();
-    next[index] = nextRoute;
+    next[index] = { ...routes[index], ...patch };
     onChange(next);
   }
 
   function addRoute() {
-    onChange([...routes, []]);
+    onChange([...routes, { places: [], priority: BEST_PRIORITY }]);
     // A brand-new route is empty, so it matches no filter — pin it while one is
     // active, otherwise it would be added straight into hiding.
     setRows((prev) => [...prev, { ...newRow(), pinned: Boolean(filtering) }]);
@@ -164,7 +169,10 @@ export default function RouteEditor({
 
   function duplicateRoute(index) {
     const next = routes.slice();
-    next.splice(index + 1, 0, routes[index].slice());
+    next.splice(index + 1, 0, {
+      ...routes[index],
+      places: routes[index].places.slice(),
+    });
     onChange(next);
     setRows((prev) => {
       const nextRows = prev.slice();
@@ -183,7 +191,9 @@ export default function RouteEditor({
 
   function togglePin(index) {
     setRows((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, pinned: !row.pinned } : row)),
+      prev.map((row, i) =>
+        i === index ? { ...row, pinned: !row.pinned } : row,
+      ),
     );
   }
 
@@ -210,7 +220,7 @@ export default function RouteEditor({
   function requestRename(oldValue, newValue) {
     if (oldValue === newValue) return;
     const total = routes.reduce(
-      (n, r) => n + r.filter((p) => p === oldValue).length,
+      (n, r) => n + r.places.filter((p) => p === oldValue).length,
       0,
     );
     if (total - 1 > 0) setPendingRename({ oldValue, newValue });
@@ -218,7 +228,12 @@ export default function RouteEditor({
   function confirmRename() {
     const { oldValue, newValue } = pendingRename;
     setPendingRename(null);
-    onChange(routes.map((r) => r.map((p) => (p === oldValue ? newValue : p))));
+    onChange(
+      routes.map((r) => ({
+        ...r,
+        places: r.places.map((p) => (p === oldValue ? newValue : p)),
+      })),
+    );
   }
 
   const { find, mainRoot, componentCount } = useMemo(
@@ -234,13 +249,13 @@ export default function RouteEditor({
   const matchedIndices = routes
     .map((_, i) => i)
     .filter((i) => {
-      const route = routes[i];
+      const { places } = routes[i];
       // Every selected destination must appear somewhere in the route (any
       // order), and the live-typed text further narrows the list.
       const hasAll = selected.every((s) =>
-        route.some((p) => p.toLowerCase().includes(s.toLowerCase())),
+        places.some((p) => p.toLowerCase().includes(s.toLowerCase())),
       );
-      const hasQuery = !q || route.some((p) => p.toLowerCase().includes(q));
+      const hasQuery = !q || places.some((p) => p.toLowerCase().includes(q));
       return hasAll && hasQuery;
     });
 
@@ -318,8 +333,8 @@ export default function RouteEditor({
               const route = routes[i];
               const disconnected =
                 componentCount > 1 &&
-                route.length > 0 &&
-                find(route[0]) !== mainRoot;
+                route.places.length > 0 &&
+                find(route.places[0]) !== mainRoot;
               return (
                 <RouteRow
                   key={rows[i].id}
@@ -332,7 +347,8 @@ export default function RouteEditor({
                   pinned={rows[i].pinned}
                   filteredOut={Boolean(filtering) && !matched.has(i)}
                   compromisedPlaces={compromisedPlaces}
-                  onChangeRoute={(next) => updateRoute(i, next)}
+                  onChangePlaces={(places) => patchRoute(i, { places })}
+                  onChangePriority={(priority) => patchRoute(i, { priority })}
                   onRemoveRoute={() => removeRoute(i)}
                   onDuplicateRoute={() => duplicateRoute(i)}
                   onTogglePin={() => togglePin(i)}
@@ -358,6 +374,24 @@ export default function RouteEditor({
   );
 }
 
+/**
+ * A priority option: a dot shaded by how far the priority is from the best, then
+ * the label. The ramp is what a bare letter can't convey — that these four values
+ * are ordered, and that picking a later one costs the route something.
+ */
+function renderPriorityOption(option) {
+  return (
+    <>
+      <span
+        className="priority-dot"
+        style={{ "--priority-step": option.value }}
+        aria-hidden="true"
+      />
+      {option.label}
+    </>
+  );
+}
+
 function RouteRow({
   id,
   index,
@@ -368,17 +402,25 @@ function RouteRow({
   pinned,
   filteredOut,
   compromisedPlaces,
-  onChangeRoute,
+  onChangePlaces,
+  onChangePriority,
   onRemoveRoute,
   onDuplicateRoute,
   onTogglePin,
   onRenameStop,
 }) {
-  const tooShort = route.length < 2;
-  const hasCompromised = route.some((p) => compromisedPlaces?.has(p));
+  const { places, priority } = route;
+  const tooShort = places.length < 2;
+  const hasCompromised = places.some((p) => compromisedPlaces?.has(p));
 
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
 
   // Translate on Y only — the list is a single column, and letting a card drift
   // sideways would just detach it from the drop targets it's aiming at.
@@ -392,6 +434,7 @@ function RouteRow({
     disconnected && "route-row--disconnected",
     hasCompromised && "route-row--compromised",
     pinned && "route-row--pinned",
+    isDowngraded(priority) && "route-row--downgraded",
     isDragging && "route-row--dragging",
   ]
     .filter(Boolean)
@@ -404,15 +447,17 @@ function RouteRow({
       warn={tooShort}
       extraClassName={extraClassName}
       badge={
-        route.length >= 2 && (
+        places.length >= 2 && (
           <Pill size="sm" className="route-badge">
-            {`${route[0]} - ${route[route.length - 1]}`}
+            {`${places[0]} - ${places[places.length - 1]}`}
           </Pill>
         )
       }
       warning={
         <>
-          {tooShort && <span className="route-warn">דרושות לפחות שתי תחנות</span>}
+          {tooShort && (
+            <span className="route-warn">דרושות לפחות שתי תחנות</span>
+          )}
           {!tooShort && disconnected && (
             <span className="route-warn route-warn--danger">
               <IconAlert size={14} /> ציר מנותק מהרשת הראשית
@@ -432,9 +477,24 @@ function RouteRow({
       }
       actions={
         <>
+          <Select
+            size="md"
+            className={
+              "route-priority" +
+              (isDowngraded(priority) ? " route-priority--downgraded" : "")
+            }
+            value={priority}
+            onChange={onChangePriority}
+            options={PRIORITY_OPTIONS}
+            renderOption={renderPriorityOption}
+            aria-label={`עדיפות ציר ${index + 1}`}
+            title="עדיפות הציר — א׳ היא הטובה ביותר. ציר בעדיפות נמוכה ישמש רק אם אין דרך אחרת."
+          />
           <IconButton
             className={"route-pin" + (pinned ? " route-pin--on" : "")}
-            ariaLabel={pinned ? `בטל נעיצת ציר ${index + 1}` : `נעץ ציר ${index + 1}`}
+            ariaLabel={
+              pinned ? `בטל נעיצת ציר ${index + 1}` : `נעץ ציר ${index + 1}`
+            }
             ariaPressed={pinned}
             title={pinned ? "בטל נעיצה" : "נעץ — הציר יישאר גלוי גם בסינון"}
             onClick={onTogglePin}
@@ -461,8 +521,8 @@ function RouteRow({
       {...listeners}
     >
       <EditableRouteChain
-        stops={route}
-        onChange={onChangeRoute}
+        stops={places}
+        onChange={onChangePlaces}
         suggestions={suggestions}
         highlight={highlight}
         onRenameStop={onRenameStop}

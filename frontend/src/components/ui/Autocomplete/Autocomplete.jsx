@@ -21,6 +21,7 @@ export default function Autocomplete({
   placeholder,
   icon,
   prefix,
+  invalid,
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -97,7 +98,8 @@ export default function Autocomplete({
         className={
           "ac-field" +
           (showList ? " ac-field--open" : "") +
-          (prefix ? " ac-field--tags" : "")
+          (prefix ? " ac-field--tags" : "") +
+          (invalid ? " ac-field--invalid" : "")
         }
       >
         {icon && (

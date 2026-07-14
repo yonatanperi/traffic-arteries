@@ -83,6 +83,41 @@ def prefer_route_penalty(graph, route_id, bias=TRANSFER_WEIGHT):
     }
 
 
+def ban_weight(graph):
+    """A penalty heavy enough to outweigh *any* number of route transfers.
+
+    A simple path visits each place at most once, so it can never make more than
+    ``len(places)`` transfers, each costing :data:`TRANSFER_WEIGHT`. One unit of
+    this therefore strictly dominates the whole rest of the cost function — which
+    is what turns an additive penalty into an effective *ban*: the search will
+    accept arbitrarily many transfers before it crosses a banned edge, and only
+    crosses one when there is no other way through at all.
+    """
+    return TRANSFER_WEIGHT * (len(graph.places()) + 1)
+
+
+def avoid_priority_penalty(graph, max_priority, bias=None):
+    """Penalty map confining any strategy to arteries rated ``max_priority`` or better.
+
+    Every edge whose best-rated artery is worse than ``max_priority``
+    (:meth:`~.core.Graph.edge_priority`) is effectively banned (see
+    :func:`ban_weight`), so ``strategy.find(...)`` returns the best route that never
+    leaves that tier — however long a detour that takes — and falls back to crossing
+    a worse edge only when the tier simply doesn't connect the endpoints.
+
+    This is what puts a *tier-clean corridor* in the candidate pool at all. Scoring
+    can only rank what generation produced, and nothing else in the pool has any
+    reason to detour around a badly-rated artery. See :mod:`.routing`.
+    """
+    if bias is None:
+        bias = ban_weight(graph)
+    return {
+        edge_key(a, b): bias
+        for a, b, _ in graph.edge_routes_records
+        if graph.edge_priority(a, b) > max_priority
+    }
+
+
 class RouteStrategy:
     """A way to find one route for a given ``{edge_key: multiplier}`` penalty map.
 

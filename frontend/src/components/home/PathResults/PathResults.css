@@ -131,6 +131,28 @@
   color: var(--text);
 }
 
+/* The route's tier: the worst source-route priority it was forced to ride. Ranking
+   puts tier before length, so this is what explains a long route beating a short
+   one — it only shows when the tier actually cost something (priority > best). */
+.priority-badge {
+  font-weight: 700;
+}
+
+/* Which sub-route carried that downgrade — the badge above says the route dipped
+   into a low-priority artery, this says exactly where. */
+.merge-route-priority {
+  font-weight: 700;
+  color: var(--warning);
+}
+.merge-route-chip--downgraded {
+  border-color: rgba(var(--warning-rgb), 0.4);
+}
+/* The hover/pinned highlight still wins: it marks *which chip you're inspecting*,
+   which has to stay legible over the downgrade tint. */
+.merge-route-chip--downgraded.merge-route-chip--hovered .merge-route-priority {
+  color: var(--info-text);
+}
+
 /* "Edit this route" — appears next to a pinned (clicked) chip. */
 .merge-route-goto {
   animation: rise 0.16s var(--ease) both;

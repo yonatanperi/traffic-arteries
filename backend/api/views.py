@@ -91,22 +91,24 @@ def _split_by_compromise(results, compromised):
 def path(request):
     """Top 3 routes between two points, optionally via required stops.
 
-    "Best" is the route that rides one authored route as far as possible — the
-    highest concentration (Herfindahl) score.
+    "Best" is the route that rides one *good* authored route as far as possible:
+    the best priority tier first, then the highest concentration score.
 
     Body: ``{"start": <place>, "end": <place>, "via": [<place>, ...]}``.
     ``via`` is optional — required intermediate stops the route must pass
     through (visited in an optimised order).
     Response: ``{"paths": [[...], ...], "meta": [{"routeCount", "match",
-    "routes"}, ...], "compromisedDetour": [...]}`` — ``paths`` are the stop
-    chains; ``meta[i]`` gives the match percentage (concentration) and which
-    authored routes route ``i`` merges (labelled by their endpoints, each with a
-    ``startIndex``/``endIndex`` pair — inclusive, 0-based indices into
-    ``paths[i]`` — for the stop range it covers). ``compromisedDetour`` lists
-    compromised destinations that the natural (unfiltered) top-3 routes would
-    have used, had they not been temporarily unavailable — empty unless
-    ``paths`` is non-empty and a detour actually happened. Empty ``paths`` means
-    no route.
+    "priority", "routes"}, ...], "compromisedDetour": [...]}`` — ``paths`` are the
+    stop chains; ``meta[i]`` gives the match percentage (concentration), the
+    route's ``priority`` *tier* (the worst authored-route priority it is forced to
+    touch — why a longer route may outrank a shorter one, so the UI must surface
+    it), and which authored routes route ``i`` merges (labelled by their
+    endpoints, each with its own ``priority`` and a ``startIndex``/``endIndex``
+    pair — inclusive, 0-based indices into ``paths[i]`` — for the stop range it
+    covers). ``compromisedDetour`` lists compromised destinations that the natural
+    (unfiltered) top-3 routes would have used, had they not been temporarily
+    unavailable — empty unless ``paths`` is non-empty and a detour actually
+    happened. Empty ``paths`` means no route.
     """
     start = (request.data.get("start") or "").strip()
     end = (request.data.get("end") or "").strip()
@@ -133,14 +135,18 @@ def path(request):
         as ``מ. אלפורן → אילת``. Falls back to the run's own endpoints when the
         route is unknown or its boundary nodes aren't on the original route.
         """
-        route = routes[run.route_id] if isinstance(run.route_id, int) and 0 <= run.route_id < len(routes) else None
-        if not route:
+        places = (
+            routes[run.route_id]["places"]
+            if isinstance(run.route_id, int) and 0 <= run.route_id < len(routes)
+            else None
+        )
+        if not places:
             return run.start, run.end
-        order = {name: i for i, name in enumerate(route)}
+        order = {name: i for i, name in enumerate(places)}
         start_i, end_i = order.get(run.start), order.get(run.end)
         if start_i is not None and end_i is not None and start_i > end_i:
-            return route[-1], route[0]
-        return route[0], route[-1]
+            return places[-1], places[0]
+        return places[0], places[-1]
 
     def run_meta(run, total_hops, start_index):
         """Metadata for one run, plus its inclusive [start_index, end_index]
@@ -153,6 +159,7 @@ def path(request):
             "id": run.route_id if isinstance(run.route_id, int) else -1,
             "label": f"{origin} - {dest}",
             "share": round(run.hops / total_hops * 100) if total_hops else 100,
+            "priority": run.priority,
             "startIndex": start_index,
             "endIndex": start_index + run.hops,
         }
@@ -173,6 +180,7 @@ def path(request):
         {
             "routeCount": r.route_count,
             "match": round(r.hhi * 100),
+            "priority": r.priority,
             "routes": routes_meta(r.runs, r.total_hops),
         }
         for r in top

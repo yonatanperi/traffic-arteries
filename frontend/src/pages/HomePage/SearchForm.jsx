@@ -15,6 +15,7 @@ export default function SearchForm({
   onAddVia,
   onSetVia,
   onRemoveVia,
+  invalidPlaces,
   loading,
   onSubmit,
 }) {
@@ -28,6 +29,7 @@ export default function SearchForm({
           options={places}
           value={start}
           onChange={onStartChange}
+          invalid={invalidPlaces?.has(start.trim())}
         />
 
         <SwapButton onClick={onSwap} />
@@ -39,6 +41,7 @@ export default function SearchForm({
           options={places}
           value={end}
           onChange={onEndChange}
+          invalid={invalidPlaces?.has(end.trim())}
         />
       </div>
 
@@ -48,6 +51,7 @@ export default function SearchForm({
         onAddVia={onAddVia}
         onSetVia={onSetVia}
         onRemoveVia={onRemoveVia}
+        invalidPlaces={invalidPlaces}
       />
 
       <Button

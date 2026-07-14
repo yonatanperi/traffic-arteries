@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getPlaces, findPaths } from "../../api/client.js";
 import { classifyPlace } from "../../utils/placeTypes.js";
+import { unknownPlaces, unknownPlacesMessage } from "../../utils/validatePlaces.js";
 import { useOriginDestination } from "../../hooks/useOriginDestination.js";
 import { useWaypoints } from "../../hooks/useWaypoints.js";
 
@@ -16,7 +17,10 @@ export function useRouteSearch() {
   const [result, setResult] = useState(null); // { paths } | null
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [invalidPlaces, setInvalidPlaces] = useState(() => new Set()); // unknown place names from the last submit attempt
   const [hiddenTypes, setHiddenTypes] = useState(() => new Set()); // stop types filtered out of the results
+
+  const placeSet = useMemo(() => new Set(places), [places]);
 
   // Only interior stops are ever filtered (start/end are always kept), so a
   // filter chip is only worth showing if some route actually has one of that
@@ -42,14 +46,21 @@ export function useRouteSearch() {
 
   async function submit() {
     setError("");
+    setInvalidPlaces(new Set());
     if (!start.trim() || !end.trim()) {
       setError("יש לבחור נקודת מוצא ונקודת יעד.");
+      return;
+    }
+    const via = vias.map((v) => v.trim()).filter(Boolean);
+    const unknown = unknownPlaces([start.trim(), end.trim(), ...via], placeSet);
+    if (unknown.length > 0) {
+      setInvalidPlaces(new Set(unknown));
+      setError(unknownPlacesMessage(unknown));
       return;
     }
     setLoading(true);
     setResult(null);
     try {
-      const via = vias.map((v) => v.trim()).filter(Boolean);
       const data = await findPaths(start.trim(), end.trim(), via);
       setResult(data);
     } catch (e2) {
@@ -82,6 +93,7 @@ export function useRouteSearch() {
     result,
     loading,
     error,
+    invalidPlaces,
     hiddenTypes,
     presentTypes,
     submit,

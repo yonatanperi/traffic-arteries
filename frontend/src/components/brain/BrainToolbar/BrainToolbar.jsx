@@ -73,6 +73,7 @@ export default function BrainToolbar({
   onAddVia,
   onSetVia,
   onRemoveVia,
+  invalidPlaces,
 }) {
   const [query, setQuery] = useState("");
   const { start, setStart, end, setEnd, swap } = useOriginDestination();
@@ -194,6 +195,7 @@ export default function BrainToolbar({
               options={placeOptions}
               value={start}
               onChange={setStart}
+              invalid={invalidPlaces?.has(start.trim())}
             />
             <SwapButton onClick={swap} />
             <Autocomplete
@@ -202,6 +204,7 @@ export default function BrainToolbar({
               options={placeOptions}
               value={end}
               onChange={setEnd}
+              invalid={invalidPlaces?.has(end.trim())}
             />
           </div>
 
@@ -212,6 +215,7 @@ export default function BrainToolbar({
               onAddVia={onAddVia}
               onSetVia={onSetVia}
               onRemoveVia={onRemoveVia}
+              invalidPlaces={invalidPlaces}
             />
           </div>
 

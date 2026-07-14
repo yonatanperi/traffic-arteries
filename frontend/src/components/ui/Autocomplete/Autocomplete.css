@@ -41,6 +41,13 @@
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
+.ac-field--invalid {
+  border-color: var(--danger);
+}
+.ac-field--invalid:focus-within {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
 /* Tag mode: selected pills sit inside the field and wrap, the input taking the
    remaining space on its row. */
 .ac-field--tags {

@@ -5,7 +5,8 @@ import tempfile
 from django.test import SimpleTestCase
 
 from .db import Database, ValidationError
-from .graph import Graph, LengthMode, RouteFinder, evaluate
+from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
+from .graph.search import MinMergeStrategy, avoid_priority_penalty
 from .views import _split_by_compromise
 
 # The example from the spec.
@@ -361,6 +362,208 @@ class ConcentrationTests(SimpleTestCase):
             self.assertAlmostEqual(fwd[0].hhi, rev[0].hhi)
             # same corridor, just walked the other way
             self.assertEqual(fwd[0].stops, rev[0].stops[::-1])
+
+
+# Two S->T corridors that put the tier and the score in direct conflict:
+#   * the "patchwork" [S, c1, c2, c3, T] stitches four *well-rated* routes — poorly
+#     concentrated (it transfers at every stop) but never leaves priority 0.
+#   * the "clean ride" [S, q1, q2, T] is a single artery end to end — perfectly
+#     concentrated, and shorter — but that artery is rated below best.
+# Stubs (routes 5..9) make the interior nodes crossroads so they carry length.
+PRIORITY_ROUTES = [
+    ["S", "c1"],              # 0: patchwork, leg 1
+    ["c1", "c2"],             # 1: patchwork, leg 2
+    ["c2", "c3"],             # 2: patchwork, leg 3
+    ["c3", "T"],              # 3: patchwork, leg 4
+    ["S", "q1", "q2", "T"],   # 4: the clean single artery
+    ["c1", "z1"],             # 5..9: stubs -> the interior nodes are crossroads
+    ["c2", "z2"],
+    ["c3", "z3"],
+    ["q1", "z4"],
+    ["q2", "z5"],
+]
+# Only the clean artery is downgraded; every other route stays best-priority.
+DOWNGRADED_ARTERY = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+
+PATCHWORK = ["S", "c1", "c2", "c3", "T"]   # tier 0, score 0.28 — badly concentrated
+CLEAN_RIDE = ["S", "q1", "q2", "T"]        # tier 1, score 0.80 — but poorly rated
+
+
+class PriorityTests(SimpleTestCase):
+    """Priority is a hard tier over the concentration score: the worst authored-route
+    priority a route is forced to touch outranks how well it rides anything."""
+
+    def setUp(self):
+        self.graph = Graph.from_routes(PRIORITY_ROUTES, DOWNGRADED_ARTERY)
+        self.finder = RouteFinder(self.graph)
+
+    def test_weight_discounts_a_downgraded_artery(self):
+        # Riding one priority-1 artery end to end: a perfect ride, scored w(1) = 0.8.
+        score, runs = evaluate(self.graph, CLEAN_RIDE)
+        self.assertAlmostEqual(score, 0.8)
+        self.assertEqual([r.route_id for r in runs], [4])
+        self.assertEqual([r.priority for r in runs], [1])
+
+    def test_best_priority_artery_still_scores_a_perfect_one(self):
+        # The weighting must not move the ceiling: an unrated artery still hits 1.0.
+        graph = Graph.from_routes(PRIORITY_ROUTES)  # nothing downgraded
+        self.assertAlmostEqual(evaluate(graph, CLEAN_RIDE)[0], 1.0)
+
+    def test_tier_is_the_worst_priority_the_chain_must_touch(self):
+        self.assertEqual(tier(self.graph, PATCHWORK), 0)
+        self.assertEqual(tier(self.graph, CLEAN_RIDE), 1)
+
+    def test_hard_tier_beats_a_better_concentrated_route(self):
+        # The whole point of HARD_TIER: the patchwork rides four arteries and scores
+        # 0.28, the clean ride is a single artery at 0.80 — and the patchwork still
+        # wins, because it never leaves priority 0.
+        routes = self.finder.find_routes("S", "T", k=3)
+        self.assertEqual(routes[0].stops, PATCHWORK)
+        self.assertEqual(routes[0].priority, 0)
+        self.assertLess(routes[0].hhi, routes[1].hhi)  # it won *despite* scoring worse
+
+    def test_alternatives_fall_through_to_worse_tiers(self):
+        # Priority ranks, it never filters. The best tier holds only one corridor
+        # here, so the alternative must come from a worse tier rather than the
+        # result list collapsing to a single route.
+        routes = self.finder.find_routes("S", "T", k=3)
+        self.assertEqual(len(routes), 2)
+        self.assertEqual(routes[1].stops, CLEAN_RIDE)
+        self.assertEqual(routes[1].priority, 1)
+        self.assertAlmostEqual(routes[1].hhi, 0.8)
+
+    def test_soft_mode_lets_the_better_route_win(self):
+        # Drop the tier from the ranking and the weighted score alone decides, so
+        # the clean (if poorly-rated) ride takes the lead.
+        PriorityMode.HARD_TIER = False
+        try:
+            routes = self.finder.find_routes("S", "T", k=3)
+        finally:
+            PriorityMode.HARD_TIER = True
+        self.assertEqual(routes[0].stops, CLEAN_RIDE)
+        self.assertAlmostEqual(routes[0].hhi, 0.8)
+
+    def test_avoid_priority_penalty_finds_the_tier_clean_corridor(self):
+        # The generator pass that puts the patchwork in the pool at all: confined to
+        # priority-0 arteries, the only way from S to T is the long way round.
+        strategy = MinMergeStrategy(self.graph, "S", "T")
+        nodes, _ = strategy.find(avoid_priority_penalty(self.graph, 0))
+        self.assertEqual(nodes, PATCHWORK)
+        # Unconstrained, the same search takes the clean (downgraded) artery — which
+        # is exactly why the tier-clean corridor needs a pass of its own.
+        self.assertEqual(strategy.find({})[0], CLEAN_RIDE)
+
+
+class PriorityTierIndependenceTests(SimpleTestCase):
+    """The tier is computed from the edges, never from the winning credit
+    assignment — the two answer different questions and can disagree."""
+
+    # Every edge of S..T is carried by BOTH the downgraded through-route (0) and a
+    # well-rated single-hop route, so the chain never *has* to leave priority 0.
+    ROUTES = [
+        ["S", "u1", "u2", "u3", "T"],  # 0: the downgraded through-artery
+        ["S", "u1"],                   # 1..4: well-rated legs covering the same edges
+        ["u1", "u2"],
+        ["u2", "u3"],
+        ["u3", "T"],
+        ["u1", "z1"],                  # 5..7: stubs -> interior nodes are crossroads
+        ["u2", "z2"],
+        ["u3", "z3"],
+    ]
+    PRIORITIES = [2, 0, 0, 0, 0, 0, 0, 0]
+    CHAIN = ["S", "u1", "u2", "u3", "T"]
+
+    def setUp(self):
+        self.graph = Graph.from_routes(self.ROUTES, self.PRIORITIES)
+
+    def test_score_credits_the_long_run_to_the_downgraded_artery(self):
+        # One 6-long run on the priority-2 artery scores 0.6·36/36 = 0.6; splitting
+        # the same chain across the four well-rated legs scores only 10/36 ≈ 0.28.
+        # So the score-maximising assignment rides the *downgraded* artery.
+        score, runs = evaluate(self.graph, self.CHAIN)
+        self.assertAlmostEqual(score, 0.6)
+        self.assertEqual([r.route_id for r in runs], [0])
+        self.assertEqual([r.priority for r in runs], [2])
+
+    def test_tier_is_still_best_because_the_chain_never_has_to_leave_it(self):
+        # Read off those runs, the chain would look priority-2. But every edge is
+        # *also* on a priority-0 route, so nothing forces the downgrade: tier 0.
+        self.assertEqual(tier(self.graph, self.CHAIN), 0)
+
+
+class PriorityCostGuardTests(SimpleTestCase):
+    """With nothing downgraded, priority cannot change any ranking — so none of the
+    priority-aware machinery may run."""
+
+    def test_unrated_graph_reports_no_priorities(self):
+        graph = Graph.from_routes(SPEC_ROUTES)
+        self.assertFalse(graph.has_priorities())
+        self.assertEqual(graph.worst_priority(), 0)
+        # `worst_priority() == 0` is what zeroes the per-tier generation loop, and
+        # `has_priorities()` what skips the per-artery one.
+        self.assertEqual(list(range(graph.worst_priority())), [])
+
+    def test_explicit_all_best_priorities_are_still_no_priorities(self):
+        # Passing all-zeroes is the same as passing nothing — the common case once
+        # the editor writes an explicit priority onto every route.
+        graph = Graph.from_routes(SPEC_ROUTES, [0, 0, 0])
+        self.assertFalse(graph.has_priorities())
+
+    def test_unrated_graph_scores_exactly_as_before(self):
+        graph = Graph.from_routes(SPEC_ROUTES)
+        routes = RouteFinder(graph).find_routes("K", "M", k=3)
+        self.assertEqual(routes[0].stops, ["K", "J", "E", "G", "N", "M"])
+        self.assertEqual(routes[0].priority, 0)
+
+
+class RoutePriorityStorageTests(SimpleTestCase):
+    """routes.json stores {places, priority}; the bare-list shape predating
+    priorities still loads, as all-best-priority."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = Database(data_dir=self.tmp.name)
+
+    def test_saves_and_loads_priority(self):
+        saved = self.db.save_routes(
+            [{"places": ["A", "B", "C"], "priority": 2}, {"places": ["C", "D"], "priority": 0}]
+        )
+        self.assertEqual(saved[0], {"places": ["A", "B", "C"], "priority": 2})
+        self.assertEqual(self.db.load_routes(), saved)
+        self.assertEqual(self.db.load_graph().route_priority(0), 2)
+
+    def test_legacy_bare_lists_load_as_best_priority(self):
+        # Written before priorities existed; must still load, and be upgraded on save.
+        self.db.save_routes([["A", "B", "C"]])
+        self.assertEqual(self.db.load_routes(), [{"places": ["A", "B", "C"], "priority": 0}])
+        self.assertFalse(self.db.load_graph().has_priorities())
+
+    def test_priority_survives_the_derived_graph_rebuild(self):
+        # Priorities live only in routes.json — edge_routes.json never carries them,
+        # so this proves they're re-attached on load rather than lost.
+        self.db.save_routes([{"places": ["A", "B", "C"], "priority": 3}])
+        graph = self.db.load_graph()
+        self.assertEqual(graph.edge_priority("A", "B"), 3)
+        self.assertEqual(graph.worst_priority(), 3)
+
+    def test_routable_graph_keeps_priorities(self):
+        self.db.save_routes(
+            [{"places": ["A", "B", "C"], "priority": 2}, {"places": ["C", "D"], "priority": 0}]
+        )
+        self.db.save_compromised([["D"]])
+        self.assertEqual(self.db.load_routable_graph().route_priority(0), 2)
+
+    def test_rejects_out_of_range_priority(self):
+        with self.assertRaises(ValidationError):
+            self.db.save_routes([{"places": ["A", "B"], "priority": 4}])
+        with self.assertRaises(ValidationError):
+            self.db.save_routes([{"places": ["A", "B"], "priority": -1}])
+
+    def test_rejects_non_integer_priority(self):
+        for bad in ("1", 1.5, None, True):
+            with self.assertRaises(ValidationError):
+                self.db.save_routes([{"places": ["A", "B"], "priority": bad}])
 
 
 class GraphShapeTests(SimpleTestCase):

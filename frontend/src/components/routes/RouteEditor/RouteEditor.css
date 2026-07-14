@@ -70,6 +70,38 @@
   font-weight: 500;
 }
 
+/* The four priorities are an ordered ramp, so the dot fades from the accent (best)
+   toward the warning colour (worst) — `--priority-step` is the 0..3 value. Mixing
+   in one channel keeps it a single expression instead of four hardcoded colours. */
+.priority-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent); /* fallback if color-mix() is unsupported */
+  background: color-mix(
+    in srgb,
+    var(--warning) calc(var(--priority-step) * 33%),
+    var(--accent)
+  );
+  opacity: calc(1 - var(--priority-step) * 0.15);
+}
+
+/* A route rated below the best is used only when nothing better connects, so the
+   card carries a standing warning tint — the same "this costs you something"
+   language as the compromised state, a step down in severity. */
+.route-row--downgraded {
+  border-color: rgba(var(--warning-rgb), 0.45);
+}
+.route-priority--downgraded .sel-field {
+  color: var(--warning);
+  border-color: rgba(var(--warning-rgb), 0.45);
+  background: rgba(var(--warning-rgb), 0.1);
+}
+.route-priority--downgraded .sel-field:hover {
+  background: rgba(var(--warning-rgb), 0.16);
+}
+
 .route-row--disconnected,
 .route-row--compromised {
   border-color: var(--danger);

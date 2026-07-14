@@ -2,8 +2,10 @@
 
 A :class:`Database` owns two JSON files under ``backend/data``:
 
-  * ``routes.json``      — the source of truth: the routes exactly as authored
-    (lists of place names).
+  * ``routes.json``      — the source of truth: the routes exactly as authored,
+    each ``{"places": [place names], "priority": 0..3}`` (``0`` = best). The
+    priority is *not* copied into the derived graph file — it is re-attached from
+    here on every load, so this stays the one place it lives.
   * ``edge_routes.json`` — the derived graph, rebuilt on every save so it can be
     loaded straight from disk without recomputation. Each record is
     ``[place_a, place_b, [authored route indices on that edge]]``: it carries both
@@ -28,7 +30,7 @@ import tempfile
 
 from django.conf import settings
 
-from .graph import Graph
+from .graph import BEST_PRIORITY, WORST_PRIORITY, Graph
 
 
 # How many stops a single hop may be elaborated with when re-inserting skipped
@@ -48,6 +50,19 @@ CONFIRMED_MIN_ROUTES = 2
 
 class ValidationError(ValueError):
     """Raised when incoming routes are malformed."""
+
+
+# A route is stored as ``{"places": [...], "priority": int}``. These two readers
+# also accept the bare ``[...]`` list the file used before priorities existed, so
+# an un-upgraded routes.json still loads (as all-best-priority).
+def route_places(route):
+    """The place-name chain of a stored route, whichever shape it is in."""
+    return list(route["places"] if isinstance(route, dict) else route)
+
+
+def route_priority(route):
+    """The priority of a stored route (``BEST_PRIORITY`` if it doesn't state one)."""
+    return route.get("priority", BEST_PRIORITY) if isinstance(route, dict) else BEST_PRIORITY
 
 
 class Database:
@@ -92,18 +107,32 @@ class Database:
     def validate_routes(routes):
         """Validate and normalise routes. Returns cleaned routes or raises.
 
-        Rules: ``routes`` is a list; each route is a list of at least two
-        non-empty strings. Place names are trimmed of surrounding whitespace.
+        Rules: ``routes`` is a list; each route is either a bare list of place
+        names or ``{"places": [...], "priority": int}``, holding at least two
+        non-empty places. Place names are trimmed of surrounding whitespace, and
+        ``priority`` must be an int in ``[BEST_PRIORITY, WORST_PRIORITY]``.
+
+        Both shapes are accepted so a routes file written before priorities existed
+        still loads — a bare list simply means :data:`~.graph.BEST_PRIORITY`. The
+        output is always the object form, so the file is upgraded on the next save.
         """
         if not isinstance(routes, list):
             raise ValidationError("הנתונים חייבים להיות רשימה של צירים.")
 
         cleaned = []
         for index, route in enumerate(routes):
-            if not isinstance(route, list):
+            if isinstance(route, list):
+                raw_places, raw_priority = route, BEST_PRIORITY
+            elif isinstance(route, dict):
+                raw_places = route.get("places")
+                raw_priority = route.get("priority", BEST_PRIORITY)
+                if not isinstance(raw_places, list):
+                    raise ValidationError(f"ציר מספר {index + 1} אינו רשימה.")
+            else:
                 raise ValidationError(f"ציר מספר {index + 1} אינו רשימה.")
+
             places = []
-            for place in route:
+            for place in raw_places:
                 if not isinstance(place, str) or not place.strip():
                     raise ValidationError(
                         f"ציר מספר {index + 1} מכיל שם מקום ריק או לא תקין."
@@ -113,7 +142,17 @@ class Database:
                 raise ValidationError(
                     f"ציר מספר {index + 1} חייב לכלול לפחות שתי נקודות."
                 )
-            cleaned.append(places)
+
+            # bool is an int subclass, and True would silently become priority 1.
+            if isinstance(raw_priority, bool) or not isinstance(raw_priority, int):
+                raise ValidationError(f"עדיפות של ציר מספר {index + 1} אינה תקינה.")
+            if not BEST_PRIORITY <= raw_priority <= WORST_PRIORITY:
+                raise ValidationError(
+                    f"עדיפות של ציר מספר {index + 1} חייבת להיות בין "
+                    f"{BEST_PRIORITY} ל-{WORST_PRIORITY}."
+                )
+
+            cleaned.append({"places": places, "priority": raw_priority})
         return cleaned
 
     @staticmethod
@@ -165,14 +204,20 @@ class Database:
     def _rebuild_graph(self, routes, lazy_gap=LAZY_GAP, confirmed_gap=CONFIRMED_GAP):
         """Derive and persist the graph from ``routes``.
 
-        The routes are first passed through :meth:`fill_missing_destinations` so
-        the graph is built from the *filled* routes, while ``routes.json`` (the
-        caller's responsibility) keeps the originals. The edges are persisted with
-        their authored-route membership; filled route indices match ``routes.json``
-        (filling preserves route order and endpoints).
+        The routes' place chains are first passed through
+        :meth:`fill_missing_destinations` so the graph is built from the *filled*
+        routes, while ``routes.json`` (the caller's responsibility) keeps the
+        originals. The edges are persisted with their authored-route membership;
+        filled route indices match ``routes.json`` (filling preserves route order
+        and endpoints).
+
+        Only the edges are persisted — priorities are *not* derived data, so they
+        stay in ``routes.json`` and are re-attached at load time.
         """
-        filled = self.fill_missing_destinations(routes, lazy_gap, confirmed_gap)
-        graph = Graph.from_routes(filled)
+        filled = self.fill_missing_destinations(
+            [route_places(route) for route in routes], lazy_gap, confirmed_gap
+        )
+        graph = Graph.from_routes(filled, [route_priority(route) for route in routes])
         self._atomic_write_json(self.edge_routes_file, graph.edge_routes_records)
         return graph
 
@@ -277,13 +322,29 @@ class Database:
     # --- public API --------------------------------------------------------
 
     def load_routes(self):
+        """The authored routes, always in the ``{"places", "priority"}`` shape.
+
+        A routes file written before priorities existed holds bare lists; it is
+        normalised here (as all-best-priority) so every caller sees one shape, and
+        rewritten in the new shape on the next save.
+        """
         self._ensure_files()
-        return self._read_json(self.routes_file)
+        return [
+            {"places": route_places(route), "priority": route_priority(route)}
+            for route in self._read_json(self.routes_file)
+        ]
 
     def load_graph(self):
-        """Load the pre-built graph (edges + route membership) from disk."""
+        """Load the pre-built graph (edges + route membership) from disk.
+
+        The edges come from the derived file; the priorities come from
+        ``routes.json``, which stays their single source of truth.
+        """
         self._ensure_files()
-        return Graph.from_edge_routes(self._read_json(self.edge_routes_file))
+        return Graph.from_edge_routes(
+            self._read_json(self.edge_routes_file),
+            [route["priority"] for route in self.load_routes()],
+        )
 
     def save_routes(self, routes):
         """Validate, persist routes, and regenerate the derived graph.

@@ -15,7 +15,7 @@ import "./BrainPage.css";
 export default function BrainPage() {
   const { data, loading, error, hasGraph, metrics, placeOptions, compromisedIds } =
     useGraphData();
-  const path = usePathSearch();
+  const path = usePathSearch(placeOptions);
 
   const graphRef = useRef(null);
 
@@ -70,6 +70,7 @@ export default function BrainPage() {
           onAddVia={path.addVia}
           onSetVia={path.setVia}
           onRemoveVia={path.removeVia}
+          invalidPlaces={path.invalidPlaces}
         />
       )}
 

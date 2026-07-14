@@ -1,0 +1,124 @@
+.sel {
+  position: relative;
+  display: inline-block;
+  z-index: 1;
+}
+/* While its own list is open, outrank sibling selects regardless of DOM order,
+   so a later one's field can't paint over this one's list (same reasoning as .ac). */
+.sel--open {
+  z-index: 20;
+}
+
+.sel-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 4px var(--s-2);
+  cursor: pointer;
+  transition:
+    border-color 0.15s var(--ease),
+    background 0.15s var(--ease),
+    box-shadow 0.15s var(--ease);
+}
+.sel-field:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.sel-field:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.sel-field--open {
+  border-color: var(--accent);
+}
+
+.sel-value {
+  flex: 1;
+  text-align: start;
+  white-space: nowrap;
+}
+
+/* IconChevron points inline-start ("<"); a quarter turn makes it point down, and
+   it flips up while the list is open. */
+.sel-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(-90deg);
+  transition: transform 0.16s var(--ease);
+}
+.sel-field--open .sel-chevron {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+.sel-list {
+  position: absolute;
+  z-index: 1000;
+  top: calc(100% + 4px);
+  inset-inline-start: 0;
+  min-width: 100%;
+  margin: 0;
+  padding: var(--s-1);
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-lg);
+  /* Its own keyframe rather than Autocomplete's identically-named one — CSS
+     keyframes are global, and Select must not depend on that file being loaded. */
+  animation: sel-dropdown 0.14s var(--ease) both;
+}
+
+@keyframes sel-dropdown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.sel-option {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border-radius: var(--r-sm);
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.sel-option-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  opacity: 0.6;
+}
+.sel-option--active {
+  background: var(--accent-soft);
+}
+.sel-option--active .sel-option-dot,
+.sel-option--selected .sel-option-dot {
+  opacity: 1;
+}
+.sel-option--selected {
+  font-weight: 700;
+}
+
+.sel--sm .sel-field {
+  padding: 2px var(--s-2);
+  font-size: 0.75rem;
+}
+.sel--sm .sel-option {
+  font-size: 0.75rem;
+}

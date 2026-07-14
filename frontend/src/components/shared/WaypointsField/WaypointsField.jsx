@@ -16,6 +16,7 @@ export default function WaypointsField({
   onAddVia,
   onSetVia,
   onRemoveVia,
+  invalidPlaces,
 }) {
   return (
     <div className="waypoints">
@@ -39,6 +40,7 @@ export default function WaypointsField({
             options={places}
             value={v}
             onChange={(val) => onSetVia(i, val)}
+            invalid={invalidPlaces?.has(v.trim())}
           />
           <IconButton
             size="lg"

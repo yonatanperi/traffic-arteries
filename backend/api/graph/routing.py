@@ -1,22 +1,28 @@
 """Diverse alternative-route search — the :class:`RouteFinder`.
 
 Route search returns up to ``k`` *genuinely different* options, and "best" means
-the route that **rides one authored route as far as possible** — the highest
-:mod:`concentration <.concentration>` (Herfindahl) score, not the shortest route
-and not simply the fewest merges.
+the route that **rides one good authored route as far as possible** — the best
+:mod:`concentration <.concentration>` tier and score, not the shortest route and
+not simply the fewest merges.
 
 Because the concentration objective is non-additive it cannot be optimised inside
 a single search. Instead a :class:`RouteFinder` *generates* a pool of candidate
 chains and scores each one exactly:
 
   1. **Generate** — one candidate per authored route, biased to ride that artery
-     (:func:`~.search.prefer_route_penalty`), plus the unbiased best and an
-     edge-penalty diversity backfill. The dominant artery is the natural axis of
-     diversity here, so this yields structurally different corridors, not one-hop
-     tweaks.
-  2. **Score & rank** — evaluate each chain's exact concentration and sort by it.
+     (:func:`~.search.prefer_route_penalty`), one per priority tier, confined to
+     arteries rated that well (:func:`~.search.avoid_priority_penalty`), plus the
+     unbiased best and an edge-penalty diversity backfill. The dominant artery is
+     the natural axis of diversity here, so this yields structurally different
+     corridors, not one-hop tweaks.
+  2. **Score & rank** — evaluate each chain's exact tier + concentration, sort by
+     tier first, then concentration.
   3. **Select** — greedily keep the best, then each next-best that is different
      enough (edge overlap) and not an excessive detour, up to ``k``.
+
+The priority-aware passes are skipped whenever no authored route is rated worse
+than best (the common case), so the search costs exactly what it did before
+priorities existed.
 
 Call :meth:`RouteFinder.find_routes` for the rich results (stops + concentration +
 which authored routes are merged) or :meth:`RouteFinder.k_shortest_paths` for
@@ -25,12 +31,13 @@ just the stop chains.
 
 import itertools
 
-from .concentration import evaluate
+from .concentration import PriorityMode, evaluate, tier
 from .core import path_edges
 from .search import (
     TRANSFER_WEIGHT,
     MinMergeStrategy,
     WaypointStrategy,
+    avoid_priority_penalty,
     prefer_route_penalty,
     single_source_costs,
 )
@@ -45,12 +52,31 @@ MAX_OPTIMIZED_WAYPOINTS = 7
 WAYPOINT_MAX_STRETCH = 1.5
 
 
+def _add_penalties(*maps):
+    """Combine ``{edge_key: cost}`` penalty maps by *adding* the costs.
+
+    The search's penalties are additive (see :data:`~.search.TRANSFER_WEIGHT`), so
+    stacking two biases means summing them, not overwriting: an edge that is both
+    off the preferred artery and below the priority floor should be discouraged on
+    both counts.
+    """
+    combined = {}
+    for penalty in maps:
+        for edge, cost in penalty.items():
+            combined[edge] = combined.get(edge, 0.0) + cost
+    return combined
+
+
 class Route:
-    """One result route: the stop chain plus how well it rides one authored route.
+    """One result route: the stop chain plus how well it rides one good artery.
 
       * ``stops``          — full place-name chain (consecutive pairs are edges).
-      * ``hhi``            — concentration in ``[0, 1]`` (the "best" key; higher is
-                             better — 1.0 means one authored route covers it all).
+      * ``priority``       — its *tier*: the worst authored-route priority it is
+                             forced to touch (``0`` = stays on the best arteries).
+                             The primary ranking key under
+                             :data:`~.concentration.PriorityMode.HARD_TIER`.
+      * ``hhi``            — priority-weighted concentration in ``[0, 1]`` (higher is
+                             better — 1.0 means one priority-0 route covers it all).
       * ``runs``           — the contiguous single-route stretches in travel order
                              (:class:`~.concentration.Run` each): the sub-routes.
       * ``route_ids``      — sorted distinct authored-route indices it stitches.
@@ -60,8 +86,9 @@ class Route:
       * ``total_hops``     — number of edges.
     """
 
-    def __init__(self, stops, hhi, runs, crossroad_hops):
+    def __init__(self, stops, hhi, runs, crossroad_hops, priority):
         self.stops = list(stops)
+        self.priority = priority
         self.hhi = hhi
         self.runs = list(runs)
         self.route_ids = sorted({r.route_id for r in runs if isinstance(r.route_id, int)})
@@ -94,6 +121,7 @@ class RouteFinder:
         self.penalty_step = penalty_step
         self.max_overlap = max_overlap
         self.max_stretch = max_stretch
+        self._avoid_cache = {}  # tier -> its avoid-penalty map (see :meth:`_avoid`)
 
     def find_routes(self, start, end, k=3, via=None):
         """Return up to ``k`` diverse :class:`Route` results, best first.
@@ -211,9 +239,11 @@ class RouteFinder:
         return sum(1 for node in nodes if self.graph.is_crossroad(node))
 
     def _make_route(self, nodes):
-        """Wrap a stop chain in a scored :class:`Route` (exact concentration)."""
+        """Wrap a stop chain in a scored :class:`Route` (exact concentration + tier)."""
         hhi, runs = evaluate(self.graph, nodes)
-        return Route(nodes, hhi, runs, self._crossroad_hops(nodes))
+        return Route(
+            nodes, hhi, runs, self._crossroad_hops(nodes), tier(self.graph, nodes)
+        )
 
     def _bidirectional_chains(self, forward, reverse):
         """Candidate chains generated from *both* endpoints, unioned.
@@ -247,22 +277,56 @@ class RouteFinder:
 
         The concentration objective's natural axis of diversity is the *dominant
         artery*, so the pool is: the unbiased best, one candidate per authored
-        route biased to ride it (:func:`~.search.prefer_route_penalty`), and an
-        edge-penalty diversity backfill for extra corridors. Scoring/selection is
-        left to :meth:`_select_diverse`.
+        route biased to ride it (:func:`~.search.prefer_route_penalty`), the
+        priority-aware corridors below, and an edge-penalty diversity backfill for
+        extra corridors. Scoring/selection is left to :meth:`_select_diverse`.
         """
+        graph = self.graph
         chains = []
 
         nodes, _ = strategy.find({})
         chains.append(nodes)
 
-        for route_id in self.graph.route_ids():
-            nodes, _ = strategy.find(prefer_route_penalty(self.graph, route_id))
+        for route_id in graph.route_ids():
+            prefer = prefer_route_penalty(graph, route_id)
+            nodes, _ = strategy.find(prefer)
+            chains.append(nodes)
+
+            # "Ride this artery, without slumming through anything worse-rated than
+            # it." The plain prefer() above fills the gaps between stints on
+            # `route_id` with whatever is cheapest, which may dip into a badly-rated
+            # artery — but only *sometimes*, so re-searching for every artery
+            # unconditionally doubles the query for nothing. Ask the chain we just
+            # got: if it never dipped below this artery's own rating, the constrained
+            # search can only return the same corridor, so skip it.
+            floor = graph.route_priority(route_id)
+            if nodes and tier(graph, nodes) > floor:
+                nodes, _ = strategy.find(_add_penalties(prefer, self._avoid(floor)))
+                chains.append(nodes)
+
+        # One corridor per tier: the best route that never leaves it. Nothing else
+        # in the pool has any reason to detour *around* a badly-rated artery, and
+        # under HARD_TIER these are exactly the routes that win.
+        for max_priority in range(graph.worst_priority()):
+            nodes, _ = strategy.find(self._avoid(max_priority))
             chains.append(nodes)
 
         chains.extend(self._penalty_diversity(strategy))
 
         return self._dedup_chains(c for c in chains if c and len(c) >= 2)
+
+    def _avoid(self, max_priority):
+        """:func:`~.search.avoid_priority_penalty`, memoised per tier.
+
+        The map depends only on the graph and the tier, but it is asked for once
+        per artery *and* once per direction — rebuilding it over every edge each
+        time is pure waste.
+        """
+        if max_priority not in self._avoid_cache:
+            self._avoid_cache[max_priority] = avoid_priority_penalty(
+                self.graph, max_priority
+            )
+        return self._avoid_cache[max_priority]
 
     def _penalty_diversity(self, strategy, rounds=6):
         """Iterative edge-penalty search yielding successive different corridors.
@@ -282,9 +346,12 @@ class RouteFinder:
     def _select_diverse(self, chains, k, max_stretch):
         """Score the candidate chains and greedily pick up to ``k`` diverse routes.
 
-        Sorted best-first by ``(-hhi, route_count, crossroad_hops, total_hops)`` —
-        highest concentration, then (among equally concentrated routes) fewest
-        merged routes, fewest intersections, and shortest, with a final
+        Sorted best-first by ``(tier, -hhi, route_count, crossroad_hops,
+        total_hops)`` — the tier first (:data:`~.concentration.PriorityMode.
+        HARD_TIER`), so a route that stays on well-rated arteries outranks one that
+        touches a badly-rated artery however much shorter it is; then highest
+        concentration, then (among equally concentrated routes) fewest merged
+        routes, fewest intersections, and shortest, with a final
         orientation-independent tie-break so the same corridor wins whichever way
         the query is posed. A candidate is kept only if it is neither a
         near-duplicate of an accepted route (``max_overlap`` of its edges) nor an
@@ -292,10 +359,19 @@ class RouteFinder:
         count. If fewer than ``k`` distinct corridors exist, fewer are returned;
         near-duplicates never pad the list. ``k=None`` keeps every candidate that
         survives those checks, uncapped by count.
+
+        Priority **ranks, it never filters**: the list stays complete, merely
+        tier-ordered. So when the best tier holds only one distinct corridor, the
+        alternatives fall through to worse tiers rather than the result list
+        collapsing to a single route — you still get real alternatives, ordered so
+        the clean one leads. (Callers surface :attr:`Route.priority` so a long
+        tier-0 detour outranking a short tier-2 hop is *visible* rather than
+        looking like a bug.)
         """
         routes = [self._make_route(nodes) for nodes in chains]
         routes.sort(
             key=lambda r: (
+                r.priority if PriorityMode.HARD_TIER else 0,
                 -r.hhi,
                 r.route_count,
                 r.crossroad_hops,
