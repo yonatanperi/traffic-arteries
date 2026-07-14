@@ -1,17 +1,65 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
 import Autocomplete from "../../ui/Autocomplete";
 import ConfirmModal from "../../ui/ConfirmModal";
 import { EditableRouteChain } from "../../shared/RouteChain";
 import RemovableChip from "../../ui/RemovableChip";
 import Pill from "../../ui/Pill";
+import IconButton from "../../ui/IconButton";
 import EditableList from "../../ui/EditableList";
 import EditableGroupRow from "../../ui/EditableGroupRow";
-import { IconSearch, IconAlert } from "../../ui/icons";
+import {
+  IconSearch,
+  IconAlert,
+  IconDuplicate,
+  IconPin,
+} from "../../ui/icons";
 import {
   useGetUrlParams,
   useSetUrlParams,
 } from "../../../hooks/useUrlParams.js";
 import "./RouteEditor.css";
+
+// Anything inside a route card that owns the pointer: the stop pills (they have
+// their own drag), every control, and the inline editors. A press that starts on
+// one of these must not turn into a card drag.
+const NO_ROW_DRAG = "button, input, a, .stop, .stop-edit, .ac";
+
+// Per-row view state that `routes` itself can't carry: routes.json is a plain
+// array of arrays, with no id to key a React element, a drag item or a pin by.
+// It's kept as an array parallel to `routes`, and every structural edit applies
+// the same splice/move to both — so a row's identity and its pin follow it.
+let rowUid = 0;
+const newRow = () => ({ id: `row-${rowUid++}`, pinned: false });
+
+/**
+ * The whole card is the drag handle (no separate grip button), so the sensor —
+ * not a handle's listeners — is what keeps the card's insides usable: it simply
+ * declines to activate when the press lands on an interactive descendant.
+ */
+class RowPointerSensor extends PointerSensor {
+  static activators = [
+    {
+      eventName: "onPointerDown",
+      handler: ({ nativeEvent: event }) => {
+        if (!event.isPrimary || event.button !== 0) return false;
+        return !event.target.closest?.(NO_ROW_DRAG);
+      },
+    },
+  ];
+}
 
 /**
  * Groups every stop into connected components using the routes as edges
@@ -90,6 +138,17 @@ export default function RouteEditor({
   }
   const [pendingRename, setPendingRename] = useState(null); // { oldValue, newValue }
 
+  const [rows, setRows] = useState(() => routes.map(newRow));
+  // Only ever re-synced if `routes` changes length behind our back (it doesn't
+  // today — every add/remove goes through this component); a guard, not a path.
+  useEffect(() => {
+    setRows((prev) =>
+      prev.length === routes.length
+        ? prev
+        : routes.map((_, i) => prev[i] ?? newRow()),
+    );
+  }, [routes.length]);
+
   function updateRoute(index, nextRoute) {
     const next = routes.slice();
     next[index] = nextRoute;
@@ -98,10 +157,39 @@ export default function RouteEditor({
 
   function addRoute() {
     onChange([...routes, []]);
+    // A brand-new route is empty, so it matches no filter — pin it while one is
+    // active, otherwise it would be added straight into hiding.
+    setRows((prev) => [...prev, { ...newRow(), pinned: Boolean(filtering) }]);
+  }
+
+  function duplicateRoute(index) {
+    const next = routes.slice();
+    next.splice(index + 1, 0, routes[index].slice());
+    onChange(next);
+    setRows((prev) => {
+      const nextRows = prev.slice();
+      nextRows.splice(index + 1, 0, {
+        ...newRow(),
+        pinned: prev[index].pinned,
+      });
+      return nextRows;
+    });
   }
 
   function removeRoute(index) {
     onChange(routes.filter((_, i) => i !== index));
+    setRows((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function togglePin(index) {
+    setRows((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, pinned: !row.pinned } : row)),
+    );
+  }
+
+  function reorderRoutes(from, to) {
+    onChange(arrayMove(routes, from, to));
+    setRows((prev) => arrayMove(prev, from, to));
   }
 
   function addFilter(place) {
@@ -142,7 +230,8 @@ export default function RouteEditor({
   const terms = selected.map((s) => s.toLowerCase());
   const highlight = q ? [...terms, q] : terms;
   const filtering = selected.length > 0 || q;
-  const visibleIndices = routes
+
+  const matchedIndices = routes
     .map((_, i) => i)
     .filter((i) => {
       const route = routes[i];
@@ -154,6 +243,28 @@ export default function RouteEditor({
       const hasQuery = !q || route.some((p) => p.toLowerCase().includes(q));
       return hasAll && hasQuery;
     });
+
+  // Pinned routes ride through the filter — they stay listed (in place) even
+  // when they don't match, so a route you're working on can't be filtered away.
+  const matched = new Set(matchedIndices);
+  const visibleIndices = routes
+    .map((_, i) => i)
+    // `rows[i] &&`: should a `routes` update ever land before the row-state sync
+    // effect catches up, skip the row for that one render rather than throwing.
+    .filter((i) => rows[i] && (matched.has(i) || rows[i].pinned));
+
+  const sensors = useSensors(
+    useSensor(RowPointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  function handleDragEnd({ active, over }) {
+    if (!over || active.id === over.id) return;
+    // Positions in the *full* list, so a drop made while the list is filtered
+    // still lands the route exactly where it was dropped among all routes.
+    const from = rows.findIndex((r) => r.id === active.id);
+    const to = rows.findIndex((r) => r.id === over.id);
+    if (from !== -1 && to !== -1) reorderRoutes(from, to);
+  }
 
   return (
     <div className="editor">
@@ -186,36 +297,52 @@ export default function RouteEditor({
         />
         {filtering && (
           <span className="editor-search-count">
-            {visibleIndices.length
-              ? `נמצאו ${visibleIndices.length} צירים`
+            {matchedIndices.length
+              ? `נמצאו ${matchedIndices.length} צירים`
               : "לא נמצאו צירים תואמים"}
           </span>
         )}
       </div>
 
-      <EditableList onAdd={addRoute} addLabel="הוסף ציר חדש">
-        {visibleIndices.map((i) => {
-          const route = routes[i];
-          const disconnected =
-            componentCount > 1 &&
-            route.length > 0 &&
-            find(route[0]) !== mainRoot;
-          return (
-            <RouteRow
-              key={i}
-              index={i}
-              route={route}
-              suggestions={suggestions}
-              highlight={highlight}
-              disconnected={disconnected}
-              compromisedPlaces={compromisedPlaces}
-              onChangeRoute={(next) => updateRoute(i, next)}
-              onRemoveRoute={() => removeRoute(i)}
-              onRenameStop={requestRename}
-            />
-          );
-        })}
-      </EditableList>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={visibleIndices.map((i) => rows[i].id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <EditableList onAdd={addRoute} addLabel="הוסף ציר חדש">
+            {visibleIndices.map((i) => {
+              const route = routes[i];
+              const disconnected =
+                componentCount > 1 &&
+                route.length > 0 &&
+                find(route[0]) !== mainRoot;
+              return (
+                <RouteRow
+                  key={rows[i].id}
+                  id={rows[i].id}
+                  index={i}
+                  route={route}
+                  suggestions={suggestions}
+                  highlight={highlight}
+                  disconnected={disconnected}
+                  pinned={rows[i].pinned}
+                  filteredOut={Boolean(filtering) && !matched.has(i)}
+                  compromisedPlaces={compromisedPlaces}
+                  onChangeRoute={(next) => updateRoute(i, next)}
+                  onRemoveRoute={() => removeRoute(i)}
+                  onDuplicateRoute={() => duplicateRoute(i)}
+                  onTogglePin={() => togglePin(i)}
+                  onRenameStop={requestRename}
+                />
+              );
+            })}
+          </EditableList>
+        </SortableContext>
+      </DndContext>
 
       {pendingRename && (
         <ConfirmModal
@@ -232,29 +359,50 @@ export default function RouteEditor({
 }
 
 function RouteRow({
+  id,
   index,
   route,
   suggestions,
   highlight,
   disconnected,
+  pinned,
+  filteredOut,
   compromisedPlaces,
   onChangeRoute,
   onRemoveRoute,
+  onDuplicateRoute,
+  onTogglePin,
   onRenameStop,
 }) {
   const tooShort = route.length < 2;
   const hasCompromised = route.some((p) => compromisedPlaces?.has(p));
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+
+  // Translate on Y only — the list is a single column, and letting a card drift
+  // sideways would just detach it from the drop targets it's aiming at.
+  const style = {
+    transform: transform ? `translate3d(0, ${transform.y}px, 0)` : undefined,
+    transition,
+  };
+
   const extraClassName = [
+    "route-row--sortable",
     disconnected && "route-row--disconnected",
     hasCompromised && "route-row--compromised",
+    pinned && "route-row--pinned",
+    isDragging && "route-row--dragging",
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <EditableGroupRow
+      rootRef={setNodeRef}
+      style={style}
       warn={tooShort}
-      extraClassName={extraClassName || undefined}
+      extraClassName={extraClassName}
       badge={
         route.length >= 2 && (
           <Pill size="sm" className="route-badge">
@@ -275,10 +423,42 @@ function RouteRow({
               <IconAlert size={14} /> כולל יעד מושבת
             </span>
           )}
+          {filteredOut && (
+            <span className="route-warn route-warn--muted">
+              <IconPin size={13} /> נעוץ — אינו תואם לסינון
+            </span>
+          )}
+        </>
+      }
+      actions={
+        <>
+          <IconButton
+            className={"route-pin" + (pinned ? " route-pin--on" : "")}
+            ariaLabel={pinned ? `בטל נעיצת ציר ${index + 1}` : `נעץ ציר ${index + 1}`}
+            ariaPressed={pinned}
+            title={pinned ? "בטל נעיצה" : "נעץ — הציר יישאר גלוי גם בסינון"}
+            onClick={onTogglePin}
+          >
+            <IconPin size={16} />
+          </IconButton>
+          <IconButton
+            ariaLabel={`שכפל ציר ${index + 1}`}
+            title="שכפל ציר"
+            onClick={onDuplicateRoute}
+          >
+            <IconDuplicate size={16} />
+          </IconButton>
         </>
       }
       onRemove={onRemoveRoute}
       removeLabel={`מחק ציר ${index + 1}`}
+      {...attributes}
+      // The card is a drag surface, not a control: keep dnd-kit's aria wiring but
+      // drop the role/tab-stop it assumes, since the card wraps real buttons and
+      // inputs that a role="button" ancestor would bury.
+      role={undefined}
+      tabIndex={undefined}
+      {...listeners}
     >
       <EditableRouteChain
         stops={route}

@@ -4,6 +4,7 @@ import { SegmentedControl } from "../../ui/SegmentedControl";
 import SwapButton from "../../ui/SwapButton";
 import Pill from "../../ui/Pill";
 import Button from "../../ui/Button";
+import WaypointsField from "../../shared/WaypointsField";
 import { useOriginDestination } from "../../../hooks/useOriginDestination.js";
 import {
   IconSearch,
@@ -68,6 +69,10 @@ export default function BrainToolbar({
   pathError,
   pathResult,
   activePathIndex,
+  vias,
+  onAddVia,
+  onSetVia,
+  onRemoveVia,
 }) {
   const [query, setQuery] = useState("");
   const { start, setStart, end, setEnd, swap } = useOriginDestination();
@@ -200,46 +205,59 @@ export default function BrainToolbar({
             />
           </div>
 
-          <Button
-            type="submit"
-            variant="primary"
-            className="bt-find"
-            disabled={pathLoading}
-          >
-            <IconRoute size={17} />
-            {pathLoading ? "מחשב…" : "הצג ציר"}
-          </Button>
+          <div className="bt-path-waypoints">
+            <WaypointsField
+              places={placeOptions}
+              vias={vias}
+              onAddVia={onAddVia}
+              onSetVia={onSetVia}
+              onRemoveVia={onRemoveVia}
+            />
+          </div>
 
-          {paths && paths.length > 0 && (
-            <div className="bt-path-chips">
-              {paths.map((p, i) => (
+          <div className="bt-path-submit-and-meta">
+            <Button
+              size="sm"
+              type="submit"
+              variant="primary"
+              className="bt-find"
+              disabled={pathLoading}
+            >
+              <IconRoute size={17} />
+              {pathLoading ? "מחשב…" : "הצג ציר"}
+            </Button>
+
+            {paths && paths.length > 0 && (
+              <div className="bt-path-chips">
+                {paths.map((p, i) => (
+                  <Pill
+                    as="button"
+                    size="md"
+                    key={i}
+                    className={
+                      "bt-chip" + (i === activePathIndex ? " bt-chip--on" : "")
+                    }
+                    onClick={() => onSelectPathIndex(i)}
+                  >
+                    {ORDINALS[i] || `ציר ${i + 1}`}
+                    <span className="bt-chip-hops">
+                      {chipLabel(meta?.[i], p.length)}
+                    </span>
+                  </Pill>
+                ))}
                 <Pill
                   as="button"
                   size="md"
-                  key={i}
-                  className={
-                    "bt-chip" + (i === activePathIndex ? " bt-chip--on" : "")
-                  }
-                  onClick={() => onSelectPathIndex(i)}
+                  className="bt-chip bt-chip--clear"
+                  onClick={clearPath}
+                  aria-label="נקה ציר"
+                  title="נקה ציר"
                 >
-                  {ORDINALS[i] || `ציר ${i + 1}`}
-                  <span className="bt-chip-hops">
-                    {chipLabel(meta?.[i], p.length)}
-                  </span>
+                  <IconClose size={15} />
                 </Pill>
-              ))}
-              <Pill
-                as="button"
-                size="md"
-                className="bt-chip bt-chip--clear"
-                onClick={clearPath}
-                aria-label="נקה ציר"
-                title="נקה ציר"
-              >
-                <IconClose size={15} />
-              </Pill>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
           {pathError && (
             <p className="bt-path-error" role="alert">

@@ -66,6 +66,10 @@ export default function BrainPage() {
           pathError={path.pathError}
           pathResult={path.pathResult}
           activePathIndex={path.activePathIndex}
+          vias={path.vias}
+          onAddVia={path.addVia}
+          onSetVia={path.setVia}
+          onRemoveVia={path.removeVia}
         />
       )}
 
@@ -96,6 +100,7 @@ export default function BrainPage() {
               componentOf={metrics.componentOf}
               pathNodes={path.pathNodes}
               pathEdges={path.pathEdges}
+              waypointIds={path.waypointIds}
               deadEndIds={metrics.deadEndIds}
               highlightDeadEnds={highlightDeadEnds}
               compromisedIds={compromisedIds}

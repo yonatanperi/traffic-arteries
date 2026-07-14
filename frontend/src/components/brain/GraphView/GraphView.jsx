@@ -17,18 +17,26 @@ const DIM = "#40412f";
 const TEXT = "#ffffff";
 const WARNING = "#e2c541";
 const COMPROMISED = "#f85149"; // --danger: destinations temporarily unavailable.
+const WAYPOINT = "#58a6ff"; // --info: stops the active path is required to pass through.
 const EXPORT_BG = "#141510"; // --bg-elevated, so exported PNGs aren't transparent.
 
 // Minimum screen-space gap enforced between neighbouring labels.
 const LABEL_SCREEN_PADDING = 4;
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+}
+const ACCENT_RGB = hexToRgb(ACCENT);
 
 /**
  * Interactive force-directed graph of the place network.
  *
  * Beyond drag / zoom / pan it supports: hover- and click-to-pin highlighting of
  * a node and its direct connections, monochrome dimming of other connected
- * components, path highlighting, and a dead-end ring overlay. Imperative
- * controls (fit / reheat / center / export) are exposed through the ref.
+ * components, path highlighting (with required waypoint stops painted
+ * separately), and a dead-end ring overlay. Imperative controls (fit / reheat
+ * / center / export) are exposed through the ref.
  */
 const GraphView = forwardRef(function GraphView(
   {
@@ -38,6 +46,7 @@ const GraphView = forwardRef(function GraphView(
     componentOf = null,
     pathNodes = null,
     pathEdges = null,
+    waypointIds = null,
     deadEndIds = null,
     highlightDeadEnds = false,
     compromisedIds = null,
@@ -148,6 +157,21 @@ const GraphView = forwardRef(function GraphView(
     [pathActive, pathNodes, selected, neighbours, componentOf]
   );
 
+  /**
+   * A node's special-status color, if any (compromised wins over waypoint,
+   * matching drawNode's paint order) — independent of interaction tier. Every
+   * link touching such a node is tinted to match, at the same tone/weight
+   * already used for "touches the selected node" / "on the active path".
+   */
+  const overrideColorOf = useCallback(
+    (id) => {
+      if (compromisedIds?.has(id)) return COMPROMISED;
+      if (waypointIds?.has(id)) return WAYPOINT;
+      return null;
+    },
+    [compromisedIds, waypointIds]
+  );
+
   const drawNode = useCallback(
     (node, ctx, globalScale) => {
       const tier = tierOf(node.id);
@@ -166,10 +190,10 @@ const GraphView = forwardRef(function GraphView(
         alpha = 0.3;
       }
 
-      // A compromised (temporarily unavailable) destination always reads red,
-      // regardless of interaction tier — only the tier's alpha still applies,
-      // so it still dims correctly when off-path/off-component.
-      if (compromisedIds?.has(node.id)) fill = COMPROMISED;
+      // A node's special-status color always overrides the tier fill, but
+      // not its alpha, so it still dims correctly when off-path/off-component.
+      const override = overrideColorOf(node.id);
+      if (override) fill = override;
 
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
@@ -197,7 +221,7 @@ const GraphView = forwardRef(function GraphView(
         ctx.stroke();
       }
     },
-    [tierOf, degree, highlightDeadEnds, deadEndIds, pathActive, compromisedIds]
+    [tierOf, degree, highlightDeadEnds, deadEndIds, pathActive, overrideColorOf]
   );
 
   /**
@@ -274,25 +298,29 @@ const GraphView = forwardRef(function GraphView(
   const linkColor = useCallback(
     (link) => {
       const [s, t] = linkEnds(link);
+      const overrideHex = overrideColorOf(s) || overrideColorOf(t);
       if (pathActive) {
         const on = pathEdges?.has(edgeKey(s, t));
-        return on ? "rgba(213,255,64,0.95)" : "rgba(64,65,47,0.15)";
+        if (!on) return "rgba(64,65,47,0.15)";
+        return `rgba(${overrideHex ? hexToRgb(overrideHex) : ACCENT_RGB},0.95)`;
       }
+      if (overrideHex) return `rgba(${hexToRgb(overrideHex)},0.9)`;
       if (!selected) return "rgba(213,255,64,0.16)";
       const touches = s === selected || t === selected;
       return touches ? "rgba(213,255,64,0.9)" : "rgba(64,65,47,0.2)";
     },
-    [pathActive, pathEdges, selected]
+    [pathActive, pathEdges, selected, overrideColorOf]
   );
 
   const linkWidth = useCallback(
     (link) => {
       const [s, t] = linkEnds(link);
       if (pathActive) return pathEdges?.has(edgeKey(s, t)) ? 3 : 0.6;
+      if (overrideColorOf(s) || overrideColorOf(t)) return 2;
       if (!selected) return 1;
       return s === selected || t === selected ? 2 : 0.6;
     },
-    [pathActive, pathEdges, selected]
+    [pathActive, pathEdges, selected, overrideColorOf]
   );
 
   return (

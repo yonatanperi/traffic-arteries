@@ -1,15 +1,8 @@
 import Autocomplete from "../../components/ui/Autocomplete";
 import SwapButton from "../../components/ui/SwapButton";
-import IconButton from "../../components/ui/IconButton";
 import Button from "../../components/ui/Button";
-import {
-  IconOrigin,
-  IconDestination,
-  IconRoute,
-  IconPlus,
-  IconClose,
-  IconSearch,
-} from "../../components/ui/icons";
+import WaypointsField from "../../components/shared/WaypointsField";
+import { IconOrigin, IconDestination, IconSearch } from "../../components/ui/icons";
 
 export default function SearchForm({
   places,
@@ -49,45 +42,13 @@ export default function SearchForm({
         />
       </div>
 
-      <div className="waypoints">
-        {vias.length > 0 && (
-          <div className="waypoints-head">
-            <span className="waypoints-title">
-              <IconRoute size={15} />
-              עצירות ביניים
-            </span>
-            <span className="waypoints-hint">
-              הציר יעבור בכל העצירות, בסדר האופטימלי
-            </span>
-          </div>
-        )}
-
-        {vias.map((v, i) => (
-          <div className="waypoint-row" key={i}>
-            <Autocomplete
-              icon={<IconRoute size={16} />}
-              placeholder="תחנה שהציר חייב לעבור בה"
-              options={places}
-              value={v}
-              onChange={(val) => onSetVia(i, val)}
-            />
-            <IconButton
-              size="lg"
-              className="waypoint-remove"
-              onClick={() => onRemoveVia(i)}
-              ariaLabel="הסר עצירה"
-              title="הסר עצירה"
-            >
-              <IconClose size={16} />
-            </IconButton>
-          </div>
-        ))}
-
-        <Button variant="dashed" className="waypoint-add" onClick={onAddVia}>
-          <IconPlus size={16} />
-          הוסף עצירת ביניים
-        </Button>
-      </div>
+      <WaypointsField
+        places={places}
+        vias={vias}
+        onAddVia={onAddVia}
+        onSetVia={onSetVia}
+        onRemoveVia={onRemoveVia}
+      />
 
       <Button
         type="submit"

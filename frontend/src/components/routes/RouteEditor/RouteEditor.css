@@ -28,6 +28,48 @@
   border-color: var(--danger);
 }
 
+/* The whole card is the drag handle (see RowPointerSensor) — hence the grab
+   cursor on the card and the pointer/text cursors its controls set back. */
+.route-row--sortable {
+  cursor: grab;
+}
+.route-row--sortable .route-row-head {
+  user-select: none;
+}
+.route-row--dragging {
+  cursor: grabbing;
+  z-index: 30;
+  position: relative;
+  box-shadow: var(--shadow-lg);
+  border-color: var(--accent);
+}
+
+/* Pinned: the card survives any filter, so it carries a standing accent tint —
+   quiet enough that the danger states below still override it. */
+.route-row--pinned {
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+.route-pin--on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.route-pin--on:hover {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.22);
+}
+/* Tilt the tack when it's stuck in. */
+.route-pin--on .ic {
+  transform: rotate(-30deg);
+}
+.route-pin .ic {
+  transition: transform 0.18s var(--ease);
+}
+
+.route-warn--muted {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
 .route-row--disconnected,
 .route-row--compromised {
   border-color: var(--danger);

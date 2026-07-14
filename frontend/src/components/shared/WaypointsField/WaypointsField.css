@@ -1,0 +1,66 @@
+.waypoints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.waypoints-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-3);
+}
+.waypoints-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text);
+}
+.waypoints-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.waypoint-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.waypoint-row .ac {
+  flex: 1;
+  min-width: 0;
+}
+
+.waypoint-remove {
+  border: 1.5px solid var(--border);
+  background: var(--surface-2);
+  transition:
+    color 0.2s,
+    border-color 0.2s,
+    background 0.2s;
+}
+.waypoint-remove:hover {
+  color: var(--danger-text);
+  border-color: rgba(var(--danger-rgb), 0.5);
+  background: var(--surface-hover);
+}
+
+.waypoint-add {
+  align-self: flex-start;
+  gap: 6px;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-md);
+  border-width: 1.5px;
+  border-color: var(--border);
+  color: var(--text-muted);
+  transition:
+    color 0.2s,
+    border-color 0.2s,
+    background 0.2s;
+}
+.waypoint-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}

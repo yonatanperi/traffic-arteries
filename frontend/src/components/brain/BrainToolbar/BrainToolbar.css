@@ -60,6 +60,16 @@
   padding: var(--s-3) var(--s-5);
 }
 
+.bt-path-waypoints {
+  flex-basis: 100%;
+}
+
+.bt-path-submit-and-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
 /* Path chips */
 .bt-path-chips {
   display: flex;

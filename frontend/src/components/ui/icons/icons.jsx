@@ -137,6 +137,28 @@ export function IconCopy(props) {
   );
 }
 
+// Duplicate — a second sheet behind, plus a "+" on the front one.
+export function IconDuplicate(props) {
+  return (
+    <Svg {...props}>
+      <path d="M8 8V6a3 3 0 0 1 3-3h7a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-2" />
+      <rect x="3" y="8" width="13" height="13" rx="3" />
+      <path d="M9.5 14.5h4M11.5 12.5v4" />
+    </Svg>
+  );
+}
+
+// Pin — a thumbtack; a pinned route stays visible through any filter.
+export function IconPin(props) {
+  return (
+    <Svg {...props}>
+      <path d="M8 3h8" />
+      <path d="M10 3v5.3a2 2 0 0 1-.9 1.7l-1.7 1.1a2 2 0 0 0-.9 1.7V14h11v-1.2a2 2 0 0 0-.9-1.7l-1.7-1.1a2 2 0 0 1-.9-1.7V3" />
+      <path d="M12 14v7" />
+    </Svg>
+  );
+}
+
 export function IconSearch(props) {
   return (
     <Svg {...props}>
