@@ -1,8 +1,11 @@
 """Django settings for traffic_arteries.
 
 Route/graph data is stored in the filesystem JSON store in ``api/db.py``, but
-the ``accounts`` app uses the real ORM/database for users. CORS is
-unnecessary because the Vite dev server proxies /api.
+the ``accounts`` app uses the real ORM/database for users. In dev the Vite
+server proxies /api so no CORS is needed; in the split production deployment
+the frontend (Cloudflare Pages) and backend (PythonAnywhere) live on different
+origins, so django-cors-headers allows the Pages origin. Secrets and host
+config are read from the environment (see ``deploy/pythonanywhere_wsgi.py``).
 """
 
 import os
@@ -14,9 +17,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 DATA_DIR = os.path.abspath(DATA_DIR)
 
-SECRET_KEY = "dev-only-not-secret-change-in-production"
-DEBUG = True
-ALLOWED_HOSTS = ["*"]
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-not-secret-change-in-production")
+DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
+ALLOWED_HOSTS = os.environ.get(
+    "DJANGO_ALLOWED_HOSTS",
+    "yonatanperi.pythonanywhere.com,localhost,127.0.0.1",
+).split(",")
+
+# Cross-origin requests from the Cloudflare Pages frontend. Auth is Bearer-header
+# only (no cookies cross the origin), so credentials support is intentionally off.
+CORS_ALLOWED_ORIGINS = os.environ.get(
+    "CORS_ALLOWED_ORIGINS",
+    "https://traffic-arteries.pages.dev",
+).split(",")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -27,11 +40,13 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
+    "corsheaders",
     "api",
     "accounts",
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
