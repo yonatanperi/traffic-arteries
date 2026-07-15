@@ -123,6 +123,19 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
+# Always log request errors (500s) to the console/stderr, regardless of DEBUG.
+# Django's default config suppresses the console handler when DEBUG=False, which
+# otherwise makes production 500s invisible in the Render log stream.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}
+
 LANGUAGE_CODE = "he"
 TIME_ZONE = "Asia/Jerusalem"
 USE_I18N = True
