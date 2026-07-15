@@ -9,12 +9,8 @@ export function setAccessToken(token) {
   accessToken = token;
 }
 
-// In dev, VITE_API_URL is unset and requests hit /api, which the Vite dev
-// server proxies to Django (same origin, no CORS). In production the frontend
-// and backend live on different origins, so VITE_API_URL points at the
-// backend's absolute /api URL (see .env.production).
 export const http = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/api",
+  baseURL: "/api",
   headers: { "Content-Type": "application/json" },
 });
 
