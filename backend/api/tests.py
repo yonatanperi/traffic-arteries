@@ -454,12 +454,16 @@ class PriorityTests(SimpleTestCase):
         self.assertEqual(strategy.find({})[0], CLEAN_RIDE)
 
 
-class PriorityTierIndependenceTests(SimpleTestCase):
-    """The tier is computed from the edges, never from the winning credit
-    assignment — the two answer different questions and can disagree."""
+class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
+    """The tier is the worst priority among the sub-routes actually ridden (the
+    max-HHI credit assignment / the UI's chips) — NOT an edge-only best. When
+    riding one authored route as far as possible means riding a downgraded one,
+    the route inherits that downgrade, even where the same road is co-served by a
+    well-rated route."""
 
     # Every edge of S..T is carried by BOTH the downgraded through-route (0) and a
-    # well-rated single-hop route, so the chain never *has* to leave priority 0.
+    # well-rated single-hop route. So per-edge the road is priority-0 drivable — but
+    # only route 0 spans it in a single concentrated run.
     ROUTES = [
         ["S", "u1", "u2", "u3", "T"],  # 0: the downgraded through-artery
         ["S", "u1"],                   # 1..4: well-rated legs covering the same edges
@@ -485,10 +489,27 @@ class PriorityTierIndependenceTests(SimpleTestCase):
         self.assertEqual([r.route_id for r in runs], [0])
         self.assertEqual([r.priority for r in runs], [2])
 
-    def test_tier_is_still_best_because_the_chain_never_has_to_leave_it(self):
-        # Read off those runs, the chain would look priority-2. But every edge is
-        # *also* on a priority-0 route, so nothing forces the downgrade: tier 0.
-        self.assertEqual(tier(self.graph, self.CHAIN), 0)
+    def test_tier_follows_the_ridden_sub_route(self):
+        # The chain is ridden as one run on the priority-2 artery, so the route is
+        # tier 2 — even though every edge is *also* on a priority-0 route. Riding it
+        # as those p0 legs is less concentrated, so that isn't how it's ridden.
+        self.assertEqual(tier(self.graph, self.CHAIN), 2)
+        # The per-edge best is still 0 — that's what generation uses to hunt for a
+        # physically different corridor, but it is not the route's tier.
+        self.assertEqual(self.graph.edge_priority("u1", "u2"), 0)
+
+    def test_ranking_prefers_a_genuinely_better_rated_corridor_when_one_exists(self):
+        # Add a physically separate all-priority-0 detour S->d->T. It's less
+        # concentrated (two arteries) but never rides the downgraded one, so hard
+        # tiering puts it first and the concentrated priority-2 ride second.
+        graph = Graph.from_routes(
+            self.ROUTES + [["S", "d1", "d2"], ["d2", "d3", "T"], ["d1", "z8"], ["d2", "z9"]],
+            self.PRIORITIES + [0, 0, 0, 0],
+        )
+        results = RouteFinder(graph).find_routes("S", "T", k=3)
+        self.assertEqual(results[0].priority, 0)
+        self.assertNotIn(0, results[0].route_ids)  # does not ride the downgraded artery
+        self.assertEqual(results[1].priority, 2)   # the concentrated ride is still offered
 
 
 class PriorityCostGuardTests(SimpleTestCase):

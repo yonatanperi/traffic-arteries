@@ -4,10 +4,15 @@
 objective has two levels, and they answer different questions:
 
 **1. The tier** (:func:`tier`) — *may* we ride this corridor at all? Every authored
-route carries a priority (``0`` = best … ``3`` = worst); a chain's tier is the worst
-priority it is forced to touch. Ranking is lexicographic on the tier first
-(:data:`PriorityMode.HARD_TIER`), so a corridor that stays on well-rated arteries
-beats one that dips into a badly-rated one *however long the detour*.
+route carries a priority (``0`` = best … ``3`` = worst); a route's tier is the worst
+priority among the sub-routes it actually **rides** — the runs of the score's own
+credit assignment below, i.e. the chips the UI shows. Ranking is lexicographic on
+the tier first (:data:`PriorityMode.HARD_TIER`), so a route that rides only
+well-rated arteries beats one whose concentrated corridor rides a badly-rated one
+*however long the detour*. Because the tier reads the ridden sub-routes, a road
+that is *also* served by a good route only escapes the downgrade when riding it as
+that good route is at least as concentrated — otherwise the concentrated way to
+ride it is the bad one, and the tier says so.
 
 **2. The score** (:func:`evaluate`) — *how well* does it ride them? For a route split
 into maximal contiguous runs ``r_1 … r_n``, each on a single authored route, we take
@@ -108,21 +113,25 @@ def _route_weight(graph, route_id):
 
 
 def tier(graph, stops):
-    """The worst priority the chain ``stops`` is *forced* to touch.
+    """The route's priority: the worst priority among the sub-routes it *rides*.
 
-    An edge may be carried by several authored routes, so travelling it only commits
-    you to the best-rated of them (:meth:`~.core.Graph.edge_priority`); the chain's
-    tier is the worst such commitment along it. This asks "what is the best possible
-    priority profile this chain can be walked with", which makes it **independent of
-    the credit assignment** :func:`evaluate` picks — and that is the point. Were it
-    read off the score-maximising runs instead, a chain could be pushed into a worse
-    tier merely because crediting one long run to a poorly-rated artery happened to
-    outscore splitting it across two well-rated ones.
+    The sub-routes are the maximal single-route runs of the max-HHI credit
+    assignment (:func:`evaluate`) — exactly the breakdown the UI shows as chips. A
+    route is therefore rated by the arteries it actually rides: if riding one
+    authored route as far as possible means riding a downgraded one, the route
+    inherits that downgrade.
+
+    This is deliberately **assignment-dependent**. An edge may also be served by a
+    better-rated route, but that only rescues the tier when riding it *as* that
+    better route is at least as concentrated — because then :func:`evaluate` credits
+    the run there anyway (a higher weight at equal length scores higher). When the
+    downgraded route is the only one that spans the stretch in a single run, that is
+    genuinely the corridor being ridden, and the tier says so. Contrast
+    :meth:`~.core.Graph.edge_priority`, the *per-edge* best, which the generators use
+    to hunt for a physically different, better-rated corridor.
     """
-    edges = list(zip(stops, stops[1:]))
-    if not edges:
-        return BEST_PRIORITY
-    return max(graph.edge_priority(a, b) for a, b in edges)
+    _, runs = evaluate(graph, stops)
+    return max((run.priority for run in runs), default=BEST_PRIORITY)
 
 
 def evaluate(graph, stops):

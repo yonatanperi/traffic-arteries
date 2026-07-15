@@ -183,8 +183,10 @@ class Graph:
 
         An edge may be carried by several authored routes; travelling it commits
         you to *at least* the best-rated of them, so the edge's priority is their
-        minimum. This is the per-edge term the route *tier* is a max over — see
-        :func:`~.concentration.tier`.
+        minimum. Note this is **not** the route *tier* (that follows the sub-routes
+        actually ridden — see :func:`~.concentration.tier`); it is the per-edge best
+        the generators use to hunt for a physically better-rated corridor, and the
+        skip test in :meth:`~.routing.RouteFinder._crosses_forced_below`.
         """
         routes = self.routes_on(a, b)
         if not routes:

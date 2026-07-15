@@ -13,9 +13,14 @@ filesystem JSON store (no SQL). The UI is Hebrew/RTL.
 priority tier. Each authored route carries a `priority` (int `0..3`, `0` = best).
 Ranking is lexicographic:
 
-1. **Tier** — the worst priority a route is *forced* to touch (per-edge min of the
-   routes on it, maxed along the chain). A route that stays on well-rated arteries
-   beats one that dips into a badly-rated one **however long the detour**.
+1. **Tier** — the worst priority among the sub-routes a route actually *rides*: the
+   `max` priority over the runs of its max-HHI decomposition (the same chips the UI
+   shows). A route that rides only well-rated arteries beats one whose concentrated
+   corridor rides a badly-rated one **however long the detour**. Note this is
+   assignment-dependent: a road co-served by a good route escapes the downgrade only
+   when riding it *as* the good route is at least as concentrated — otherwise the
+   concentrated way to ride it is the bad one. (`Graph.edge_priority`, the per-edge
+   best, is a separate thing the generators use to hunt for a different corridor.)
 2. **Concentration** — within a tier, a priority-weighted Herfindahl (HHI) score
    over how the route's length splits across the authored routes it stitches
    (`w(p) = 1 - 0.2p`). Not fewest hops, not fewest merges.

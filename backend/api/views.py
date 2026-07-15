@@ -100,9 +100,10 @@ def path(request):
     Response: ``{"paths": [[...], ...], "meta": [{"routeCount", "match",
     "priority", "routes"}, ...], "compromisedDetour": [...]}`` — ``paths`` are the
     stop chains; ``meta[i]`` gives the match percentage (concentration), the
-    route's ``priority`` *tier* (the worst authored-route priority it is forced to
-    touch — why a longer route may outrank a shorter one, so the UI must surface
-    it), and which authored routes route ``i`` merges (labelled by their
+    route's ``priority`` *tier* (the worst priority among the sub-routes it rides,
+    i.e. the max over ``routes[].priority`` below — why a longer route may outrank a
+    shorter one, so the UI must surface it), and which authored routes route ``i``
+    merges (labelled by their
     endpoints, each with its own ``priority`` and a ``startIndex``/``endIndex``
     pair — inclusive, 0-based indices into ``paths[i]`` — for the stop range it
     covers). ``compromisedDetour`` lists compromised destinations that the natural

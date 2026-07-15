@@ -31,8 +31,8 @@ just the stop chains.
 
 import itertools
 
-from .concentration import PriorityMode, evaluate, tier
-from .core import path_edges
+from .concentration import PriorityMode, evaluate
+from .core import BEST_PRIORITY, path_edges
 from .search import (
     TRANSFER_WEIGHT,
     MinMergeStrategy,
@@ -71,9 +71,9 @@ class Route:
     """One result route: the stop chain plus how well it rides one good artery.
 
       * ``stops``          — full place-name chain (consecutive pairs are edges).
-      * ``priority``       — its *tier*: the worst authored-route priority it is
-                             forced to touch (``0`` = stays on the best arteries).
-                             The primary ranking key under
+      * ``priority``       — its *tier*: the worst priority among the sub-routes it
+                             rides — ``max`` over ``runs`` (``0`` = rides only the
+                             best arteries). The primary ranking key under
                              :data:`~.concentration.PriorityMode.HARD_TIER`.
       * ``hhi``            — priority-weighted concentration in ``[0, 1]`` (higher is
                              better — 1.0 means one priority-0 route covers it all).
@@ -239,11 +239,15 @@ class RouteFinder:
         return sum(1 for node in nodes if self.graph.is_crossroad(node))
 
     def _make_route(self, nodes):
-        """Wrap a stop chain in a scored :class:`Route` (exact concentration + tier)."""
+        """Wrap a stop chain in a scored :class:`Route` (exact concentration + tier).
+
+        The tier is the worst priority among the sub-routes :func:`evaluate` credits
+        (the chips the UI shows), so it is read straight off ``runs`` rather than
+        recomputed — see :func:`~.concentration.tier`.
+        """
         hhi, runs = evaluate(self.graph, nodes)
-        return Route(
-            nodes, hhi, runs, self._crossroad_hops(nodes), tier(self.graph, nodes)
-        )
+        priority = max((run.priority for run in runs), default=BEST_PRIORITY)
+        return Route(nodes, hhi, runs, self._crossroad_hops(nodes), priority)
 
     def _bidirectional_chains(self, forward, reverse):
         """Candidate chains generated from *both* endpoints, unioned.
@@ -292,15 +296,15 @@ class RouteFinder:
             nodes, _ = strategy.find(prefer)
             chains.append(nodes)
 
-            # "Ride this artery, without slumming through anything worse-rated than
-            # it." The plain prefer() above fills the gaps between stints on
-            # `route_id` with whatever is cheapest, which may dip into a badly-rated
-            # artery — but only *sometimes*, so re-searching for every artery
-            # unconditionally doubles the query for nothing. Ask the chain we just
-            # got: if it never dipped below this artery's own rating, the constrained
-            # search can only return the same corridor, so skip it.
+            # "Ride this artery, without crossing a road that can *only* be driven
+            # as something worse-rated than it." The plain prefer() above fills the
+            # gaps between stints on `route_id` with whatever is cheapest, which may
+            # cross such a road — but only *sometimes*, so re-searching for every
+            # artery unconditionally doubles the query for nothing. The constrained
+            # search differs only if the chain we just got actually crosses an edge
+            # the constraint would ban; otherwise it returns the same corridor, skip.
             floor = graph.route_priority(route_id)
-            if nodes and tier(graph, nodes) > floor:
+            if nodes and self._crosses_forced_below(nodes, floor):
                 nodes, _ = strategy.find(_add_penalties(prefer, self._avoid(floor)))
                 chains.append(nodes)
 
@@ -314,6 +318,16 @@ class RouteFinder:
         chains.extend(self._penalty_diversity(strategy))
 
         return self._dedup_chains(c for c in chains if c and len(c) >= 2)
+
+    def _crosses_forced_below(self, nodes, floor):
+        """Whether ``nodes`` crosses an edge the ``floor`` constraint would ban — an
+        edge whose *best* available route is still worse-rated than ``floor``, so it
+        can only be driven as something below it. Cheap (per-edge best), and exactly
+        the condition under which :func:`~.search.avoid_priority_penalty` changes the
+        search result."""
+        return any(
+            self.graph.edge_priority(a, b) > floor for a, b in zip(nodes, nodes[1:])
+        )
 
     def _avoid(self, max_priority):
         """:func:`~.search.avoid_priority_penalty`, memoised per tier.
@@ -348,8 +362,8 @@ class RouteFinder:
 
         Sorted best-first by ``(tier, -hhi, route_count, crossroad_hops,
         total_hops)`` — the tier first (:data:`~.concentration.PriorityMode.
-        HARD_TIER`), so a route that stays on well-rated arteries outranks one that
-        touches a badly-rated artery however much shorter it is; then highest
+        HARD_TIER`), so a route that rides only well-rated arteries outranks one
+        whose corridor rides a badly-rated one however much shorter it is; then highest
         concentration, then (among equally concentrated routes) fewest merged
         routes, fewest intersections, and shortest, with a final
         orientation-independent tie-break so the same corridor wins whichever way
