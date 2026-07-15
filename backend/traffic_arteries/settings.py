@@ -92,6 +92,12 @@ DATABASES = {
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS", "https://traffic-arteries.pages.dev"
 ).split(",")
+# Cloudflare Pages serves every deploy on a per-deployment/branch preview
+# subdomain (e.g. https://<hash>.traffic-arteries.pages.dev), so match those too
+# — otherwise the app works only on the bare production domain.
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://([a-z0-9-]+\.)?traffic-arteries\.pages\.dev$",
+]
 # Trusted origins for CSRF-checked POSTs (e.g. the admin login) under DEBUG=False.
 CSRF_TRUSTED_ORIGINS = [
     "https://traffic-arteries.onrender.com",
