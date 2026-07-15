@@ -1,13 +1,13 @@
-"""Filesystem "database".
+""""Database" backed by Cloudflare R2 (S3-compatible object storage).
 
-A :class:`Database` owns two JSON files under ``backend/data``:
+A :class:`Database` owns two JSON objects in an R2 bucket:
 
   * ``routes.json``      — the source of truth: the routes exactly as authored,
     each ``{"places": [place names], "priority": 0..3}`` (``0`` = best). The
-    priority is *not* copied into the derived graph file — it is re-attached from
+    priority is *not* copied into the derived graph object — it is re-attached from
     here on every load, so this stays the one place it lives.
   * ``edge_routes.json`` — the derived graph, rebuilt on every save so it can be
-    loaded straight from disk without recomputation. Each record is
+    loaded straight from the store without recomputation. Each record is
     ``[place_a, place_b, [authored route indices on that edge]]``: it carries both
     the topology (the adjacency is reconstructed from the edges) and the route
     provenance the router needs to find the most-concentrated path (riding one
@@ -16,19 +16,17 @@ A :class:`Database` owns two JSON files under ``backend/data``:
     so a route that skips stops another spells out doesn't fabricate a direct
     edge — ``routes.json`` keeps the originals, the graph sees the filled version.
 
-Writes are atomic (temp file + ``os.replace``) so a crash mid-write can never
-leave a half-written file. On first access an empty store is initialised.
+All object I/O goes through :mod:`utils.r2_storage`; ``PutObject`` is atomic per
+key, so no half-written object can be observed. On first access an empty store is
+initialised. The move off the local filesystem is what lets the backend run on
+Render's ephemeral disk (see ``build.sh`` / deployment notes).
 
-A module-level :data:`database` singleton, wired to ``settings.DATA_DIR``, is the
-instance the app uses; construct your own :class:`Database` (e.g. in tests) to
-point at a different directory.
+A module-level :data:`database` singleton (no key prefix) is the instance the app
+uses; construct your own :class:`Database` (e.g. in tests, against a mocked
+bucket) with a ``prefix`` to namespace its keys.
 """
 
-import json
-import os
-import tempfile
-
-from django.conf import settings
+from utils import r2_storage
 
 from .graph import BEST_PRIORITY, WORST_PRIORITY, Graph
 
@@ -65,41 +63,42 @@ def route_priority(route):
     return route.get("priority", BEST_PRIORITY) if isinstance(route, dict) else BEST_PRIORITY
 
 
-class Database:
-    """Routes + derived graph persisted as two JSON files in ``data_dir``."""
+def _join_key(prefix, name):
+    """Namespace an object key under an optional prefix (``""`` = no prefix)."""
+    prefix = (prefix or "").strip("/")
+    return f"{prefix}/{name}" if prefix else name
 
-    def __init__(self, data_dir=None):
-        base = data_dir if data_dir is not None else settings.DATA_DIR
-        self.routes_file = os.path.join(base, "routes.json")
+
+class Database:
+    """Routes + derived graph persisted as JSON objects in an R2 bucket.
+
+    ``prefix`` namespaces this instance's keys (default ``""`` = the bare keys
+    ``routes.json`` etc.); tests pass a prefix to isolate their objects.
+    """
+
+    def __init__(self, prefix=""):
+        self.routes_key = _join_key(prefix, "routes.json")
         # The derived graph: edges with their authored-route membership. Lets the
         # router find the route that rides one authored route as far as possible,
-        # and the adjacency is reconstructed from it — no separate adjacency file.
-        self.edge_routes_file = os.path.join(base, "edge_routes.json")
+        # and the adjacency is reconstructed from it — no separate adjacency object.
+        self.edge_routes_key = _join_key(prefix, "edge_routes.json")
         # Destinations temporarily marked unavailable, grouped (e.g. one group per
         # closure event): a list of lists of place names. Filtered out at read
         # time for routing/place-picking — routes.json/edge_routes.json never
         # change because of this.
-        self.compromised_file = os.path.join(base, "compromised.json")
+        self.compromised_key = _join_key(prefix, "compromised.json")
 
     # --- persistence primitives -------------------------------------------
 
     @staticmethod
-    def _atomic_write_json(path, data):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, path)
-        except Exception:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise
+    def _atomic_write_json(key, data):
+        # PutObject is atomic per key, so the name is kept for callers' intent
+        # even though there's no temp-file/rename dance anymore.
+        r2_storage.upload_json(key, data)
 
     @staticmethod
-    def _read_json(path):
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
+    def _read_json(key):
+        return r2_storage.download_json(key)
 
     # --- validation --------------------------------------------------------
 
@@ -191,15 +190,15 @@ class Database:
     # --- store lifecycle ---------------------------------------------------
 
     def _ensure_files(self):
-        if not os.path.exists(self.routes_file):
+        if not r2_storage.object_exists(self.routes_key):
             # Start empty; routes are added through the editor.
-            self._atomic_write_json(self.routes_file, [])
+            self._atomic_write_json(self.routes_key, [])
             self._rebuild_graph([])
-        elif not os.path.exists(self.edge_routes_file):
+        elif not r2_storage.object_exists(self.edge_routes_key):
             # routes exist but the derived graph is missing/stale — rebuild it.
-            self._rebuild_graph(self._read_json(self.routes_file))
-        if not os.path.exists(self.compromised_file):
-            self._atomic_write_json(self.compromised_file, [])
+            self._rebuild_graph(self._read_json(self.routes_key))
+        if not r2_storage.object_exists(self.compromised_key):
+            self._atomic_write_json(self.compromised_key, [])
 
     def _rebuild_graph(self, routes, lazy_gap=LAZY_GAP, confirmed_gap=CONFIRMED_GAP):
         """Derive and persist the graph from ``routes``.
@@ -218,7 +217,7 @@ class Database:
             [route_places(route) for route in routes], lazy_gap, confirmed_gap
         )
         graph = Graph.from_routes(filled, [route_priority(route) for route in routes])
-        self._atomic_write_json(self.edge_routes_file, graph.edge_routes_records)
+        self._atomic_write_json(self.edge_routes_key, graph.edge_routes_records)
         return graph
 
     @staticmethod
@@ -331,7 +330,7 @@ class Database:
         self._ensure_files()
         return [
             {"places": route_places(route), "priority": route_priority(route)}
-            for route in self._read_json(self.routes_file)
+            for route in self._read_json(self.routes_key)
         ]
 
     def load_graph(self):
@@ -342,7 +341,7 @@ class Database:
         """
         self._ensure_files()
         return Graph.from_edge_routes(
-            self._read_json(self.edge_routes_file),
+            self._read_json(self.edge_routes_key),
             [route["priority"] for route in self.load_routes()],
         )
 
@@ -352,13 +351,13 @@ class Database:
         Returns the cleaned routes that were saved.
         """
         cleaned = self.validate_routes(routes)
-        self._atomic_write_json(self.routes_file, cleaned)
+        self._atomic_write_json(self.routes_key, cleaned)
         self._rebuild_graph(cleaned)
         return cleaned
 
     def load_compromised(self):
         self._ensure_files()
-        return self._read_json(self.compromised_file)
+        return self._read_json(self.compromised_key)
 
     def compromised_places(self):
         """Flattened set of every destination marked unavailable, across all groups."""
@@ -371,7 +370,7 @@ class Database:
         """
         known = set(self.load_graph().places())
         cleaned = self.validate_compromised(groups, known)
-        self._atomic_write_json(self.compromised_file, cleaned)
+        self._atomic_write_json(self.compromised_key, cleaned)
         return cleaned
 
     def load_routable_graph(self):
@@ -386,5 +385,5 @@ class Database:
         return graph.without_places(compromised) if compromised else graph
 
 
-# The instance the app uses, backed by ``settings.DATA_DIR``.
+# The instance the app uses: the bare-key store in the configured R2 bucket.
 database = Database()

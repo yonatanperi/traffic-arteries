@@ -1,0 +1,5 @@
+# Development/test-only dependencies.
+-r requirements.txt
+
+# In-process S3 mock so the R2-backed storage tests run offline.
+moto[s3]>=5.0

@@ -1,8 +1,11 @@
 """Algorithm correctness tests, anchored on the spec's own example."""
 
-import tempfile
+import os
+from unittest import mock
 
+import boto3
 from django.test import SimpleTestCase
+from moto import mock_aws
 
 from .db import Database, ValidationError
 from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
@@ -15,6 +18,40 @@ SPEC_ROUTES = [
     ["C", "M", "N", "G", "E", "R"],
     ["E", "J", "K", "L", "A"],
 ]
+
+# Dummy R2 credentials + an AWS-style endpoint override so moto's mock (which only
+# recognizes AWS hostnames, not R2's) intercepts the boto3 calls in-process.
+_R2_TEST_ENV = {
+    "R2_ACCOUNT_ID": "test",
+    "R2_ACCESS_KEY_ID": "test",
+    "R2_SECRET_ACCESS_KEY": "test",
+    "R2_BUCKET_NAME": "traffic-arteries-test",
+    "R2_ENDPOINT_URL": "https://s3.amazonaws.com",
+}
+
+
+class R2BackedTestCase(SimpleTestCase):
+    """Backs the R2-persisted :class:`Database` with an in-process S3 mock, so the
+    storage tests run offline against a fresh bucket per test."""
+
+    def setUp(self):
+        super().setUp()
+        env = mock.patch.dict(os.environ, _R2_TEST_ENV)
+        env.start()
+        self.addCleanup(env.stop)
+
+        self._aws_mock = mock_aws()
+        self._aws_mock.start()
+        self.addCleanup(self._aws_mock.stop)
+
+        boto3.client(
+            "s3",
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+            region_name="us-east-1",
+        ).create_bucket(Bucket=_R2_TEST_ENV["R2_BUCKET_NAME"])
+
+        self.db = Database()
 
 
 class KShortestPathsTests(SimpleTestCase):
@@ -537,14 +574,9 @@ class PriorityCostGuardTests(SimpleTestCase):
         self.assertEqual(routes[0].priority, 0)
 
 
-class RoutePriorityStorageTests(SimpleTestCase):
+class RoutePriorityStorageTests(R2BackedTestCase):
     """routes.json stores {places, priority}; the bare-list shape predating
     priorities still loads, as all-best-priority."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.db = Database(data_dir=self.tmp.name)
 
     def test_saves_and_loads_priority(self):
         saved = self.db.save_routes(
@@ -619,14 +651,12 @@ class GraphShapeTests(SimpleTestCase):
         self.assertEqual(trimmed.neighbors("B"), ["A", "C"])
 
 
-class CompromisedDestinationsTests(SimpleTestCase):
+class CompromisedDestinationsTests(R2BackedTestCase):
     """Compromised destinations are excluded from routing/place-picking but
     never removed from routes.json/edge_routes.json themselves."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.db = Database(data_dir=self.tmp.name)
+        super().setUp()
         self.db.save_routes([["A", "B", "C"], ["C", "D", "E"]])
 
     def test_defaults_to_empty(self):
@@ -668,16 +698,14 @@ class CompromisedDestinationsTests(SimpleTestCase):
         self.assertEqual(finder.k_shortest_paths("A", "E"), [])
 
 
-class DetourNoticeTests(SimpleTestCase):
+class DetourNoticeTests(R2BackedTestCase):
     """`_split_by_compromise` (backend/api/views.py) — computed from a single
     RouteFinder run against the FULL graph: which compromised destinations the
     natural, unfiltered top-3 would have used, and which of the ranked results
     are actually clean (usable as the real response)."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.db = Database(data_dir=self.tmp.name)
+        super().setUp()
         self.db.save_routes([["A", "B", "C"], ["C", "D", "E"]])
 
     def test_sole_connector_compromised_shows_up_in_detour(self):

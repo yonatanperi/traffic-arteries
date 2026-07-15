@@ -9,8 +9,13 @@ export function setAccessToken(token) {
   accessToken = token;
 }
 
+// In dev VITE_API_URL is unset, so baseURL stays "/api" and the Vite dev
+// server proxies it to Django (same origin, no CORS). In production it's set
+// to the Render backend origin (e.g. https://traffic-arteries.onrender.com),
+// making cross-origin calls to that host's /api.
+const API_BASE = import.meta.env.VITE_API_URL ?? "";
 export const http = axios.create({
-  baseURL: "/api",
+  baseURL: `${API_BASE}/api`,
   headers: { "Content-Type": "application/json" },
 });
 
