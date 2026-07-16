@@ -12,6 +12,25 @@ from accounts.permissions import IsEditorOrAdmin
 from .db import ValidationError, database
 from .graph import RouteFinder
 
+# Product decision: a search shows the three best routes. Named rather than a
+# bare ``[:3]`` literal so the count lives in one place and never gets encoded as
+# a magic ``k`` — routing is asked for the full ranked pool (the ``k=None``
+# sentinel) and this is the only thing that truncates it.
+TOP_N = 3
+
+
+@api_view(["GET"])
+def health(request):
+    """Liveness probe for the frontend's startup gate.
+
+    Deliberately touches neither the R2 store nor the database — it answers as
+    soon as the process is up. The frontend polls this before rendering, so it
+    can wait out Render's free-tier cold start (a spun-down service takes tens
+    of seconds to wake) behind a single loader, instead of every page racing an
+    unfinished request and, e.g., reporting valid places as unknown.
+    """
+    return Response({"status": "ok"})
+
 
 @api_view(["GET"])
 def places(request):
@@ -73,18 +92,6 @@ def network(request):
     for node in payload["nodes"]:
         node["compromised"] = node["id"] in compromised_places
     return Response(payload)
-
-
-def _split_by_compromise(results, compromised):
-    """Split ranked results (best-first) into the routes that don't touch any
-    compromised destination, and which compromised destinations the natural
-    top-3 (before filtering) would have used. Both are unchanged/empty when
-    nothing is compromised."""
-    if not compromised:
-        return results, []
-    detour = sorted({stop for r in results[:3] for stop in r.stops} & compromised)
-    clean = [r for r in results if not (compromised & set(r.stops))]
-    return clean, detour
 
 
 @api_view(["POST"])
@@ -173,9 +180,25 @@ def path(request):
             offset += run.hops
         return metas
 
-    results = RouteFinder(graph).find_routes(start, end, k=None, via=via)
-    clean, detour = _split_by_compromise(results, compromised)
-    top = clean[:3]
+    # Rank the candidate pool once (the single sort), then select over it twice:
+    # the natural best (to report what the compromise costs) and the best that
+    # avoids compromised destinations (what we actually show). No re-sort, and the
+    # compromised-free results are *selected* — arena and diversity budget computed
+    # among showable routes — not a natural list with holes filtered out of it.
+    finder = RouteFinder(graph)
+    ranked, stretch = finder.rank_candidates(start, end, via=via)
+    natural = finder.select_diverse(ranked, k=None, max_stretch=stretch)
+    detour = (
+        sorted({stop for r in natural[:TOP_N] for stop in r.stops} & compromised)
+        if compromised
+        else []
+    )
+    clean = (
+        finder.select_diverse(ranked, k=None, max_stretch=stretch, exclude=compromised)
+        if compromised
+        else natural
+    )
+    top = clean[:TOP_N]
     paths = [r.stops for r in top]
     meta = [
         {

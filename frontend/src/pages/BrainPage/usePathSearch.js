@@ -25,7 +25,9 @@ export function usePathSearch(placeOptions = []) {
     setPathError("");
     setInvalidPlaces(new Set());
     const via = vias.map((v) => v.trim()).filter(Boolean);
-    const unknown = unknownPlaces([start, end, ...via], placeSet);
+    // Skip the guard until the place options have loaded — an empty set would
+    // otherwise flag valid places as unknown (see useRouteSearch).
+    const unknown = placeSet.size > 0 ? unknownPlaces([start, end, ...via], placeSet) : [];
     if (unknown.length > 0) {
       setInvalidPlaces(new Set(unknown));
       setPathError(unknownPlacesMessage(unknown));

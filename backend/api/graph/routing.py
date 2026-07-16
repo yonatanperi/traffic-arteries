@@ -15,10 +15,17 @@ chains and scores each one exactly:
      unbiased best and an edge-penalty diversity backfill. The dominant artery is
      the natural axis of diversity here, so this yields structurally different
      corridors, not one-hop tweaks.
-  2. **Score & rank** — evaluate each chain's exact tier + concentration, sort by
-     tier first, then concentration.
-  3. **Select** — greedily keep the best, then each next-best that is different
-     enough (edge overlap) and not an excessive detour, up to ``k``.
+  2. **Rank** — :meth:`RouteFinder.rank_candidates` scores each chain's exact
+     concentration and sorts the pool once, best-concentration-first. This is the
+     only expensive step, and it happens once per query.
+  3. **Select** — :meth:`RouteFinder.select_diverse` walks that ranked pool with a
+     *priority arena*: round 1 admits only tier-0 routes and picks the most
+     concentrated diverse one; after yielding a route of priority ``X`` the next
+     round admits priority ``≤ X + 1``. So a concentrated tier>0 corridor surfaces
+     as an alternative once the arena opens to its tier, while the headline result
+     stays the best tier-0 route. Selection is cheap and can run more than once
+     over the one ranked pool (e.g. with and without an ``exclude`` set), which is
+     how compromised-destination filtering avoids a second sort.
 
 The priority-aware passes are skipped whenever no authored route is rated worse
 than best (the common case), so the search costs exactly what it did before
@@ -26,7 +33,9 @@ priorities existed.
 
 Call :meth:`RouteFinder.find_routes` for the rich results (stops + concentration +
 which authored routes are merged) or :meth:`RouteFinder.k_shortest_paths` for
-just the stop chains.
+just the stop chains. :meth:`rank_candidates` + :meth:`select_diverse` are the
+two-step form for callers (e.g. :func:`api.views.path`) that need to select more
+than once over a single ranked pool.
 """
 
 import itertools
@@ -123,13 +132,18 @@ class RouteFinder:
         self.max_stretch = max_stretch
         self._avoid_cache = {}  # tier -> its avoid-penalty map (see :meth:`_avoid`)
 
-    def find_routes(self, start, end, k=3, via=None):
+    def find_routes(self, start, end, k=3, via=None, exclude=None):
         """Return up to ``k`` diverse :class:`Route` results, best first.
 
         ``via`` is an optional list of *required stops* the route must pass
         through (visited in an optimised order, alternatives kept tight so none
         detours around an already-short connection). "Best" is the route with the
         highest concentration — the one riding a single authored route furthest.
+
+        ``exclude`` is an optional set of place names to keep out of every result
+        (any route touching one is dropped) — a generic hook the caller uses for
+        temporarily-unavailable destinations; the router itself stays oblivious to
+        why a place is excluded.
 
         ``k=None`` lifts the cap entirely, returning every diverse candidate the
         pool contains (still subject to ``max_overlap``/``max_stretch`` — not
@@ -138,42 +152,63 @@ class RouteFinder:
         ``k`` is ever consulted, so raising (or removing) the cap doesn't repeat
         any work — it only changes how many already-ranked results are kept.
 
+        This is the one-call convenience over :meth:`rank_candidates` +
+        :meth:`select_diverse`; callers that select more than once over a single
+        ranked pool should use those directly.
+
         Edge cases:
           * ``start == end`` (no ``via``) -> a single trivial ``Route([start])``
           * ``start``/``end``/``via`` absent from graph -> ``[]``
           * no connection / unreachable stop           -> ``[]``
         """
+        ranked, stretch = self.rank_candidates(start, end, via=via)
+        return self.select_diverse(ranked, k=k, max_stretch=stretch, exclude=exclude)
+
+    def rank_candidates(self, start, end, via=None):
+        """Generate and score this query's candidate pool, sorted once.
+
+        Returns ``(ranked, max_stretch)``: the scored :class:`Route` objects
+        best-concentration-first, and the stretch bound :meth:`select_diverse`
+        should apply (tighter when ``via`` stops are required). This is the
+        expensive step — generation, exact scoring, and the single sort — so a
+        caller that needs several selections (e.g. with and without an exclusion
+        set) does it once and hands ``ranked`` to :meth:`select_diverse` repeatedly.
+
+        Edge cases mirror :meth:`find_routes`: an unknown endpoint/stop or no
+        connection yields an empty pool; ``start == end`` (no ``via``) yields the
+        single trivial ``Route([start])``.
+        """
         graph = self.graph
         waypoints = self._normalise_waypoints(start, end, via)
 
         if start not in graph or end not in graph:
-            return []
+            return [], self.max_stretch
         if any(stop not in graph for stop in waypoints):
-            return []
+            return [], self.max_stretch
 
         # No required stops -> plain point-to-point concentration search.
         if not waypoints:
             if start == end:
-                return [self._make_route([start])]
+                return [self._make_route([start])], self.max_stretch
             chains = self._bidirectional_chains(
                 MinMergeStrategy(graph, start, end),
                 MinMergeStrategy(graph, end, start),
             )
-            return self._select_diverse(chains, k, self.max_stretch)
+            return self._rank(chains), self.max_stretch
 
         # Required stops -> strict simple paths, tightly bounded. Try candidate
-        # stop orders cheapest-first and keep the first order that yields a route.
+        # stop orders cheapest-first and keep the first order that yields a pool.
         stretch = min(self.max_stretch, WAYPOINT_MAX_STRETCH)
         for points in self._ordered_point_lists(start, end, waypoints):
             chains = self._bidirectional_chains(
                 WaypointStrategy(graph, points),
                 WaypointStrategy(graph, points[::-1]),
             )
-            routes = self._select_diverse(chains, k, stretch)
-            if routes:
-                return routes
+            ranked = self._rank(chains)
+            if ranked:
+                return ranked, stretch
 
-        return []
+        return [], stretch
 
     def k_shortest_paths(self, start, end, k=3, via=None):
         """Backward-compatible view of :meth:`find_routes`: just the stop chains."""
@@ -283,7 +318,7 @@ class RouteFinder:
         artery*, so the pool is: the unbiased best, one candidate per authored
         route biased to ride it (:func:`~.search.prefer_route_penalty`), the
         priority-aware corridors below, and an edge-penalty diversity backfill for
-        extra corridors. Scoring/selection is left to :meth:`_select_diverse`.
+        extra corridors. Scoring/selection is left to :meth:`select_diverse`.
         """
         graph = self.graph
         chains = []
@@ -357,35 +392,22 @@ class RouteFinder:
                 penalty[edge] = penalty.get(edge, 0.0) + self.penalty_step
             yield nodes
 
-    def _select_diverse(self, chains, k, max_stretch):
-        """Score the candidate chains and greedily pick up to ``k`` diverse routes.
+    def _rank(self, chains):
+        """Score each candidate chain and sort the pool once, concentration-first.
 
-        Sorted best-first by ``(tier, -hhi, route_count, crossroad_hops,
-        total_hops)`` — the tier first (:data:`~.concentration.PriorityMode.
-        HARD_TIER`), so a route that rides only well-rated arteries outranks one
-        whose corridor rides a badly-rated one however much shorter it is; then highest
-        concentration, then (among equally concentrated routes) fewest merged
-        routes, fewest intersections, and shortest, with a final
-        orientation-independent tie-break so the same corridor wins whichever way
-        the query is posed. A candidate is kept only if it is neither a
-        near-duplicate of an accepted route (``max_overlap`` of its edges) nor an
-        excessive detour — more than ``max_stretch`` times the best route's stop
-        count. If fewer than ``k`` distinct corridors exist, fewer are returned;
-        near-duplicates never pad the list. ``k=None`` keeps every candidate that
-        survives those checks, uncapped by count.
-
-        Priority **ranks, it never filters**: the list stays complete, merely
-        tier-ordered. So when the best tier holds only one distinct corridor, the
-        alternatives fall through to worse tiers rather than the result list
-        collapsing to a single route — you still get real alternatives, ordered so
-        the clean one leads. (Callers surface :attr:`Route.priority` so a long
-        tier-0 detour outranking a short tier-2 hop is *visible* rather than
-        looking like a bug.)
+        The single expensive ordering step. The key is
+        ``(-hhi, route_count, crossroad_hops, total_hops, canonical orientation)``:
+        highest concentration first, then (among equally concentrated routes)
+        fewest merged routes, fewest intersections, shortest, and a final
+        orientation-independent tie-break so the same corridor sorts the same way
+        whichever direction the query is posed. Priority is deliberately **not** in
+        this key — the tier gate belongs to :meth:`select_diverse`'s arena, so one
+        ranked pool can be selected over with different priority behaviour without
+        re-sorting.
         """
         routes = [self._make_route(nodes) for nodes in chains]
         routes.sort(
             key=lambda r: (
-                r.priority if PriorityMode.HARD_TIER else 0,
                 -r.hhi,
                 r.route_count,
                 r.crossroad_hops,
@@ -393,26 +415,115 @@ class RouteFinder:
                 min(tuple(r.stops), tuple(r.stops[::-1])),  # canonical orientation
             )
         )
-        if not routes:
-            return []
+        return routes
 
-        best_stops = len(routes[0].stops)  # the best route sets the length baseline
+    def select_diverse(self, ranked, k=None, max_stretch=None, exclude=None):
+        """Pick up to ``k`` diverse routes from a pre-ranked pool via priority arenas.
+
+        ``ranked`` is a concentration-first list from :meth:`rank_candidates` /
+        :meth:`_rank`. Selection is a cheap greedy walk, so it can run several
+        times over one ranked pool (the whole point of splitting it from ranking).
+
+        **Priority arena.** Under :data:`~.concentration.PriorityMode.HARD_TIER`,
+        each round has an arena ``X``: only candidates with ``priority <= X`` are
+        eligible, and the most concentrated diverse one among them is taken. Round
+        one's arena is ``0`` (so the headline result is the best tier-0 route);
+        after a round yields a route of priority ``X`` the next arena is ``X + 1``.
+        A concentrated tier>0 corridor therefore surfaces as an alternative exactly
+        when it out-concentrates the remaining same-or-lower-tier options, and
+        results descend at most one tier per slot. If no candidate is eligible at
+        the current arena (a tier is absent, or none exists at ``0``), the arena
+        jumps to the cheapest priority still present rather than the list
+        collapsing. With ``HARD_TIER`` off, arenas are skipped and selection is
+        plain concentration-first.
+
+        Priority **ranks, it never filters**: the pool stays complete, merely
+        arena-ordered, so you still get real alternatives — ordered so the clean
+        one leads. (Callers surface :attr:`Route.priority` so a long tier-0 route
+        outranking a short tier>0 one is *visible* rather than looking like a bug.)
+
+        A candidate is kept only if it is neither a near-duplicate of an accepted
+        route (``max_overlap`` of its edges) nor an excessive detour — more than
+        ``max_stretch`` times the best route's stop count. ``exclude`` is a set of
+        place names; any candidate touching one is dropped from the pool up front,
+        so the arena and diversity budget are computed among the routes that can
+        actually be shown. ``k=None`` keeps every survivor, uncapped by count.
+        """
+        if not ranked:
+            return []
+        if max_stretch is None:
+            max_stretch = self.max_stretch
+        hard = PriorityMode.HARD_TIER
+
+        # The eventual #1 (best under the full priority-first key) sets the length
+        # baseline — a `min` scan, not a second sort.
+        best = min(
+            ranked,
+            key=lambda r: (
+                r.priority if hard else 0,
+                -r.hhi,
+                r.route_count,
+                r.crossroad_hops,
+                r.total_hops,
+                min(tuple(r.stops), tuple(r.stops[::-1])),
+            ),
+        )
+        best_stops = len(best.stops)
+
         accepted = []
         accepted_edges = []  # edge set per accepted route, parallel to ``accepted``
-        for route in routes:
-            if k is not None and len(accepted) >= k:
-                break
-            edges = frozenset(path_edges(route.stops))
+
+        def passes(route, edges):
             if any(edges == prior for prior in accepted_edges):
-                continue
+                return False
             if len(route.stops) > best_stops * max_stretch:
-                continue  # too long a detour to be a useful alternative
-            if any(
+                return False  # too long a detour to be a useful alternative
+            if edges and any(
                 len(edges & prior) / len(edges) > self.max_overlap
                 for prior in accepted_edges
             ):
+                return False
+            return True
+
+        remaining = [
+            r for r in ranked if not (exclude and exclude.intersection(r.stops))
+        ]
+
+        if not hard:
+            for route in remaining:
+                if k is not None and len(accepted) >= k:
+                    break
+                edges = frozenset(path_edges(route.stops))
+                if passes(route, edges):
+                    accepted.append(route)
+                    accepted_edges.append(edges)
+            return accepted
+
+        # Priority-arena walk. ``remaining`` stays concentration-ordered, so the
+        # first eligible (priority <= arena) candidate that passes is the most
+        # concentrated one in the arena.
+        arena = 0
+        while remaining and (k is None or len(accepted) < k):
+            picked = picked_edges = None
+            for route in list(remaining):
+                if route.priority > arena:
+                    continue  # not in this arena yet; keep for a later, wider one
+                edges = frozenset(path_edges(route.stops))
+                if passes(route, edges):
+                    picked, picked_edges = route, edges
+                    break
+                remaining.remove(route)  # a greedy reject can never pass later
+            if picked is None:
+                # Nothing eligible at this arena: open it to the cheapest tier
+                # still present rather than stopping short.
+                beyond = [r.priority for r in remaining if r.priority > arena]
+                if not beyond:
+                    break
+                arena = min(beyond)
                 continue
-            accepted.append(route)
-            accepted_edges.append(edges)
+            accepted.append(picked)
+            accepted_edges.append(picked_edges)
+            remaining.remove(picked)
+            arena = picked.priority + 1
 
         return accepted

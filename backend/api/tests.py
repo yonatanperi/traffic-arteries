@@ -10,7 +10,6 @@ from moto import mock_aws
 from .db import Database, ValidationError
 from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
 from .graph.search import MinMergeStrategy, avoid_priority_penalty
-from .views import _split_by_compromise
 
 # The example from the spec.
 SPEC_ROUTES = [
@@ -549,6 +548,77 @@ class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
         self.assertEqual(results[1].priority, 2)   # the concentrated ride is still offered
 
 
+# A strong tier-0 headline, a competitive tier-1 corridor, and two weaker tier-0
+# corridors. Under the old priority-first sort the top-3 would be the three tier-0
+# routes and the tier-1 one would never show. Under the priority arena, once #1
+# (the strong tier-0) is taken the arena opens to 1 and the concentrated tier-1
+# corridor out-concentrates the weak tier-0 alternatives, surfacing at #2.
+ARENA_ROUTES = [
+    ["S", "a1", "a2", "a3", "T"],   # 0: strong tier-0 single artery -> hhi 1.0
+    ["S", "q1", "q2", "q3", "T"],   # 1: tier-1 single artery       -> hhi 0.8
+    ["S", "b1", "b2"],              # 2..3: weak tier-0 patchwork    -> hhi 0.5
+    ["b2", "b3", "T"],
+    ["S", "c1", "c2"],              # 4..5: another weak tier-0 patchwork
+    ["c2", "c3", "T"],
+    # stubs so every interior node is a real crossroad (carries length)
+    ["a1", "za1"], ["a2", "za2"], ["a3", "za3"],
+    ["q1", "zq1"], ["q2", "zq2"], ["q3", "zq3"],
+    ["b1", "zb1"], ["b2", "zb2"], ["b3", "zb3"],
+    ["c1", "zc1"], ["c2", "zc2"], ["c3", "zc3"],
+]
+ARENA_PRIORITIES = [0, 1, 0, 0, 0, 0] + [0] * 12
+
+
+class PriorityArenaTests(SimpleTestCase):
+    """The priority arena surfaces a concentrated tier>0 corridor as an
+    alternative once it out-concentrates the remaining same-or-lower-tier
+    options — instead of the top-3 collapsing to only tier-0 routes."""
+
+    def setUp(self):
+        self.graph = Graph.from_routes(ARENA_ROUTES, ARENA_PRIORITIES)
+        self.finder = RouteFinder(self.graph)
+
+    def test_concentrated_higher_tier_surfaces_as_alternative(self):
+        results = self.finder.find_routes("S", "T", k=3)
+        self.assertEqual([r.priority for r in results], [0, 1, 0])
+        # #1 is the perfect tier-0 ride; #2 is the tier-1 artery, which surfaces
+        # even though the displaced tier-0 alternative (#3) is *less* concentrated.
+        self.assertAlmostEqual(results[0].hhi, 1.0)
+        self.assertAlmostEqual(results[1].hhi, 0.8)
+        self.assertGreater(results[1].hhi, results[2].hhi)
+
+    def test_headline_is_still_the_best_tier_zero_route(self):
+        # The arena never demotes the genuine best: round one admits only tier 0.
+        results = self.finder.find_routes("S", "T", k=3)
+        self.assertEqual(results[0].stops, ["S", "a1", "a2", "a3", "T"])
+        self.assertEqual(results[0].priority, 0)
+
+
+class SelectDiverseExclusionTests(SimpleTestCase):
+    """`select_diverse(exclude=...)` drops any candidate touching an excluded
+    place from the pool up front, so it never occupies a slot nor spends the
+    diversity budget — the generic hook views.path uses for compromised places."""
+
+    # Two disjoint S->T corridors, one through M and one through N.
+    ROUTES = [["S", "M", "T"], ["S", "N", "T"], ["M", "zm"], ["N", "zn"]]
+
+    def setUp(self):
+        self.finder = RouteFinder(Graph.from_routes(self.ROUTES))
+
+    def test_excluded_place_is_kept_out_of_results(self):
+        ranked, stretch = self.finder.rank_candidates("S", "T")
+        # Unfiltered, both corridors are offered.
+        both = self.finder.select_diverse(ranked, k=None, max_stretch=stretch)
+        self.assertIn(["S", "M", "T"], [r.stops for r in both])
+        self.assertIn(["S", "N", "T"], [r.stops for r in both])
+        # Excluding M leaves only the N corridor — selected over the same pool,
+        # no re-rank.
+        clean = self.finder.select_diverse(
+            ranked, k=None, max_stretch=stretch, exclude={"M"}
+        )
+        self.assertEqual([r.stops for r in clean], [["S", "N", "T"]])
+
+
 class PriorityCostGuardTests(SimpleTestCase):
     """With nothing downgraded, priority cannot change any ranking — so none of the
     priority-aware machinery may run."""
@@ -699,33 +769,49 @@ class CompromisedDestinationsTests(R2BackedTestCase):
 
 
 class DetourNoticeTests(R2BackedTestCase):
-    """`_split_by_compromise` (backend/api/views.py) — computed from a single
-    RouteFinder run against the FULL graph: which compromised destinations the
-    natural, unfiltered top-3 would have used, and which of the ranked results
-    are actually clean (usable as the real response)."""
+    """The compromised split in views.path: one ranked pool (a single sort),
+    selected twice — the natural best (to report which compromised destinations
+    the top-N would have used) and the best avoiding them (the real response)."""
+
+    TOP_N = 3
 
     def setUp(self):
         super().setUp()
         self.db.save_routes([["A", "B", "C"], ["C", "D", "E"]])
 
+    def _split(self, start, end):
+        """Mirror views.path: rank once, select natural + compromised-free."""
+        finder = RouteFinder(self.db.load_graph())
+        compromised = self.db.compromised_places()
+        ranked, stretch = finder.rank_candidates(start, end)
+        natural = finder.select_diverse(ranked, k=None, max_stretch=stretch)
+        detour = (
+            sorted({s for r in natural[: self.TOP_N] for s in r.stops} & compromised)
+            if compromised
+            else []
+        )
+        clean = (
+            finder.select_diverse(ranked, k=None, max_stretch=stretch, exclude=compromised)
+            if compromised
+            else natural
+        )
+        return [r.stops for r in clean], detour, [r.stops for r in natural]
+
     def test_sole_connector_compromised_shows_up_in_detour(self):
         self.db.save_compromised([["C"]])
-        results = RouteFinder(self.db.load_graph()).find_routes("A", "E", k=None)
-        clean, detour = _split_by_compromise(results, self.db.compromised_places())
+        clean, detour, _ = self._split("A", "E")
         self.assertEqual(detour, ["C"])
         self.assertEqual(clean, [])
 
     def test_nothing_compromised_leaves_results_untouched(self):
-        results = RouteFinder(self.db.load_graph()).find_routes("A", "E", k=None)
-        clean, detour = _split_by_compromise(results, self.db.compromised_places())
+        clean, detour, natural = self._split("A", "E")
         self.assertEqual(detour, [])
-        self.assertEqual(clean, results)
+        self.assertEqual(clean, natural)  # clean is exactly the natural selection
 
     def test_unrelated_compromise_does_not_trigger_detour(self):
         # F is an unrelated branch off C; the natural A-E route never touches it.
         self.db.save_routes([["A", "B", "C"], ["C", "D", "E"], ["C", "F"]])
         self.db.save_compromised([["F"]])
-        results = RouteFinder(self.db.load_graph()).find_routes("A", "E", k=None)
-        clean, detour = _split_by_compromise(results, self.db.compromised_places())
+        clean, detour, natural = self._split("A", "E")
         self.assertEqual(detour, [])
-        self.assertEqual(clean, results)
+        self.assertEqual(clean, natural)  # excluding an unused place changes nothing

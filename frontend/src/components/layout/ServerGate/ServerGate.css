@@ -1,0 +1,15 @@
+.server-gate {
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  text-align: center;
+}
+
+.server-gate-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}

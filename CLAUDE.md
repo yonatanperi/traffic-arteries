@@ -11,7 +11,7 @@ filesystem JSON store (no SQL). The UI is Hebrew/RTL.
 
 **The routing objective is concentration, not shortest-path**, gated by a hard
 priority tier. Each authored route carries a `priority` (int `0..3`, `0` = best).
-Ranking is lexicographic:
+Two levels judge a route's quality (and pick the single best result):
 
 1. **Tier** — the worst priority among the sub-routes a route actually *rides*: the
    `max` priority over the runs of its max-HHI decomposition (the same chips the UI
@@ -28,15 +28,26 @@ Ranking is lexicographic:
 Both are non-additive, so they can't be optimized inside a single shortest-path
 search; `backend/api/graph/routing.py` generates a pool of candidate corridors
 (one biased toward each authored route, one confined to each priority tier) and
-scores each exactly (`concentration.py`) before picking the top-3 diverse results.
-Two static flags exist to experiment with: `LengthMode.CROSSROADS_ONLY` and
-`PriorityMode.HARD_TIER` (both in `concentration.py`).
+scores each exactly (`concentration.py`). The pool is sorted **once** by
+concentration (`RouteFinder.rank_candidates`), then the top-3 are assembled by a
+**priority-arena** walk (`RouteFinder.select_diverse`): round one admits only
+tier-0 routes, so the headline result is the best tier-0 corridor; after a slot of
+priority `X` the next round admits `priority ≤ X + 1`. So a *concentrated* higher-tier
+corridor surfaces as an alternative exactly when it out-concentrates the remaining
+better-tier options, and the list descends at most one tier per slot. Splitting
+rank-once from select-cheaply also lets `views.path` select twice over the one
+pool — natural, and compromised-free — without a second sort. Two static flags
+exist to experiment with: `LengthMode.CROSSROADS_ONLY` and `PriorityMode.HARD_TIER`
+(both in `concentration.py`; flipping `HARD_TIER` off drops the arena for a plain
+concentration-first pick).
 
-Priority **ranks, it never filters** — the candidate list stays complete, merely
-tier-ordered, so alternatives fall through to worse tiers rather than the result
-list collapsing to one route. Because a longer route can therefore outrank a
-shorter one, the tier is returned in the API meta and **must** stay visible in the
-UI, or it reads as a bug.
+Priority **ranks, it never filters** — the pool stays complete, merely
+arena-ordered, so a concentrated tier>0 corridor appears as a real alternative
+(and, when the best tier holds only one corridor, the next slots still fall
+through to worse tiers) rather than the result list collapsing to one route.
+Because a longer or lower-concentration route can therefore appear above a shorter
+one, the tier is returned in the API meta and **must** stay visible in the UI, or
+it reads as a bug.
 
 Read the module docstrings in `backend/api/graph/` (`core.py`, `search.py`,
 `concentration.py`, `routing.py`) before touching the algorithm — each lays
@@ -83,8 +94,9 @@ backend/
                         WaypointStrategy) over (node, active_route) state
     concentration.py   evaluate(): exact HHI scoring of a stop chain via a
                         chain-DP over route-credit assignments
-    routing.py         RouteFinder: generates diverse candidate chains, scores
-                        them, and greedily selects up to k non-overlapping ones
+    routing.py         RouteFinder: generates + scores + sorts candidate chains
+                        once (rank_candidates), then a priority-arena greedy pick
+                        of up to k non-overlapping ones (select_diverse)
   api/db.py            filesystem "database" — see below
   api/views.py         DRF function views (@api_view + Response), thin
   api/urls.py           /api/places/, /api/routes/, /api/compromised/, /api/graph/, /api/path/
@@ -198,19 +210,27 @@ values. The theme is dark-only (no light-mode branch to maintain).
 ### Route search flow (a request through the system)
 
 1. `POST /api/path/` with `{start, end, via}` → `views.path`.
-2. `database.load_routable_graph()` — the derived graph minus compromised places.
-3. `RouteFinder(graph).find_routes(start, end, k=3, via=via)`:
-   - No `via`: `routing.py` runs `MinMergeStrategy` from both directions,
-     biased once per authored route (`prefer_route_penalty`) plus an
-     edge-penalty diversity backfill, to build a candidate pool.
+2. `database.load_graph()` — the **full** derived graph (compromised places
+   included, so the detour report can see what the natural best would have used),
+   plus `database.compromised_places()` as the exclusion set.
+3. `finder.rank_candidates(start, end, via=via)` — the single expensive step
+   (generate + score + one sort):
+   - No `via`: `MinMergeStrategy` from both directions, biased once per authored
+     route (`prefer_route_penalty`) plus an edge-penalty diversity backfill, to
+     build the candidate pool.
    - With `via`: `WaypointStrategy` over optimized stop orderings (bounded by
      `MAX_OPTIMIZED_WAYPOINTS`; a small TSP over hop-count heuristics).
-   - Every candidate is scored exactly by `concentration.evaluate` (the HHI),
-     then `_select_diverse` greedily keeps up to `k` results that are neither
-     near-duplicates (`max_overlap`) nor excessive detours (`max_stretch`).
-4. Response carries `paths` (stop chains) and `meta` (per-result HHI as
-   `match`, and which authored routes — labeled by their endpoints — each
-   result merges).
+   - Each candidate is scored exactly by `concentration.evaluate` (the HHI) and
+     the pool is sorted once, concentration-first.
+4. `finder.select_diverse(ranked, k=None, exclude=…)` — a cheap priority-arena
+   greedy pick (neither near-duplicates by `max_overlap` nor excessive detours by
+   `max_stretch`), run **twice** over the one ranked pool: once natural (the
+   `compromisedDetour` = compromised places the natural top-`TOP_N` would use) and
+   once with `exclude=compromised` (the results actually shown). The `TOP_N` (=3)
+   truncation is the only place the result count lives — never a magic `k`.
+5. Response carries `paths` (stop chains), `meta` (per-result HHI as `match`, the
+   priority tier, and which authored routes — labeled by their endpoints — each
+   result merges), and `compromisedDetour`.
 
 ### Frontend/backend contract notes
 

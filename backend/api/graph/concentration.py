@@ -94,7 +94,7 @@ class PriorityMode:
 
     The weighted score (:func:`evaluate`) is in play either way; this flag only
     controls whether the tier gates ahead of it. See :meth:`.routing.RouteFinder.
-    _select_diverse` for the sort it feeds.
+    select_diverse` for the arena it feeds.
     """
 
     HARD_TIER = True

@@ -5,6 +5,13 @@
 
 import { http, unwrap } from "./httpClient.js";
 
+// Lightweight liveness probe (touches no store/DB) used by the startup gate to
+// wait out Render's free-tier cold start. Short per-attempt timeout so a request
+// that hangs during boot is retried instead of blocking forever.
+export function getHealth() {
+  return unwrap(http.get("/health/", { timeout: 8000 }));
+}
+
 export function getPlaces() {
   return unwrap(http.get("/places/"));
 }

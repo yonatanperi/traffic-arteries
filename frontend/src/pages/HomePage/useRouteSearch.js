@@ -52,7 +52,10 @@ export function useRouteSearch() {
       return;
     }
     const via = vias.map((v) => v.trim()).filter(Boolean);
-    const unknown = unknownPlaces([start.trim(), end.trim(), ...via], placeSet);
+    // Only assert "unknown" once the place universe is actually loaded; an empty
+    // set means the /api/places/ fetch hasn't landed yet (e.g. start/end were
+    // prefilled from the URL), and flagging valid places then is a false error.
+    const unknown = placeSet.size > 0 ? unknownPlaces([start.trim(), end.trim(), ...via], placeSet) : [];
     if (unknown.length > 0) {
       setInvalidPlaces(new Set(unknown));
       setError(unknownPlacesMessage(unknown));
