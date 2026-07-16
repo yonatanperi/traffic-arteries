@@ -104,7 +104,11 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
         // Hovering a chip previews it even while another is pinned; once the
         // mouse leaves, the view falls back to whatever is pinned.
         const active =
-          hovered?.pathIndex === i ? hovered : pinned?.pathIndex === i ? pinned : null;
+          hovered?.pathIndex === i
+            ? hovered
+            : pinned?.pathIndex === i
+              ? pinned
+              : null;
         const highlightedStops = active
           ? new Set(path.slice(active.startIndex, active.endIndex + 1))
           : null;
@@ -190,8 +194,8 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                           }
                           onMouseLeave={() => setHovered(null)}
                           onClick={() =>
-                            setPinned(
-                              isChipPinned
+                            setPinned((prev) =>
+                              prev
                                 ? null
                                 : {
                                     pathIndex: i,
@@ -209,7 +213,9 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                             </span>
                           )}
                           {typeof r.share === "number" && (
-                            <span className="merge-route-share">{r.share}%</span>
+                            <span className="merge-route-share">
+                              {r.share}%
+                            </span>
                           )}
                         </Pill>
                         {isChipPinned && canEditRoutes && (
