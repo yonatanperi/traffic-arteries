@@ -16,8 +16,8 @@ A :class:`Database` owns two JSON objects in an R2 bucket:
     so a route that skips stops another spells out doesn't fabricate a direct
     edge — ``routes.json`` keeps the originals, the graph sees the filled version.
 
-All object I/O goes through :mod:`utils.r2_storage`; ``PutObject`` is atomic per
-key, so no half-written object can be observed. On first access an empty store is
+All object I/O goes through the :data:`~utils.r2_storage.storage` facade; writes
+are atomic per key, so no half-written object can be observed. On first access an empty store is
 initialised. The move off the local filesystem is what lets the backend run on
 Render's ephemeral disk (see ``build.sh`` / deployment notes).
 
@@ -26,7 +26,7 @@ uses; construct your own :class:`Database` (e.g. in tests, against a mocked
 bucket) with a ``prefix`` to namespace its keys.
 """
 
-from utils import r2_storage
+from utils.r2_storage import storage
 
 from .graph import BEST_PRIORITY, WORST_PRIORITY, Graph
 
@@ -92,13 +92,12 @@ class Database:
 
     @staticmethod
     def _atomic_write_json(key, data):
-        # PutObject is atomic per key, so the name is kept for callers' intent
-        # even though there's no temp-file/rename dance anymore.
-        r2_storage.upload_json(key, data)
+        # The store writes atomically per key; the name is kept for callers' intent.
+        storage.upload_json(key, data)
 
     @staticmethod
     def _read_json(key):
-        return r2_storage.download_json(key)
+        return storage.download_json(key)
 
     # --- validation --------------------------------------------------------
 
@@ -190,14 +189,14 @@ class Database:
     # --- store lifecycle ---------------------------------------------------
 
     def _ensure_files(self):
-        if not r2_storage.object_exists(self.routes_key):
+        if not storage.object_exists(self.routes_key):
             # Start empty; routes are added through the editor.
             self._atomic_write_json(self.routes_key, [])
             self._rebuild_graph([])
-        elif not r2_storage.object_exists(self.edge_routes_key):
+        elif not storage.object_exists(self.edge_routes_key):
             # routes exist but the derived graph is missing/stale — rebuild it.
             self._rebuild_graph(self._read_json(self.routes_key))
-        if not r2_storage.object_exists(self.compromised_key):
+        if not storage.object_exists(self.compromised_key):
             self._atomic_write_json(self.compromised_key, [])
 
     def _rebuild_graph(self, routes, lazy_gap=LAZY_GAP, confirmed_gap=CONFIRMED_GAP):

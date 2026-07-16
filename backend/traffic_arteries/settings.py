@@ -1,6 +1,7 @@
 """Django settings for traffic_arteries.
 
-Route/graph data lives in the R2 object store (``api/db.py`` + ``utils/r2_storage``);
+Route/graph data lives in the R2 object store when R2 is configured, else in an
+on-disk JSON store under ``backend/data`` (``api/db.py`` + ``utils/r2_storage``);
 the ``accounts`` app uses the real ORM/database (SQLite locally, Neon Postgres in
 production) for users. Config is environment-driven with local-dev fallbacks: a
 git-ignored ``backend/.env`` (see ``.env.example``) is loaded on startup, so

@@ -15,7 +15,7 @@ import os
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from utils import r2_storage
+from utils.r2_storage import storage
 
 # The three objects the store owns. Each local filename maps 1:1 to its R2 key
 # (the app uses bare, unprefixed keys — see api/db.py).
@@ -41,5 +41,5 @@ class Command(BaseCommand):
                 continue
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            r2_storage.upload_json(name, data)
+            storage.upload_json(name, data)
             self.stdout.write(self.style.SUCCESS(f"uploaded {name} -> r2://{name}"))
