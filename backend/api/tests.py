@@ -7,7 +7,7 @@ import boto3
 from django.test import SimpleTestCase
 from moto import mock_aws
 
-from .db import Database, ValidationError
+from .db import Database, ValidationError, expand_route, expand_routes
 from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
 from .graph.search import MinMergeStrategy, avoid_priority_penalty
 
@@ -815,3 +815,132 @@ class DetourNoticeTests(R2BackedTestCase):
         clean, detour, natural = self._split("A", "E")
         self.assertEqual(detour, [])
         self.assertEqual(clean, natural)  # excluding an unused place changes nothing
+
+
+class BranchedRouteExpansionTests(SimpleTestCase):
+    """A branched route is a shared tail with converging heads; it flattens to one
+    subroute per leaf, identical to authoring each as a separate flat route."""
+
+    # J,T1,T2 is the shared tail (J = מחלף אליפלט, T2 = כביש 6); three heads
+    # converge into it — no "primary" head, the tail owns no origin of its own.
+    FLAT = [
+        ["H1a", "H1b", "J", "T1", "T2"],
+        ["H2a", "J", "T1", "T2"],
+        ["H3a", "H3b", "J", "T1", "T2"],
+    ]
+    BRANCHED = [
+        {
+            "places": ["J", "T1", "T2"],
+            "priority": 0,
+            "branches": [
+                {"places": ["H1a", "H1b"]},
+                {"places": ["H2a"]},
+                {"places": ["H3a", "H3b"]},
+            ],
+        }
+    ]
+
+    def test_flat_route_expands_to_itself(self):
+        self.assertEqual(expand_route(["A", "B", "C"]), [["A", "B", "C"]])
+        self.assertEqual(
+            expand_route({"places": ["A", "B", "C"], "priority": 1}), [["A", "B", "C"]]
+        )
+
+    def test_branched_expands_to_the_flat_subroutes(self):
+        chains = [r["places"] for r in expand_routes(self.BRANCHED)]
+        self.assertEqual(chains, self.FLAT)  # one per leaf, in branch order
+
+    def test_all_subroutes_inherit_the_single_priority(self):
+        branched = [{**self.BRANCHED[0], "priority": 2}]
+        self.assertEqual([r["priority"] for r in expand_routes(branched)], [2, 2, 2])
+
+    def test_nested_heads_ride_through_their_parent(self):
+        # Tail D,E. Head C converges into D and itself splits upstream into A,B and
+        # X. Only the two leaves are subroutes — the shared C segment is not.
+        route = {
+            "places": ["D", "E"],
+            "priority": 0,
+            "branches": [
+                {
+                    "places": ["C"],
+                    "branches": [{"places": ["A", "B"]}, {"places": ["X"]}],
+                },
+            ],
+        }
+        self.assertEqual(
+            expand_route(route),
+            [["A", "B", "C", "D", "E"], ["X", "C", "D", "E"]],
+        )
+
+    def test_tail_may_be_a_single_stop(self):
+        # Heads converging straight into the destination — an alternate final approach.
+        route = {"places": ["B"], "priority": 0, "branches": [{"places": ["A"]}, {"places": ["Q"]}]}
+        self.assertEqual(expand_route(route), [["A", "B"], ["Q", "B"]])
+
+
+class BranchedRouteStorageTests(R2BackedTestCase):
+    """Persisting, loading and deriving the graph from branched routes."""
+
+    def test_derived_graph_identical_to_flat_authoring(self):
+        flat_db = Database(prefix="flat")
+        tree_db = Database(prefix="tree")
+        flat_db.save_routes(BranchedRouteExpansionTests.FLAT)
+        tree_db.save_routes(BranchedRouteExpansionTests.BRANCHED)
+        # Same edges *and* same per-edge route indices (leaf order matches flat order).
+        self.assertEqual(
+            flat_db.load_graph().edge_routes_records,
+            tree_db.load_graph().edge_routes_records,
+        )
+
+    def test_roundtrip_preserves_the_tree(self):
+        saved = self.db.save_routes(BranchedRouteExpansionTests.BRANCHED)
+        self.assertEqual(saved, self.db.load_routes())
+        self.assertEqual(len(saved[0]["branches"]), 3)
+        self.assertEqual(saved[0]["branches"][1], {"places": ["H2a"]})
+
+    def test_load_graph_priorities_align_across_subroutes(self):
+        self.db.save_routes([{**BranchedRouteExpansionTests.BRANCHED[0], "priority": 2}])
+        graph = self.db.load_graph()
+        # Three leaves → route ids 0,1,2, all priority 2.
+        self.assertEqual([graph.route_priority(i) for i in (0, 1, 2)], [2, 2, 2])
+
+    def test_flat_route_stays_flat_shape(self):
+        saved = self.db.save_routes([{"places": ["A", "B", "C"], "priority": 1}])
+        self.assertEqual(saved, [{"places": ["A", "B", "C"], "priority": 1}])
+        self.assertNotIn("branches", saved[0])
+
+    def test_branched_tail_may_be_one_stop(self):
+        saved = self.db.save_routes(
+            [{"places": ["B"], "priority": 0, "branches": [{"places": ["A"]}, {"places": ["Q"]}]}]
+        )
+        self.assertEqual(len(saved[0]["branches"]), 2)
+
+    def test_rejects_branchless_single_stop_route(self):
+        with self.assertRaises(ValidationError):
+            self.db.save_routes([{"places": ["A"], "priority": 0}])
+
+    def test_rejects_empty_tail(self):
+        with self.assertRaises(ValidationError):
+            self.db.save_routes(
+                [{"places": [], "priority": 0, "branches": [{"places": ["A"]}, {"places": ["Q"]}]}]
+            )
+
+    def test_rejects_empty_branch(self):
+        with self.assertRaises(ValidationError):
+            self.db.save_routes(
+                [{"places": ["A", "B"], "priority": 0, "branches": [{"places": []}]}]
+            )
+
+    def test_pathfinding_matches_flat_authoring(self):
+        flat_db = Database(prefix="flat")
+        tree_db = Database(prefix="tree")
+        flat_db.save_routes(BranchedRouteExpansionTests.FLAT)
+        tree_db.save_routes(BranchedRouteExpansionTests.BRANCHED)
+        flat_finder = RouteFinder(flat_db.load_graph())
+        tree_finder = RouteFinder(tree_db.load_graph())
+        flat_ranked, _ = flat_finder.rank_candidates("H2a", "T2")
+        tree_ranked, _ = tree_finder.rank_candidates("H2a", "T2")
+        flat_top = [r.stops for r in flat_finder.select_diverse(flat_ranked, k=None)]
+        tree_top = [r.stops for r in tree_finder.select_diverse(tree_ranked, k=None)]
+        self.assertEqual(flat_top, tree_top)
+        self.assertEqual(flat_top[0], ["H2a", "J", "T1", "T2"])

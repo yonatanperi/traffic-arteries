@@ -7,6 +7,7 @@ import Page from "../../components/layout/Page";
 import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { IconRoute, IconAlert } from "../../components/ui/icons";
 import { useAutoSave } from "../../hooks/useAutoSave.js";
+import { routeStops, isRouteValid } from "../../utils/branches.js";
 import {
   getRoutes,
   saveRoutes,
@@ -44,9 +45,7 @@ export default function RoutesPage() {
   // instead of a plain setState, so each add/remove immediately persists
   // (when the result is valid). Invalid intermediate states are held locally
   // and saved as soon as they become valid again.
-  const routesState = useAutoSave(saveRoutes, (r) =>
-    r.every((route) => route.places.length >= 2),
-  );
+  const routesState = useAutoSave(saveRoutes, (r) => r.every(isRouteValid));
   const compromisedState = useAutoSave(saveCompromised, (g) => g.every((group) => group.length >= 1));
 
   useEffect(() => {
@@ -66,7 +65,7 @@ export default function RoutesPage() {
   const suggestions = useMemo(() => {
     if (!routes) return [];
     const set = new Set();
-    routes.forEach((r) => r.places.forEach((p) => p.trim() && set.add(p.trim())));
+    routes.forEach((r) => routeStops(r).forEach((p) => p.trim() && set.add(p.trim())));
     return [...set].sort((a, b) => a.localeCompare(b, "he"));
   }, [routes]);
 

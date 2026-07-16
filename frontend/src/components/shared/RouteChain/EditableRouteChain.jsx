@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   DndContext,
   PointerSensor,
@@ -16,7 +17,13 @@ import { CSS } from "@dnd-kit/utilities";
 import Autocomplete from "../../ui/Autocomplete";
 import Button from "../../ui/Button";
 import IconButton from "../../ui/IconButton";
-import { IconChevron, IconPlus, IconTrash, IconClose } from "../../ui/icons";
+import {
+  IconChevron,
+  IconPlus,
+  IconTrash,
+  IconClose,
+  IconBranch,
+} from "../../ui/icons";
 import "./RouteChain.css";
 
 let uid = 0;
@@ -51,6 +58,17 @@ function isMatch(value, highlight) {
  *                 renamed, so the parent can offer to propagate the change.
  *   compromisedPlaces  optional Set of destination names currently marked
  *                 unavailable, painted red
+ *   onAddBranch   optional (splitIndex) => void. When given, an insert "+" offers
+ *                 a choice — add a stop here, or branch: split the chain *at this
+ *                 gap* (`splitIndex` = the number of stops before it) so the stops
+ *                 up to here become one converging head and a fresh head is added
+ *                 beside them, over the shared tail from `splitIndex` on. Every gap
+ *                 between two stops offers it (not the trailing "+", which has no
+ *                 tail after it). When absent the "+" inserts a stop directly,
+ *                 exactly as before (so the component stays reusable elsewhere).
+ *   isJunction    whether this chain is a tail that already has converging heads at
+ *                 its start; only then does the leading "+" offer "add head" (a new
+ *                 sibling head at the junction, split index 0).
  */
 export default function EditableRouteChain({
   stops,
@@ -59,6 +77,8 @@ export default function EditableRouteChain({
   highlight,
   onRenameStop,
   compromisedPlaces,
+  onAddBranch,
+  isJunction = false,
 }) {
   // Internal id-keyed model so dnd-kit and the inline editor stay stable across
   // reorders (stop values can duplicate, so they can't be used as keys).
@@ -187,7 +207,16 @@ export default function EditableRouteChain({
             </li>
           ) : (
             <>
-              <InsertSlot variant="lead" onClick={() => openInsert(0)} />
+              <InsertSlot
+                variant="lead"
+                onAddStop={() => openInsert(0)}
+                // Leading "+" adds a sibling head only on a tail that already
+                // branches (split index 0 = the existing junction).
+                onAddBranch={
+                  onAddBranch && isJunction ? () => onAddBranch(0) : undefined
+                }
+                branchLabel="הוסף ראש"
+              />
               {items.map((it, i) => (
                 <Fragment key={it.id}>
                   <li className="chain-item">
@@ -214,7 +243,16 @@ export default function EditableRouteChain({
                     )}
                     <InsertSlot
                       variant={i < items.length - 1 ? "gap" : "trail"}
-                      onClick={() => openInsert(i + 1)}
+                      onAddStop={() => openInsert(i + 1)}
+                      // Branch = split at this gap: the stops up to and including
+                      // this one (index i → splitIndex i+1) become a head, the rest
+                      // the shared tail. Every gap between two stops offers it; the
+                      // trailing "+" (i === last) has no tail after it, so it doesn't.
+                      onAddBranch={
+                        onAddBranch && i < items.length - 1
+                          ? () => onAddBranch(i + 1)
+                          : undefined
+                      }
                     />
                   </li>
                 </Fragment>
@@ -386,13 +424,60 @@ function StopEditor({ initial, suggestions, onCommit, onCancel }) {
   );
 }
 
-function InsertSlot({ variant, onClick }) {
+/**
+ * The "+" between/around stops. Without `onAddBranch` a click inserts a stop
+ * (unchanged). With it, a click opens a tiny chooser — add a stop here, or fork a
+ * branch that merges into the stop this slot precedes. The slot stays visually
+ * "active" (plus revealed) while its menu is open, even after the pointer leaves.
+ */
+function InsertSlot({ variant, onAddStop, onAddBranch, branchLabel = "הוסף הסתעפות" }) {
+  const [menu, setMenu] = useState(null); // { top, right } while open, else null
+  const btnRef = useRef(null);
+
+  function openMenu() {
+    const rect = btnRef.current.getBoundingClientRect();
+    // Anchor the menu's start edge (RTL: right) under the slot, just below it.
+    setMenu({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+  }
+  const close = () => setMenu(null);
+
+  // While open, close on an outside press, Escape, or any scroll/resize (which
+  // would leave the fixed menu stranded from its slot).
+  useEffect(() => {
+    if (!menu) return;
+    function onDocDown(e) {
+      if (!btnRef.current?.contains(e.target) && !e.target.closest?.(".insert-menu"))
+        close();
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close();
+    }
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu]);
+
+  // No branch option: the slot is the plain single-action button it always was.
+  const handleClick = onAddBranch ? (menu ? close : openMenu) : onAddStop;
+
   return (
     <button
+      ref={btnRef}
       type="button"
-      className={"insert-slot insert-slot--" + variant}
-      onClick={onClick}
-      aria-label="הוסף תחנה כאן"
+      className={
+        "insert-slot insert-slot--" + variant + (menu ? " insert-slot--open" : "")
+      }
+      onClick={handleClick}
+      aria-label={onAddBranch ? "הוסף כאן" : "הוסף תחנה כאן"}
+      aria-haspopup={onAddBranch ? "menu" : undefined}
+      aria-expanded={onAddBranch ? Boolean(menu) : undefined}
     >
       {variant === "gap" && (
         <span className="insert-slot-chevron" aria-hidden="true">
@@ -407,6 +492,39 @@ function InsertSlot({ variant, onClick }) {
       <span className="insert-slot-plus" aria-hidden="true">
         <IconPlus size={14} />
       </span>
+
+      {menu &&
+        createPortal(
+          <div
+            className="insert-menu"
+            role="menu"
+            style={{ top: menu.top, right: menu.right }}
+          >
+            <button
+              type="button"
+              className="insert-menu-item"
+              role="menuitem"
+              onClick={() => {
+                close();
+                onAddStop();
+              }}
+            >
+              <IconPlus size={15} /> הוסף תחנה
+            </button>
+            <button
+              type="button"
+              className="insert-menu-item"
+              role="menuitem"
+              onClick={() => {
+                close();
+                onAddBranch();
+              }}
+            >
+              <IconBranch size={15} /> {branchLabel}
+            </button>
+          </div>,
+          document.body,
+        )}
     </button>
   );
 }

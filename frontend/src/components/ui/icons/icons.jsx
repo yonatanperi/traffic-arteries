@@ -93,6 +93,19 @@ export function IconPlus(props) {
   );
 }
 
+// Branch — a git-style fork: a trunk with a side branch curving into it.
+export function IconBranch(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="6" cy="18" r="2.4" />
+      <circle cx="6" cy="6" r="2.4" />
+      <circle cx="18" cy="7" r="2.4" />
+      <path d="M6 8.4v7.2" />
+      <path d="M17.4 9.2A8 8 0 0 1 8.3 16.2" />
+    </Svg>
+  );
+}
+
 export function IconClose(props) {
   return (
     <Svg {...props}>

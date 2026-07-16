@@ -14,14 +14,27 @@ import {
 } from "@dnd-kit/sortable";
 import Autocomplete from "../../ui/Autocomplete";
 import ConfirmModal from "../../ui/ConfirmModal";
-import { EditableRouteChain } from "../../shared/RouteChain";
 import RemovableChip from "../../ui/RemovableChip";
 import Pill from "../../ui/Pill";
 import IconButton from "../../ui/IconButton";
 import EditableList from "../../ui/EditableList";
 import EditableGroupRow from "../../ui/EditableGroupRow";
 import Select from "../../ui/Select";
-import { IconSearch, IconAlert, IconDuplicate, IconPin } from "../../ui/icons";
+import BranchedChain from "./BranchedChain";
+import {
+  IconSearch,
+  IconAlert,
+  IconDuplicate,
+  IconPin,
+  IconBranch,
+} from "../../ui/icons";
+import {
+  expandRoute,
+  routeStops,
+  cloneRoute,
+  renameStop,
+  leafCount,
+} from "../../../utils/branches.js";
 import {
   useGetUrlParams,
   useSetUrlParams,
@@ -92,11 +105,15 @@ function analyzeConnectivity(routes) {
     if (ra !== rb) parent.set(ra, rb);
   }
 
-  routes.forEach(({ places }) => {
-    places.forEach((place) => find(place));
-    for (let i = 1; i < places.length; i++) {
-      union(places[i - 1], places[i]);
-    }
+  // A branched route contributes every subroute's edges (a branch connects into
+  // the trunk), so expand each route to its chains before unioning.
+  routes.forEach((route) => {
+    expandRoute(route).forEach((places) => {
+      places.forEach((place) => find(place));
+      for (let i = 1; i < places.length; i++) {
+        union(places[i - 1], places[i]);
+      }
+    });
   });
 
   const sizeByRoot = new Map();
@@ -169,10 +186,7 @@ export default function RouteEditor({
 
   function duplicateRoute(index) {
     const next = routes.slice();
-    next.splice(index + 1, 0, {
-      ...routes[index],
-      places: routes[index].places.slice(),
-    });
+    next.splice(index + 1, 0, cloneRoute(routes[index]));
     onChange(next);
     setRows((prev) => {
       const nextRows = prev.slice();
@@ -220,7 +234,7 @@ export default function RouteEditor({
   function requestRename(oldValue, newValue) {
     if (oldValue === newValue) return;
     const total = routes.reduce(
-      (n, r) => n + r.places.filter((p) => p === oldValue).length,
+      (n, r) => n + routeStops(r).filter((p) => p === oldValue).length,
       0,
     );
     if (total - 1 > 0) setPendingRename({ oldValue, newValue });
@@ -228,12 +242,7 @@ export default function RouteEditor({
   function confirmRename() {
     const { oldValue, newValue } = pendingRename;
     setPendingRename(null);
-    onChange(
-      routes.map((r) => ({
-        ...r,
-        places: r.places.map((p) => (p === oldValue ? newValue : p)),
-      })),
-    );
+    onChange(routes.map((r) => renameStop(r, oldValue, newValue)));
   }
 
   const { find, mainRoot, componentCount } = useMemo(
@@ -347,7 +356,7 @@ export default function RouteEditor({
                   pinned={rows[i].pinned}
                   filteredOut={Boolean(filtering) && !matched.has(i)}
                   compromisedPlaces={compromisedPlaces}
-                  onChangePlaces={(places) => patchRoute(i, { places })}
+                  onChangeRoute={(nextRoute) => patchRoute(i, nextRoute)}
                   onChangePriority={(priority) => patchRoute(i, { priority })}
                   onRemoveRoute={() => removeRoute(i)}
                   onDuplicateRoute={() => duplicateRoute(i)}
@@ -402,7 +411,7 @@ function RouteRow({
   pinned,
   filteredOut,
   compromisedPlaces,
-  onChangePlaces,
+  onChangeRoute,
   onChangePriority,
   onRemoveRoute,
   onDuplicateRoute,
@@ -410,8 +419,12 @@ function RouteRow({
   onRenameStop,
 }) {
   const { places, priority } = route;
-  const tooShort = places.length < 2;
-  const hasCompromised = places.some((p) => compromisedPlaces?.has(p));
+  const origins = leafCount(route); // number of converging origin heads (1 = plain)
+  const branched = origins > 1;
+  // A plain route needs both endpoints; a branched one is validated per-head.
+  const tooShort = !branched && places.length < 2;
+  const destination = places[places.length - 1];
+  const hasCompromised = routeStops(route).some((p) => compromisedPlaces?.has(p));
 
   const {
     attributes,
@@ -447,10 +460,21 @@ function RouteRow({
       warn={tooShort}
       extraClassName={extraClassName}
       badge={
-        places.length >= 2 && (
-          <Pill size="sm" className="route-badge">
-            {`${places[0]} - ${places[places.length - 1]}`}
-          </Pill>
+        (branched || places.length >= 2) && (
+          <>
+            <Pill size="sm" className="route-badge">
+              {branched ? `יעד: ${destination}` : `${places[0]} - ${destination}`}
+            </Pill>
+            {branched && (
+              <Pill
+                size="sm"
+                className="route-branch-count"
+                title="מספר המקורות המתכנסים אל היעד"
+              >
+                <IconBranch size={12} /> {`${origins} מקורות`}
+              </Pill>
+            )}
+          </>
         )
       }
       warning={
@@ -520,9 +544,9 @@ function RouteRow({
       tabIndex={undefined}
       {...listeners}
     >
-      <EditableRouteChain
-        stops={places}
-        onChange={onChangePlaces}
+      <BranchedChain
+        route={route}
+        onChange={onChangeRoute}
         suggestions={suggestions}
         highlight={highlight}
         onRenameStop={onRenameStop}

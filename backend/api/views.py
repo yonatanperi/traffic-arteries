@@ -132,7 +132,10 @@ def path(request):
 
     compromised = database.compromised_places()
     graph = database.load_graph()
-    routes = database.load_routes()  # originals, for human-readable labels
+    # Expanded subroutes (one per tree node) — this is the list the graph's route
+    # indices line up with, so `run.route_id` labels resolve correctly for branched
+    # routes too.
+    routes = database.load_expanded_routes()
 
     def run_endpoints(run):
         """The authored route's endpoints, oriented to the travel direction.

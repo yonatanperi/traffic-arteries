@@ -1,0 +1,190 @@
+/* The route's converging tree, drawn as a horizontal dendrogram (RTL): origin
+   heads on the upstream (right) side merge through elbow connectors into the tail
+   that flows left toward the destination. Nesting is just a head that is itself a
+   junction, rendered recursively. Wide trees scroll horizontally rather than
+   breaking the card. */
+
+.branched-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* room so the outermost connectors / remove buttons aren't clipped */
+  padding-block: var(--s-1);
+  margin-inline: calc(-1 * var(--s-1));
+  padding-inline: var(--s-1);
+}
+.branched {
+  display: inline-block;
+  min-width: 100%;
+}
+
+/* A leaf (plain head / branchless route): its chain, with an optional "[" (root). */
+.tnode-leaf {
+  display: flex;
+  align-items: stretch;
+  gap: var(--s-2);
+}
+
+/* A junction: heads column (right) + the tail chain (left), vertically centered
+   so the connector bus lines up with the tail's junction stop. */
+.tnode {
+  display: flex;
+  align-items: center;
+}
+
+/* The heads, stacked and aligned on their trunk-facing (inline-end / left) edge so
+   a single vertical "bus" can run down that edge. `padding-inline-end` is the
+   gutter the bus and the head stubs live in. */
+.tnode-heads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  padding-inline-end: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s-7);
+  position: relative;
+}
+/* The vertical bus down the trunk-side edge of the heads block. */
+.tnode-heads::before {
+  content: "";
+  position: absolute;
+  inset-block: 11px;
+  inset-inline-end: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.tnode-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+/* Each head's horizontal stub, from its vertical center out to the bus. */
+.tnode-head::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: -20px;
+  width: 20px;
+  height: 2px;
+  transform: translateY(-1px);
+  background: var(--border-strong);
+}
+.tnode-head-body {
+  min-width: 0;
+}
+
+/* A "[" bracket embracing each head on its origin (upstream / right) side, so a
+   branch — expanded or collapsed, however tall — reads as one grouped unit. Logical
+   borders keep the opening facing the tail (inline-end / left) under RTL. */
+.tnode-bracket {
+  flex-shrink: 0;
+  align-self: stretch;
+  width: 7px;
+  margin-block: 3px;
+  border: 2px solid var(--border-strong);
+  border-inline-end: 0;
+  border-start-start-radius: 6px;
+  border-end-start-radius: 6px;
+}
+
+/* A folded-away head: a muted, dashed pill-chain that is itself the expand button. */
+.tnode-collapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-pill);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    border-color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+.tnode-collapsed:hover,
+.tnode-collapsed:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+/* The stops inside read as plain (non-editable) pills. */
+.tnode-collapsed .stop {
+  cursor: pointer;
+}
+.tnode-dots {
+  color: var(--text-faint);
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.tnode-collapsed:hover .tnode-dots,
+.tnode-collapsed:focus-visible .tnode-dots {
+  color: var(--accent);
+}
+.tnode-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-hover);
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+
+/* The tail chain, with a short arm on its upstream (inline-start / right) side that
+   bridges to the bus. */
+.tnode-trunk {
+  position: relative;
+  margin-inline-start: 16px;
+  display: flex;
+  align-items: stretch;
+  gap: var(--s-2);
+}
+.tnode-trunk::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: -16px;
+  width: 16px;
+  height: 2px;
+  transform: translateY(-1px);
+  background: var(--border-strong);
+}
+
+/* Per-head delete — sits at the head's upstream tip. */
+.tnode-remove {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.tnode-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--s-1);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+/* Tighter gutters on phones so deep nesting keeps the chains usable. */
+@media (max-width: 480px) {
+  .tnode-heads {
+    padding-inline-end: 14px;
+    gap: var(--s-2);
+  }
+  .tnode-head::before {
+    inset-inline-end: -14px;
+    width: 14px;
+  }
+  .tnode-trunk {
+    margin-inline-start: 12px;
+  }
+  .tnode-trunk::before {
+    inset-inline-start: -12px;
+    width: 12px;
+  }
+}

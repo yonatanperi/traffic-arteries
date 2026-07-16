@@ -13,6 +13,19 @@
   white-space: nowrap;
 }
 
+/* Count of a branched route's branches, shown beside its endpoint badge. */
+.route-branch-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.route-branch-count .ic {
+  color: var(--accent);
+}
+
 /* Filter pill: the whole pill is the remove control — click it to drop the
    filter. Hover tints it toward danger to signal the click removes it. */
 .stop--filter {
