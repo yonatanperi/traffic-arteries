@@ -67,8 +67,54 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* iOS/Android-style fixed bottom tab bar — mobile only, mirrors the top
+   navbar's links + auth action so they stay reachable without a dropdown. */
+.tabbar {
+  display: none;
+}
+
 @media (max-width: 640px) {
   .brand-text small {
     display: none;
+  }
+
+  /* The bottom tab bar carries links + auth on mobile, so the top bar has
+     nothing left to show. */
+  .navbar {
+    display: none;
+  }
+
+  .tabbar {
+    display: flex;
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 50;
+    background: var(--bg-elevated);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--border);
+    padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom));
+  }
+
+  .tabbar-item {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s-2) 2px;
+    border: none;
+    background: transparent;
+    color: var(--text-faint);
+    border-radius: var(--r-sm);
+    transition: color 0.2s var(--ease);
+  }
+
+  .tabbar-item:hover {
+    color: var(--text-muted);
+  }
+
+  .tabbar-item--on {
+    color: var(--accent);
   }
 }

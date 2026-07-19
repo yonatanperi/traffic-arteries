@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getHealth } from "../../../api/client.js";
-import Loader from "../../ui/Loader";
+import { IconNetwork } from "../../ui/icons/icons.jsx";
 import "./ServerGate.css";
 
 /**
@@ -16,7 +16,6 @@ import "./ServerGate.css";
  */
 export default function ServerGate({ children }) {
   const [ready, setReady] = useState(false);
-  const [slow, setSlow] = useState(false); // show the "waking up" note after a couple of misses
 
   useEffect(() => {
     let cancelled = false;
@@ -28,7 +27,6 @@ export default function ServerGate({ children }) {
         if (!cancelled) setReady(true);
       } catch {
         if (cancelled) return;
-        if (attempt >= 1) setSlow(true); // two misses ⇒ almost certainly a cold start
         const delay = Math.min(1000 * 2 ** attempt, 5000);
         timer = setTimeout(() => ping(attempt + 1), delay);
       }
@@ -45,12 +43,14 @@ export default function ServerGate({ children }) {
 
   return (
     <div className="server-gate">
-      <Loader label="מתחבר לשרת…" />
-      {slow && (
-        <p className="server-gate-note">
-          השרת מתעורר ממצב שינה, זה עשוי לקחת עד דקה.
+      <div className="server-gate-card">
+        <span className="server-gate-spinner" aria-hidden="true">
+          <IconNetwork size={30} />
+        </span>
+        <p className="server-gate-title" role="status" aria-live="polite">
+          מתחברים לשרת…
         </p>
-      )}
+      </div>
     </div>
   );
 }

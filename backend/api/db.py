@@ -318,16 +318,29 @@ class Database:
         routes flat and authoring them as one trunk + two branches therefore derive
         the *same* edges — the expansion is the single route-index space.
         """
-        expanded = expand_routes(routes)
+        # Flatten each authored route to its leaf subroutes, remembering which
+        # authored route (``group``) each came from. A branched route yields one
+        # chain per leaf that all share the same tail, so the group id is what lets
+        # the fill count a shared hop once per authored route rather than once per
+        # leaf (see :meth:`fill_missing_destinations`).
+        chains, priorities, groups = [], [], []
+        for index, route in enumerate(routes):
+            priority = route_priority(route)
+            for chain in expand_route(route):
+                chains.append(chain)
+                priorities.append(priority)
+                groups.append(index)
         filled = self.fill_missing_destinations(
-            [route_places(route) for route in expanded], lazy_gap, confirmed_gap
+            chains, lazy_gap, confirmed_gap, route_groups=groups
         )
-        graph = Graph.from_routes(filled, [route_priority(route) for route in expanded])
+        graph = Graph.from_routes(filled, priorities)
         self._atomic_write_json(self.edge_routes_key, graph.edge_routes_records)
         return graph
 
     @staticmethod
-    def fill_missing_destinations(routes, lazy_gap=LAZY_GAP, confirmed_gap=CONFIRMED_GAP):
+    def fill_missing_destinations(
+        routes, lazy_gap=LAZY_GAP, confirmed_gap=CONFIRMED_GAP, route_groups=None
+    ):
         """Fill stops that a route skipped on a segment detailed elsewhere.
 
         A hand-written route may hop straight from ``D`` to ``B`` while another
@@ -346,6 +359,14 @@ class Database:
         only one route takes directly is a likely lazy shortcut we fill
         generously (``lazy_gap``). ``lazy_gap == 0`` disables filling entirely.
 
+        "Several routes" means several **authored** routes. A branched route
+        flattens to one chain per leaf that all share the same tail, so counting
+        the direct hop once per chain would tally that single authored route once
+        per leaf and wrongly "confirm" (and thus under-fill) its shared tail.
+        ``route_groups[i]`` is the authored-route id of ``routes[i]`` (default:
+        each chain is its own route, the pre-branch behaviour), so each authored
+        route is credited a given hop at most once.
+
         Two invariants are guaranteed, so the derived graph never gains a
         connection that isn't in the source:
 
@@ -361,12 +382,17 @@ class Database:
         if lazy_gap <= 0:
             return [list(route) for route in routes]
 
-        # How many routes take each undirected pair as a *direct* hop.
-        direct = {}
-        for route in routes:
+        # How many *authored* routes take each undirected pair as a direct hop.
+        # Chains from the same authored route (a branched route's leaves) share a
+        # group id, so a hop on their shared tail is counted once, not once per leaf.
+        if route_groups is None:
+            route_groups = range(len(routes))
+        takers = {}
+        for group, route in zip(route_groups, routes):
             for a, b in zip(route, route[1:]):
                 if a != b:
-                    direct[frozenset((a, b))] = direct.get(frozenset((a, b)), 0) + 1
+                    takers.setdefault(frozenset((a, b)), set()).add(group)
+        direct = {pair: len(groups) for pair, groups in takers.items()}
 
         def gap_budget(a, b):
             confirmed = direct.get(frozenset((a, b)), 0) >= CONFIRMED_MIN_ROUTES

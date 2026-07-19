@@ -14,7 +14,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <NavBar />
-      <main style={{ flex: 1 }}>
+      <main className="app-main">
         <ServerGate>
         <Routes>
           <Route path="/" element={<HomePage />} />
