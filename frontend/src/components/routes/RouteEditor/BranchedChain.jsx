@@ -89,9 +89,12 @@ export default function BranchedChain({
     compromisedPlaces,
   };
 
+  // Bracket the tail only on an actual tree; a plain (branchless) route is not a
+  // branch, so it renders without a leading "[".
+  const branched = route.branches?.length > 0;
   const tree = (
     <div className="branched">
-      <TreeNode ctx={ctx} node={route} path={[]} bracket />
+      <TreeNode ctx={ctx} node={route} path={[]} bracket={branched} />
     </div>
   );
 
@@ -125,7 +128,7 @@ export default function BranchedChain({
   }, [fitToView]);
 
   // A plain (branchless) route needs no map — render the inline chain as before.
-  if (!(route.branches?.length > 0)) return tree;
+  if (!branched) return tree;
 
   return (
     <TransformWrapper
@@ -206,6 +209,12 @@ function TreeNode({ ctx, node, path, bracket = false }) {
       }
       isJunction={junction}
       sortable={false}
+      // Accent only the *real* tree edges: a real origin is a leaf segment's first
+      // stop (a junction's first stop is where its sub-heads converge — internal),
+      // and the one real destination is the root/tail's last stop (a head's last
+      // stop just connects into its parent — internal).
+      showStart={!junction}
+      showEnd={path.length === 0}
       suggestions={ctx.suggestions}
       highlight={ctx.highlight}
       onRenameStop={ctx.onRenameStop}

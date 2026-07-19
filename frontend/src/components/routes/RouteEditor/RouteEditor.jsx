@@ -262,13 +262,16 @@ export default function RouteEditor({
   const matchedIndices = routes
     .map((_, i) => i)
     .filter((i) => {
-      const { places } = routes[i];
+      // All stops in the route — tail *and* every branch head (recursive) — so a
+      // filter by a branch's stop (e.g. an origin head) matches a tree route too,
+      // not just its shared tail.
+      const stops = routeStops(routes[i]);
       // Every selected destination must appear somewhere in the route (any
       // order), and the live-typed text further narrows the list.
       const hasAll = selected.every((s) =>
-        places.some((p) => p.toLowerCase().includes(s.toLowerCase())),
+        stops.some((p) => p.toLowerCase().includes(s.toLowerCase())),
       );
-      const hasQuery = !q || places.some((p) => p.toLowerCase().includes(q));
+      const hasQuery = !q || stops.some((p) => p.toLowerCase().includes(q));
       return hasAll && hasQuery;
     });
 

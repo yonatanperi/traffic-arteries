@@ -77,6 +77,11 @@ function isMatch(value, highlight) {
  *   sortable      whether stops can be drag-reordered (default true). The branched
  *                 tree passes false: on its pan/zoom map a drag pans the canvas, so
  *                 pills stay click-to-edit but aren't draggable.
+ *   showStart / showEnd  whether the first / last stop gets the origin / destination
+ *                 accent (default true). The branched tree passes these per segment
+ *                 so only a *real* tree edge is accented — a leaf's true origin and
+ *                 the tail's final destination — not every sub-branch's internal
+ *                 junction endpoints.
  */
 export default function EditableRouteChain({
   stops,
@@ -88,6 +93,8 @@ export default function EditableRouteChain({
   onAddBranch,
   isJunction = false,
   sortable = true,
+  showStart = true,
+  showEnd = true,
 }) {
   // Internal id-keyed model so dnd-kit and the inline editor stay stable across
   // reorders (stop values can duplicate, so they can't be used as keys).
@@ -247,6 +254,8 @@ export default function EditableRouteChain({
                         highlight={highlight}
                         dragging={dragging}
                         sortable={sortable}
+                        showStart={showStart}
+                        showEnd={showEnd}
                         compromised={compromisedPlaces?.has(it.value)}
                         onEdit={() => setEditingId(it.id)}
                         onRemove={() => removeStop(it.id)}
@@ -283,6 +292,8 @@ function SortableStop({
   highlight,
   dragging,
   sortable = true,
+  showStart = true,
+  showEnd = true,
   compromised,
   onEdit,
   onRemove,
@@ -340,8 +351,8 @@ function SortableStop({
       className={
         "stop stop--editable" +
         (hovered ? " stop--hovered" : "") +
-        (index === 0 ? " stop--start" : "") +
-        (index === count - 1 ? " stop--end" : "") +
+        (showStart && index === 0 ? " stop--start" : "") +
+        (showEnd && index === count - 1 ? " stop--end" : "") +
         (matched ? " stop--match" : "") +
         (isDragging ? " stop--dragging" : "") +
         (sortable ? "" : " stop--static") +
