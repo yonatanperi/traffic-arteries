@@ -16,9 +16,13 @@
     linear-gradient(180deg, var(--accent-gradient-soft), transparent 55%),
     var(--surface);
 }
-.result-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--border-strong);
+/* Hover-capable pointers only: on touch the lifted state sticks after a tap
+   until something else is tapped, which reads as the card being stuck. */
+@media (hover: hover) {
+  .result-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+  }
 }
 
 .result-head {
@@ -156,6 +160,27 @@
 /* "Edit this route" — appears next to a pinned (clicked) chip. */
 .merge-route-goto {
   animation: rise 0.16s var(--ease) both;
+}
+
+@media (max-width: 640px) {
+  .result-card {
+    padding: var(--s-4);
+  }
+  .result-head {
+    margin-bottom: var(--s-3);
+  }
+  .result-title {
+    font-size: 1.05rem;
+  }
+  .result-meta {
+    margin-bottom: var(--s-4);
+  }
+  /* The hops line and the route chips each get their own row instead of
+     competing for one narrow line. */
+  .result-hops {
+    flex-wrap: wrap;
+    gap: var(--s-2);
+  }
 }
 
 /* Chain rendering (.chain / .stop / .chain-arrow) now lives in

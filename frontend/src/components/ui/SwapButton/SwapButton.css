@@ -13,7 +13,10 @@
   transform: rotate(180deg);
 }
 
-@media (max-width: 620px) {
+/* Breakpoint tracks the app-wide phone breakpoint (global.css / NavBar.css).
+   HomePage.css overrides this for the search form, where the button is instead
+   absolutely placed on the seam between the two fields. */
+@media (max-width: 640px) {
   .swap-btn {
     transform: rotate(90deg);
     justify-self: center;

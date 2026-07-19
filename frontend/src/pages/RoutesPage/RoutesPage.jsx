@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import RouteEditor from "../../components/routes/RouteEditor";
 import CompromisedEditor from "../../components/routes/CompromisedEditor";
-import Loader from "../../components/ui/Loader";
+import LoaderLayout from "../../components/ui/LoaderLayout";
 import PageHeader from "../../components/ui/PageHeader";
 import Page from "../../components/layout/Page";
 import { SegmentedControl } from "../../components/ui/SegmentedControl";
@@ -77,7 +77,7 @@ export default function RoutesPage() {
   if (loading) {
     return (
       <Page>
-        <Loader label="טוען נתונים…" />
+        <LoaderLayout label="טוען נתונים…" />
       </Page>
     );
   }

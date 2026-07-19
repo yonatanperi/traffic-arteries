@@ -1,4 +1,4 @@
-.server-gate {
+.loader-layout {
   min-height: 60vh;
   display: flex;
   align-items: center;
@@ -6,7 +6,7 @@
   padding: var(--s-5);
 }
 
-.server-gate-card {
+.loader-layout-card {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -20,7 +20,7 @@
   animation: rise 0.4s var(--ease) both;
 }
 
-.server-gate-spinner {
+.loader-layout-spinner {
   position: relative;
   display: grid;
   place-items: center;
@@ -29,45 +29,45 @@
   color: var(--accent);
 }
 
-.server-gate-spinner::before {
+.loader-layout-spinner::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: 50%;
   border: 3px solid var(--border-strong);
   border-top-color: var(--accent);
-  animation: server-gate-spin 0.9s linear infinite;
+  animation: loader-layout-spin 0.9s linear infinite;
 }
 
-.server-gate-title {
+.loader-layout-title {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 700;
   color: var(--text);
 }
 
-@keyframes server-gate-spin {
+@keyframes loader-layout-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
 @media (max-width: 640px) {
-  .server-gate {
+  .loader-layout {
     min-height: 50vh;
   }
 
-  .server-gate-card {
+  .loader-layout-card {
     width: 100%;
     padding: var(--s-6) var(--s-5);
   }
 
-  .server-gate-spinner {
+  .loader-layout-spinner {
     width: 52px;
     height: 52px;
   }
 
-  .server-gate-title {
+  .loader-layout-title {
     font-size: 0.95rem;
   }
 }

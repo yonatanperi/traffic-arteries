@@ -64,6 +64,12 @@
   --s-7: 48px;
   --s-8: 64px;
 
+  /* Space the fixed mobile tab bar (components/layout/NavBar) occupies at the
+     bottom of the viewport. 0 on desktop, where that bar isn't rendered.
+     Pages add it to their bottom padding so trailing content can always be
+     scrolled clear of the bar. */
+  --tabbar-h: 0px;
+
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -77,6 +83,14 @@
   --font:
     "Heebo", "Assistant", "Segoe UI", system-ui, -apple-system,
     "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Must track the `max-width: 640px` breakpoint in NavBar.css, where the top bar
+   is swapped for the fixed bottom tab bar. */
+@media (max-width: 640px) {
+  :root {
+    --tabbar-h: calc(56px + env(safe-area-inset-bottom));
+  }
 }
 
 * {

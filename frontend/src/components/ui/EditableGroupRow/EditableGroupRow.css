@@ -28,6 +28,9 @@
 }
 
 .route-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: var(--s-1) var(--s-3);
   font-size: 0.9rem;
   font-weight: 700;
@@ -57,4 +60,22 @@
   padding: var(--s-2) var(--s-3);
   font-size: 0.85rem;
   gap: var(--s-2);
+}
+
+/* On a narrow card the badge(s), warnings and action cluster no longer fit on
+   one line — wrap instead of overflowing/squeezing the controls. */
+@media (max-width: 640px) {
+  .route-row {
+    padding: var(--s-3) var(--s-4);
+  }
+
+  .route-row-head {
+    flex-wrap: wrap;
+    row-gap: var(--s-2);
+  }
+
+  .route-row-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }

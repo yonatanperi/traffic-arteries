@@ -16,3 +16,19 @@
   font-size: 1.05rem;
   margin-top: var(--s-2);
 }
+
+/* On a phone the hero type would push the search form below the fold — the one
+   thing that has to be reachable on arrival. Shrink it to a heading. */
+@media (max-width: 640px) {
+  .page-header {
+    margin-bottom: var(--s-4);
+  }
+  .page-title {
+    font-size: 1.95rem;
+    letter-spacing: -0.02em;
+  }
+  .page-subtitle {
+    font-size: 0.95rem;
+    margin-top: var(--s-1);
+  }
+}

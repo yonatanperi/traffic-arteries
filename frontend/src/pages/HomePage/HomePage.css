@@ -77,15 +77,65 @@
   text-decoration: line-through;
 }
 
-@media (max-width: 620px) {
+/* Phone layout. Breakpoint tracks NavBar.css/global.css (the bottom tab bar). */
+@media (max-width: 640px) {
+  .search-panel {
+    padding: var(--s-4);
+    gap: var(--s-3);
+  }
+
+  /* The flight-search pattern: origin and destination stack into one connected
+     block with a round swap button straddling the seam, rather than the swap
+     taking a full row of its own between them. */
   .search-fields {
+    position: relative;
     grid-template-columns: 1fr;
+    gap: var(--s-3);
   }
-  .swap-btn {
-    transform: rotate(90deg);
-    justify-self: center;
+
+  /* Lifted out of the grid flow. Both fields are the same height, so the
+     container's vertical midpoint is exactly the seam between them. */
+  .search-fields .swap-btn {
+    position: absolute;
+    top: 50%;
+    inset-inline-end: var(--s-3);
+    z-index: 2;
+    transform: translateY(-50%) rotate(90deg);
+    background: var(--surface);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
   }
-  .swap-btn:hover {
-    transform: rotate(270deg);
+  .search-fields .swap-btn:hover {
+    transform: translateY(-50%) rotate(270deg);
+  }
+  /* The button now overhangs the near corner of both fields — keep their text
+     and clear affordance out from under it. */
+  .search-fields .ac-field {
+    padding-inline-end: 46px;
+  }
+
+  /* Comfortable thumb target for the primary action. */
+  .search-submit {
+    min-height: 52px;
+  }
+
+  .results-area {
+    margin-top: var(--s-5);
+  }
+
+  /* Filters are a horizontal strip that scrolls rather than wrapping into
+     several rows and pushing the results down. */
+  .type-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-inline: calc(-1 * var(--s-4));
+    padding-inline: var(--s-4);
+  }
+  .type-filters::-webkit-scrollbar {
+    display: none;
+  }
+  .type-filter-chip {
+    flex: none;
   }
 }

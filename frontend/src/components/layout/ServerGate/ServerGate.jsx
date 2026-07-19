@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { getHealth } from "../../../api/client.js";
-import { IconNetwork } from "../../ui/icons/icons.jsx";
-import "./ServerGate.css";
+import LoaderLayout from "../../ui/LoaderLayout";
 
 /**
  * Holds the app's content behind a single loader until the backend answers a
@@ -41,16 +40,5 @@ export default function ServerGate({ children }) {
 
   if (ready) return children;
 
-  return (
-    <div className="server-gate">
-      <div className="server-gate-card">
-        <span className="server-gate-spinner" aria-hidden="true">
-          <IconNetwork size={30} />
-        </span>
-        <p className="server-gate-title" role="status" aria-live="polite">
-          מתחברים לשרת…
-        </p>
-      </div>
-    </div>
-  );
+  return <LoaderLayout label="מתחברים לשרת…" />;
 }
