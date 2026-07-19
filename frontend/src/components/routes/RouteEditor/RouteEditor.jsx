@@ -431,7 +431,9 @@ function RouteRow({
   // A plain route needs both endpoints; a branched one is validated per-head.
   const tooShort = !branched && places.length < 2;
   const destination = places[places.length - 1];
-  const hasCompromised = routeStops(route).some((p) => compromisedPlaces?.has(p));
+  const hasCompromised = routeStops(route).some((p) =>
+    compromisedPlaces?.has(p),
+  );
 
   const {
     attributes,
@@ -470,7 +472,9 @@ function RouteRow({
         (branched || places.length >= 2) && (
           <>
             <Pill size="sm" className="route-badge">
-              {branched ? `יעד: ${destination}` : `${places[0]} - ${destination}`}
+              {branched
+                ? `יעד: ${destination}`
+                : `${places[0]} - ${destination}`}
             </Pill>
             {branched && (
               <Pill

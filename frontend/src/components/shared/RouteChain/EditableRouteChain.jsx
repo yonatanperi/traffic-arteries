@@ -82,6 +82,10 @@ function isMatch(value, highlight) {
  *                 so only a *real* tree edge is accented — a leaf's true origin and
  *                 the tail's final destination — not every sub-branch's internal
  *                 junction endpoints.
+ *   wrapEvery     optional stop count after which the row breaks to a new line (via
+ *                 a full-width flex break item). Null (default) = wrap only to fit
+ *                 the container, as before. The branched map passes 6 so a long
+ *                 segment stacks in rows of 6 instead of one line to pan across.
  */
 export default function EditableRouteChain({
   stops,
@@ -95,6 +99,7 @@ export default function EditableRouteChain({
   sortable = true,
   showStart = true,
   showEnd = true,
+  wrapEvery = null,
 }) {
   // Internal id-keyed model so dnd-kit and the inline editor stay stable across
   // reorders (stop values can duplicate, so they can't be used as keys).
@@ -275,6 +280,13 @@ export default function EditableRouteChain({
                       }
                     />
                   </li>
+                  {/* Force a new row every `wrapEvery` stops: a zero-height,
+                      full-width flex item pushes the rest of the chain down. */}
+                  {wrapEvery &&
+                    (i + 1) % wrapEvery === 0 &&
+                    i < items.length - 1 && (
+                      <li className="chain-break" aria-hidden="true" />
+                    )}
                 </Fragment>
               ))}
             </>

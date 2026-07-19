@@ -80,6 +80,13 @@ export default function BranchedChain({
   onRenameStop,
   compromisedPlaces,
 }) {
+  // A branched route lives on the pan/zoom map; a plain (branchless) route is the
+  // bare inline chain. This split drives three things: the leading "[" bracket
+  // (tree only), stop drag-reorder (allowed only *outside* the viewport — i.e. on
+  // flat routes; inside the map a drag pans the canvas), and the 6-per-row wrap
+  // (only the mapped tree wraps; a flat chain wraps to fit the card as before).
+  const branched = route.branches?.length > 0;
+
   const ctx = {
     route,
     onChange,
@@ -87,11 +94,10 @@ export default function BranchedChain({
     highlight,
     onRenameStop,
     compromisedPlaces,
+    sortable: !branched,
+    wrapEvery: branched ? 6 : null,
   };
 
-  // Bracket the tail only on an actual tree; a plain (branchless) route is not a
-  // branch, so it renders without a leading "[".
-  const branched = route.branches?.length > 0;
   const tree = (
     <div className="branched">
       <TreeNode ctx={ctx} node={route} path={[]} bracket={branched} />
@@ -208,7 +214,12 @@ function TreeNode({ ctx, node, path, bracket = false }) {
         ctx.onChange(branchAt(ctx.route, path, splitIndex))
       }
       isJunction={junction}
-      sortable={false}
+      // Reorder only outside the viewport (flat routes); inside the map a drag
+      // pans the canvas, so the tree's stops are click-to-edit only.
+      sortable={ctx.sortable}
+      // On the mapped tree, break each segment to a new row every 6 stops rather
+      // than running one long line the user must pan across.
+      wrapEvery={ctx.wrapEvery}
       // Accent only the *real* tree edges: a real origin is a leaf segment's first
       // stop (a junction's first stop is where its sub-heads converge — internal),
       // and the one real destination is the root/tail's last stop (a head's last
