@@ -63,7 +63,12 @@
 }
 
 /* On a narrow card the badge(s), warnings and action cluster no longer fit on
-   one line — wrap instead of overflowing/squeezing the controls. */
+   one line — wrap instead of overflowing/squeezing the controls. The actions
+   cluster drops its desktop `margin-inline-start: auto` (which shoves it to the
+   line's far end) so that, once wrapped onto its own line, it packs against the
+   same edge as the badges above it rather than the opposite one. The remove
+   button also drops to icon-only, matching the plain look of the pin/duplicate
+   buttons beside it instead of standing out as a bordered text pill. */
 @media (max-width: 640px) {
   .route-row {
     padding: var(--s-3) var(--s-4);
@@ -76,6 +81,15 @@
 
   .route-row-actions {
     flex-wrap: wrap;
-    justify-content: flex-end;
+    margin-inline-start: 0;
+  }
+
+  .route-remove {
+    padding: var(--s-2);
+    gap: 0;
+  }
+
+  .route-remove-label {
+    display: none;
   }
 }

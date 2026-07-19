@@ -43,8 +43,10 @@ export default function EditableGroupRow({
             className="route-remove"
             onClick={onRemove}
             aria-label={removeLabel}
+            title={removeText}
           >
-            <IconTrash size={15} /> {removeText}
+            <IconTrash size={15} />{" "}
+            <span className="route-remove-label">{removeText}</span>
           </Button>
         </div>
       </div>

@@ -126,116 +126,118 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
               <CopyButton path={shown} />
             </header>
 
-            <div className="result-meta">
-              <span className="result-hops">
-                {merge && (
-                  <Pill size="sm" className="merge-badge">
-                    {merge}
-                  </Pill>
-                )}
-                {typeof match === "number" && (
-                  <Pill size="sm" className="match-badge">
-                    התאמה {match}%
-                  </Pill>
-                )}
-                {/* Ranking puts the best priority tier first, so a longer route
+            {canEditRoutes && (
+              <div className="result-meta">
+                <span className="result-hops">
+                  {merge && (
+                    <Pill size="sm" className="merge-badge">
+                      {merge}
+                    </Pill>
+                  )}
+                  {typeof match === "number" && (
+                    <Pill size="sm" className="match-badge">
+                      התאמה {match}%
+                    </Pill>
+                  )}
+                  {/* Ranking puts the best priority tier first, so a longer route
                     can legitimately outrank a shorter one. Say so, or it reads
                     as a bug. */}
-                {isDowngraded(info?.priority) && (
-                  <Pill
-                    size="sm"
-                    tone="warning"
-                    className="priority-badge"
-                    title="הציר עובר בציר מקור בעדיפות נמוכה — לא נמצאה חלופה טובה יותר"
-                  >
-                    {priorityLabel(info.priority)}
-                  </Pill>
-                )}
-                <span>
-                  {path.length} תחנות
-                  {filtered && ` (${shown.length} מוצגות)`}
+                  {isDowngraded(info?.priority) && (
+                    <Pill
+                      size="sm"
+                      tone="warning"
+                      className="priority-badge"
+                      title="הציר עובר בציר מקור בעדיפות נמוכה — לא נמצאה חלופה טובה יותר"
+                    >
+                      {priorityLabel(info.priority)}
+                    </Pill>
+                  )}
+                  <span>
+                    {path.length} תחנות
+                    {filtered && ` (${shown.length} מוצגות)`}
+                  </span>
                 </span>
-              </span>
 
-              {info?.routes?.length > 0 && (
-                <div className="merge-routes">
-                  <span className="merge-routes-label">צירים:</span>
-                  {info.routes.map((r, j) => {
-                    const isChipHovered =
-                      hovered?.pathIndex === i && hovered?.chipIndex === j;
-                    const isChipPinned =
-                      pinned?.pathIndex === i && pinned?.chipIndex === j;
-                    return (
-                      <span className="merge-route-chip-group" key={j}>
-                        <Pill
-                          as="button"
-                          size="sm"
-                          title={
-                            isDowngraded(r.priority)
-                              ? `ציר מקור ב${priorityLabel(r.priority)}`
-                              : undefined
-                          }
-                          className={
-                            "merge-route-chip" +
-                            (isChipHovered || isChipPinned
-                              ? " merge-route-chip--hovered"
-                              : "") +
-                            (isDowngraded(r.priority)
-                              ? " merge-route-chip--downgraded"
-                              : "")
-                          }
-                          onMouseEnter={() =>
-                            setHovered({
-                              pathIndex: i,
-                              chipIndex: j,
-                              startIndex: r.startIndex,
-                              endIndex: r.endIndex,
-                            })
-                          }
-                          onMouseLeave={() => setHovered(null)}
-                          onClick={() =>
-                            setPinned((prev) =>
-                              prev
-                                ? null
-                                : {
-                                    pathIndex: i,
-                                    chipIndex: j,
-                                    startIndex: r.startIndex,
-                                    endIndex: r.endIndex,
-                                  },
-                            )
-                          }
-                        >
-                          {r.label}
-                          {isDowngraded(r.priority) && (
-                            <span className="merge-route-priority">
-                              {priorityLetter(r.priority)}
-                            </span>
-                          )}
-                          {typeof r.share === "number" && (
-                            <span className="merge-route-share">
-                              {r.share}%
-                            </span>
-                          )}
-                        </Pill>
-                        {isChipPinned && canEditRoutes && (
-                          <IconButton
+                {info?.routes?.length > 0 && (
+                  <div className="merge-routes">
+                    <span className="merge-routes-label">צירים:</span>
+                    {info.routes.map((r, j) => {
+                      const isChipHovered =
+                        hovered?.pathIndex === i && hovered?.chipIndex === j;
+                      const isChipPinned =
+                        pinned?.pathIndex === i && pinned?.chipIndex === j;
+                      return (
+                        <span className="merge-route-chip-group" key={j}>
+                          <Pill
+                            as="button"
                             size="sm"
-                            info
-                            className="merge-route-goto"
-                            ariaLabel={`ערוך את הציר ${r.label} בעריכת צירים`}
-                            title="ערוך ציר זה"
-                            onClick={() => goToRoute(r.label)}
+                            title={
+                              isDowngraded(r.priority)
+                                ? `ציר מקור ב${priorityLabel(r.priority)}`
+                                : undefined
+                            }
+                            className={
+                              "merge-route-chip" +
+                              (isChipHovered || isChipPinned
+                                ? " merge-route-chip--hovered"
+                                : "") +
+                              (isDowngraded(r.priority)
+                                ? " merge-route-chip--downgraded"
+                                : "")
+                            }
+                            onMouseEnter={() =>
+                              setHovered({
+                                pathIndex: i,
+                                chipIndex: j,
+                                startIndex: r.startIndex,
+                                endIndex: r.endIndex,
+                              })
+                            }
+                            onMouseLeave={() => setHovered(null)}
+                            onClick={() =>
+                              setPinned((prev) =>
+                                prev
+                                  ? null
+                                  : {
+                                      pathIndex: i,
+                                      chipIndex: j,
+                                      startIndex: r.startIndex,
+                                      endIndex: r.endIndex,
+                                    },
+                              )
+                            }
                           >
-                            <IconRoute size={13} />
-                          </IconButton>
-                        )}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+                            {r.label}
+                            {isDowngraded(r.priority) && (
+                              <span className="merge-route-priority">
+                                {priorityLetter(r.priority)}
+                              </span>
+                            )}
+                            {typeof r.share === "number" && (
+                              <span className="merge-route-share">
+                                {r.share}%
+                              </span>
+                            )}
+                          </Pill>
+                          {isChipPinned && canEditRoutes && (
+                            <IconButton
+                              size="sm"
+                              info
+                              className="merge-route-goto"
+                              ariaLabel={`ערוך את הציר ${r.label} בעריכת צירים`}
+                              title="ערוך ציר זה"
+                              onClick={() => goToRoute(r.label)}
+                            >
+                              <IconRoute size={13} />
+                            </IconButton>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             <RouteChain stops={shown} highlightedStops={highlightedStops} />
           </article>
