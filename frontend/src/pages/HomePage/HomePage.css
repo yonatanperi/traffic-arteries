@@ -110,9 +110,9 @@
   }
   /* The button now overhangs the near corner of both fields — keep their text
      and clear affordance out from under it. */
-  .search-fields .ac-field {
+  /* .search-fields .ac-field {
     padding-inline-end: 46px;
-  }
+  } */
 
   /* Comfortable thumb target for the primary action. */
   .search-submit {
