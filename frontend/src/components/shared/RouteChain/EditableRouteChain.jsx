@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext,
@@ -14,6 +14,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { ScaleRefContext } from "../../routes/RouteEditor/scaleContext.js";
 import Autocomplete from "../../ui/Autocomplete";
 import Button from "../../ui/Button";
 import IconButton from "../../ui/IconButton";
@@ -27,8 +28,10 @@ import {
 import "./RouteChain.css";
 
 // A DndContext with no sensors can never start a drag — used to render the chain
-// read-only-for-reorder (stops still edit/insert/remove, just don't drag) inside
-// the branched-route map, where a drag pans the canvas instead.
+// read-only-for-reorder (stops still edit/insert/remove, just don't drag) where a
+// drag must mean something else. (The branched map now *does* allow reorder: a
+// press on a pill is excluded from the canvas pan, so it drags to reorder there
+// too — only empty-canvas drags pan.)
 const NO_SENSORS = [];
 
 // Stops per row when wrapping to a cap of `max`: balanced so the last row is as
@@ -83,9 +86,10 @@ function isMatch(value, highlight) {
  *   isJunction    whether this chain is a tail that already has converging heads at
  *                 its start; only then does the leading "+" offer "add head" (a new
  *                 sibling head at the junction, split index 0).
- *   sortable      whether stops can be drag-reordered (default true). The branched
- *                 tree passes false: on its pan/zoom map a drag pans the canvas, so
- *                 pills stay click-to-edit but aren't draggable.
+ *   sortable      whether stops can be drag-reordered (default true). Enabled on the
+ *                 branched tree too: a press on a pill is excluded from the map's
+ *                 canvas pan, so it drags to reorder; the drag stays 1:1 with the
+ *                 cursor at any zoom via the ScaleRefContext modifier below.
  *   showStart / showEnd  whether the first / last stop gets the origin / destination
  *                 accent (default true). The branched tree passes these per segment
  *                 so only a *real* tree edge is accented — a leaf's true origin and
@@ -136,6 +140,17 @@ export default function EditableRouteChain({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
   const sensors = sortable ? pointerSensors : NO_SENSORS;
+
+  // On the branched map the pill lives inside a scaled canvas, so dnd-kit's
+  // screen-pixel drag delta paints at `delta * scale` and drifts from the cursor.
+  // Divide the live translate by the current zoom to keep the drag 1:1. The ref
+  // has a stable identity (default { current: 1 }), so reading it never re-renders
+  // and flat routes / results (scale 1) are a no-op.
+  const scaleRef = useContext(ScaleRefContext);
+  const scaleModifier = ({ transform }) => {
+    const s = scaleRef.current || 1;
+    return s === 1 ? transform : { ...transform, x: transform.x / s, y: transform.y / s };
+  };
 
   function emit(next) {
     onChange(next.filter((it) => it.value !== "").map((it) => it.value));
@@ -307,6 +322,7 @@ export default function EditableRouteChain({
   return (
     <DndContext
       sensors={sensors}
+      modifiers={[scaleModifier]}
       collisionDetection={closestCenter}
       onDragStart={() => {
         setEditingId(null);

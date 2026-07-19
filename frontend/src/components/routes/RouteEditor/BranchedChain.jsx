@@ -14,14 +14,16 @@ import {
   removeBranch,
   patchNodePlaces,
 } from "../../../utils/branches.js";
+import { ScaleRefContext } from "./scaleContext.js";
 import "./BranchedChain.css";
 
 // The interactive surface inside the tree — a pointer press here acts on the
-// element instead of panning the map: the pills (`.stop`, click-to-edit; reorder is
-// off in the tree so a press just does nothing rather than dragging), every control
-// (`button`, incl. `.insert-slot`/IconButtons), and the inline editors (`input`,
-// `.stop-edit`, `.ac`). Panning happens on the empty canvas / connectors between
-// them. Also fed to wheel/pinch so a gesture over an input doesn't zoom.
+// element instead of panning the map: the pills (`.stop`, click-to-edit and now
+// drag-to-reorder — excluding them from the pan is what lets a pill drag reorder
+// while an empty-canvas drag pans), every control (`button`, incl.
+// `.insert-slot`/IconButtons), and the inline editors (`input`, `.stop-edit`,
+// `.ac`). Panning happens on the empty canvas / connectors between them. Also fed
+// to wheel/pinch so a gesture over an input doesn't zoom.
 // (react-zoom-pan-pinch matches these against the event target.)
 const PAN_EXCLUDED = [
   "input",
@@ -81,10 +83,11 @@ export default function BranchedChain({
   compromisedPlaces,
 }) {
   // A branched route lives on the pan/zoom map; a plain (branchless) route is the
-  // bare inline chain. This split drives three things: the leading "[" bracket
-  // (tree only), stop drag-reorder (allowed only *outside* the viewport — i.e. on
-  // flat routes; inside the map a drag pans the canvas), and the 6-per-row wrap
-  // (only the mapped tree wraps; a flat chain wraps to fit the card as before).
+  // bare inline chain. This split drives two things: the leading "[" bracket
+  // (tree only) and the 6-per-row wrap (only the mapped tree wraps; a flat chain
+  // wraps to fit the card as before). Stop drag-reorder is enabled either way —
+  // inside the map a pill drag reorders (it's excluded from the canvas pan) and
+  // stays 1:1 with the cursor at any zoom via the shared scale ref below.
   const branched = route.branches?.length > 0;
 
   const ctx = {
@@ -94,15 +97,9 @@ export default function BranchedChain({
     highlight,
     onRenameStop,
     compromisedPlaces,
-    sortable: !branched,
+    sortable: true,
     wrapEvery: branched ? 6 : null,
   };
-
-  const tree = (
-    <div className="branched">
-      <TreeNode ctx={ctx} node={route} path={[]} bracket={branched} />
-    </div>
-  );
 
   // The most zoomed-OUT state is the whole tree fitting the viewport: minScale is
   // the measured fit scale, so you can't zoom out past the tree's boundary into
@@ -110,6 +107,18 @@ export default function BranchedChain({
   // real value is measured (on init / resize).
   const [minScale, setMinScale] = useState(SCALE_FLOOR);
   const apiRef = useRef(null);
+  // The live zoom, shared with every EditableRouteChain (via context) so a stop
+  // reorder drag divides its screen-pixel delta by the scale and stays 1:1 with
+  // the cursor. A ref (not state) so zoom frames don't re-render the whole tree.
+  const scaleRef = useRef(1);
+
+  const tree = (
+    <ScaleRefContext.Provider value={scaleRef}>
+      <div className="branched">
+        <TreeNode ctx={ctx} node={route} path={[]} bracket={branched} />
+      </div>
+    </ScaleRefContext.Provider>
+  );
 
   // Fit the tree to the viewport and pin minScale to that fit — centered. Called on
   // init, on the Fit button, and on resize (the fit scale depends on both sizes).
@@ -119,6 +128,7 @@ export default function BranchedChain({
     const scale = measureFitScale(api);
     if (scale == null) return;
     setMinScale(scale);
+    scaleRef.current = scale;
     const wrapper = api.instance.wrapperComponent;
     const content = api.instance.contentComponent;
     const x = (wrapper.offsetWidth - content.offsetWidth * scale) / 2;
@@ -151,6 +161,10 @@ export default function BranchedChain({
       // Gentle, relaxed wheel/trackpad zoom (the default is jumpy).
       wheel={{ excluded: PAN_EXCLUDED, step: 0.04 }}
       pinch={{ excluded: PAN_EXCLUDED, step: 3 }}
+      // Keep the shared scale ref live so a stop reorder drag stays 1:1 under zoom.
+      onTransformed={(_ref, state) => {
+        scaleRef.current = state.scale;
+      }}
       onInit={(ref) => {
         apiRef.current = ref;
         fitToView(ref, false);
@@ -214,8 +228,9 @@ function TreeNode({ ctx, node, path, bracket = false }) {
         ctx.onChange(branchAt(ctx.route, path, splitIndex))
       }
       isJunction={junction}
-      // Reorder only outside the viewport (flat routes); inside the map a drag
-      // pans the canvas, so the tree's stops are click-to-edit only.
+      // Stops drag-reorder within their own segment, on the map too: a pill press
+      // is excluded from the canvas pan, so it reorders (only empty-canvas drags
+      // pan). The scale ref keeps that drag 1:1 with the cursor at any zoom.
       sortable={ctx.sortable}
       // On the mapped tree, break each segment to a new row every 6 stops rather
       // than running one long line the user must pan across.
