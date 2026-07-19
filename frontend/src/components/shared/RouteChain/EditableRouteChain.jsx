@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext,
@@ -30,6 +30,15 @@ import "./RouteChain.css";
 // read-only-for-reorder (stops still edit/insert/remove, just don't drag) inside
 // the branched-route map, where a drag pans the canvas instead.
 const NO_SENSORS = [];
+
+// Stops per row when wrapping to a cap of `max`: balanced so the last row is as
+// full as possible. n stops span ceil(n/max) rows, and spreading n evenly over
+// those rows gives ceil(n/rows) each — e.g. 7 over a cap of 6 → 2 rows of 4 and 3,
+// not 6 and 1. Rows are (k, k, …, k, p) with p ≤ k.
+function rowSize(n, max) {
+  if (!max || n <= max) return Math.max(n, 1);
+  return Math.ceil(n / Math.ceil(n / max));
+}
 
 let uid = 0;
 const toItem = (value) => ({ id: `stop-${uid++}`, value });
@@ -82,10 +91,11 @@ function isMatch(value, highlight) {
  *                 so only a *real* tree edge is accented — a leaf's true origin and
  *                 the tail's final destination — not every sub-branch's internal
  *                 junction endpoints.
- *   wrapEvery     optional stop count after which the row breaks to a new line (via
- *                 a full-width flex break item). Null (default) = wrap only to fit
- *                 the container, as before. The branched map passes 6 so a long
- *                 segment stacks in rows of 6 instead of one line to pan across.
+ *   wrapEvery     optional cap on stops per row. When set, the chain is pre-split
+ *                 into balanced rows of at most this many stops (see `rowSize`) and
+ *                 stacked as a column of `.chain-line`s, rather than wrapping to fit
+ *                 its box. Null (default) = the plain single flowing row that wraps
+ *                 to fit, as before. The branched map passes 6.
  */
 export default function EditableRouteChain({
   stops,
@@ -201,6 +211,99 @@ export default function EditableRouteChain({
     setAddingId(null);
   }
 
+  // The leading "+" (add a stop / — on a junction tail — a sibling head at the
+  // junction). Lives at the very start of the chain (row 0 when wrapped).
+  const lead = (
+    <InsertSlot
+      variant="lead"
+      onAddStop={() => openInsert(0)}
+      onAddBranch={onAddBranch && isJunction ? () => onAddBranch(0) : undefined}
+      branchLabel="הוסף ראש"
+    />
+  );
+
+  // One stop: its pill (or inline editor) plus the "+"/chevron gap after it.
+  const renderStop = (it, i) => (
+    <li className="chain-item" key={it.id}>
+      {editingId === it.id ? (
+        <StopEditor
+          initial={it.value}
+          suggestions={suggestions}
+          onCommit={(v, keepAdding) => commitEdit(it.id, v, keepAdding)}
+          onCancel={() => cancelEdit(it.id)}
+        />
+      ) : (
+        <SortableStop
+          item={it}
+          index={i}
+          count={items.length}
+          highlight={highlight}
+          dragging={dragging}
+          sortable={sortable}
+          showStart={showStart}
+          showEnd={showEnd}
+          compromised={compromisedPlaces?.has(it.value)}
+          onEdit={() => setEditingId(it.id)}
+          onRemove={() => removeStop(it.id)}
+        />
+      )}
+      <InsertSlot
+        variant={i < items.length - 1 ? "gap" : "trail"}
+        onAddStop={() => openInsert(i + 1)}
+        // Branch = split at this gap: the stops up to and including this one
+        // (index i → splitIndex i+1) become a head, the rest the shared tail.
+        // Every gap between two stops offers it; the trailing "+" (i === last)
+        // has no tail after it, so it doesn't.
+        onAddBranch={
+          onAddBranch && i < items.length - 1
+            ? () => onAddBranch(i + 1)
+            : undefined
+        }
+      />
+    </li>
+  );
+
+  let body;
+  if (items.length === 0) {
+    body = (
+      <li className="chain-item">
+        <Button
+          variant="dashed"
+          className="chain-empty-add"
+          onClick={() => openInsert(0)}
+        >
+          <IconPlus size={15} /> הוסף תחנה
+        </Button>
+      </li>
+    );
+  } else if (wrapEvery) {
+    // Pre-split into balanced rows (`.chain-line`s) so the chain stacks as a
+    // column instead of wrapping to fit its box. Each line is a nowrap flex row,
+    // so the container measures to the widest line — keeping the map's fit/zoom
+    // and pan bounds honest (a flex-wrap container mis-measures to the full
+    // single-line width, since intrinsic sizing ignores in-flow line breaks).
+    const per = rowSize(items.length, wrapEvery);
+    const lines = [];
+    for (let start = 0, r = 0; start < items.length; start += per, r++) {
+      lines.push(
+        <li className="chain-line" key={`line-${r}`}>
+          {r === 0 && lead}
+          {items
+            .slice(start, start + per)
+            .map((it, k) => renderStop(it, start + k))}
+        </li>,
+      );
+    }
+    body = lines;
+  } else {
+    body = (
+      <>
+        {lead}
+        {items.map(renderStop)}
+      </>
+    );
+  }
+
   return (
     <DndContext
       sensors={sensors}
@@ -216,81 +319,14 @@ export default function EditableRouteChain({
         items={items.map((it) => it.id)}
         strategy={rectSortingStrategy}
       >
-        <ol className={"chain" + (dragging ? " chain--dragging" : "")}>
-          {items.length === 0 ? (
-            <li className="chain-item">
-              <Button
-                variant="dashed"
-                className="chain-empty-add"
-                onClick={() => openInsert(0)}
-              >
-                <IconPlus size={15} /> הוסף תחנה
-              </Button>
-            </li>
-          ) : (
-            <>
-              <InsertSlot
-                variant="lead"
-                onAddStop={() => openInsert(0)}
-                // Leading "+" adds a sibling head only on a tail that already
-                // branches (split index 0 = the existing junction).
-                onAddBranch={
-                  onAddBranch && isJunction ? () => onAddBranch(0) : undefined
-                }
-                branchLabel="הוסף ראש"
-              />
-              {items.map((it, i) => (
-                <Fragment key={it.id}>
-                  <li className="chain-item">
-                    {editingId === it.id ? (
-                      <StopEditor
-                        initial={it.value}
-                        suggestions={suggestions}
-                        onCommit={(v, keepAdding) =>
-                          commitEdit(it.id, v, keepAdding)
-                        }
-                        onCancel={() => cancelEdit(it.id)}
-                      />
-                    ) : (
-                      <SortableStop
-                        item={it}
-                        index={i}
-                        count={items.length}
-                        highlight={highlight}
-                        dragging={dragging}
-                        sortable={sortable}
-                        showStart={showStart}
-                        showEnd={showEnd}
-                        compromised={compromisedPlaces?.has(it.value)}
-                        onEdit={() => setEditingId(it.id)}
-                        onRemove={() => removeStop(it.id)}
-                      />
-                    )}
-                    <InsertSlot
-                      variant={i < items.length - 1 ? "gap" : "trail"}
-                      onAddStop={() => openInsert(i + 1)}
-                      // Branch = split at this gap: the stops up to and including
-                      // this one (index i → splitIndex i+1) become a head, the rest
-                      // the shared tail. Every gap between two stops offers it; the
-                      // trailing "+" (i === last) has no tail after it, so it doesn't.
-                      onAddBranch={
-                        onAddBranch && i < items.length - 1
-                          ? () => onAddBranch(i + 1)
-                          : undefined
-                      }
-                    />
-                  </li>
-                  {/* Force a new row every `wrapEvery` stops: a zero-height,
-                      full-width flex item pushes the rest of the chain down. */}
-                  {wrapEvery &&
-                    (i + 1) % wrapEvery === 0 &&
-                    i < items.length - 1 && (
-                      <li className="chain-break" aria-hidden="true" />
-                    )}
-                </Fragment>
-              ))}
-            </>
-          )}
+        <ol
+          className={
+            "chain" +
+            (wrapEvery ? " chain--wrapped" : "") +
+            (dragging ? " chain--dragging" : "")
+          }
+        >
+          {body}
         </ol>
       </SortableContext>
     </DndContext>

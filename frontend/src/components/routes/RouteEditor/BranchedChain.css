@@ -40,10 +40,11 @@
   cursor: grabbing;
 }
 /* The transformed content sizes to the tree, not the viewport. `width: max-content`
-   is essential once chains wrap: without it the inline-block would shrink-to-fit the
-   *viewport* width and every chain would wrap naturally to fit (4-per-row, not 6),
-   defeating the explicit `.chain-break`s. max-content lets the canvas grow to the
-   tree's true width so the forced breaks are the only ones. */
+   is essential: without it the inline-block would shrink-to-fit the *viewport* width
+   and every chain would wrap to fit it (4-per-row, not the intended 6). max-content
+   lets the canvas grow to the tree's true width, and because each segment stacks as
+   a column of nowrap `.chain-line`s (see RouteChain.css `.chain--wrapped`), that
+   width is the widest actual row — so fit/zoom and pan bounds match what's painted. */
 .branched-canvas.branched-canvas {
   display: inline-block;
   width: max-content;
@@ -59,27 +60,9 @@
   min-width: 0;
 }
 
-/* Inside the map a chain doesn't wrap to fit the canvas (it would reflow as the
-   user zooms); instead it runs on one line until an explicit break every N stops
-   (the `.chain-break` items EditableRouteChain injects) forces a new row. So a long
-   segment stacks in fixed rows of N rather than one endless line to pan across.
-   Scoped to the map — flat routes and path results elsewhere keep wrapping to fit. */
-.branched-canvas .chain {
-  flex-wrap: wrap;
-}
-.branched-canvas .chain > * {
-  flex-shrink: 0;
-}
-/* A full-width, zero-height flex item: everything after it is pushed to the next
-   row, giving an exact N-stops-per-row break regardless of pill widths. */
-.branched-canvas .chain-break {
-  flex-basis: 100%;
-  width: 100%;
-  height: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
+/* The map's chains render in `.chain--wrapped` mode (a column of balanced nowrap
+   rows) — see RouteChain.css. Nothing map-specific to add here; the row structure
+   and its measurement come from the shared chain styles. */
 
 /* Always-visible control cluster, floating over the top-start corner of the map.
    Kept visible (not hover-revealed) because on touch it's the only zoom affordance

@@ -18,6 +18,26 @@
   gap: var(--s-2);
 }
 
+/* Wrapped mode (the branched map): instead of one flowing row that wraps to fit,
+   EditableRouteChain pre-splits the stops into balanced rows (`.chain-line`) and
+   stacks them as a column. Each line is a nowrap flex row, so the container's
+   intrinsic width is the widest line (a plain flex-wrap row mis-measures to its
+   full single-line width, since intrinsic sizing ignores in-flow breaks). */
+.chain--wrapped {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.chain-line {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--s-3) var(--s-2);
+}
+.chain-line > * {
+  flex-shrink: 0;
+}
+
 .stop {
   display: inline-flex;
   align-items: center;
