@@ -1,21 +1,90 @@
 /* The route's converging tree, drawn as a horizontal dendrogram (RTL): origin
    heads on the upstream (right) side merge through elbow connectors into the tail
    that flows left toward the destination. Nesting is just a head that is itself a
-   junction, rendered recursively. Wide trees scroll horizontally rather than
-   breaking the card. */
+   junction, rendered recursively.
 
-.branched-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
-  /* room so the outermost connectors / remove buttons aren't clipped */
-  padding-block: var(--s-1);
-  margin-inline: calc(-1 * var(--s-1));
-  padding-inline: var(--s-1);
-}
+   A branched route is shown on a Figma-style map (`.branched-map`) — the whole tree
+   rendered in full inside a bounded, pan/zoom viewport. A flat route is just the
+   inline `.branched` chain, unwrapped. */
+
 .branched {
   display: inline-block;
   min-width: 100%;
 }
+
+/* --- the pan/zoom map (branched routes only) ----------------------------- */
+
+.branched-map {
+  position: relative;
+}
+
+/* The bounded viewport the tree pans/zooms inside. react-zoom-pan-pinch sizes its
+   own wrapper/content; we give it the box (height, border, canvas backdrop).
+   `direction: ltr` is required: the library positions the content from the left
+   (LTR math), so under the app's RTL it would otherwise anchor the tree to the
+   right and translate it off-screen. The tree itself is set back to RTL below. */
+.branched-viewport.branched-viewport {
+  direction: ltr;
+  width: 100%;
+  height: clamp(240px, 42vh, 480px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg, 12px);
+  background-color: var(--surface);
+  /* A faint dot grid reads as a canvas and makes pan/zoom legible. */
+  background-image: radial-gradient(var(--border-strong) 1px, transparent 1px);
+  background-size: 22px 22px;
+  cursor: grab;
+}
+.branched-viewport.branched-viewport:active {
+  cursor: grabbing;
+}
+/* The transformed content sizes to the tree, not the viewport. */
+.branched-canvas.branched-canvas {
+  display: inline-block;
+  padding: var(--s-3);
+}
+/* Inside the map the tree must shrink-wrap its content so the measured content box
+   is the *actual* tree bounds — otherwise `min-width: 100%` inflates it with empty
+   space and the fit/zoom center-of-mass lands in the void. `direction: rtl` restores
+   the tree's own right-to-left layout inside the LTR transform container. */
+.branched-canvas .branched {
+  direction: rtl;
+  display: inline-block;
+  min-width: 0;
+}
+
+/* Inside the map every chain stays on a single line — the pan/zoom canvas handles
+   overflow, so a branch/tail never wraps to multiple rows (which would misalign the
+   connectors). The content grows horizontally and the user pans/zooms to it. Scoped
+   to the map, so flat routes and path results elsewhere keep wrapping to fit. */
+.branched-canvas .chain {
+  flex-wrap: nowrap;
+}
+.branched-canvas .chain > * {
+  flex-shrink: 0;
+}
+
+/* Always-visible control cluster, floating over the top-start corner of the map.
+   Kept visible (not hover-revealed) because on touch it's the only zoom affordance
+   besides pinch. */
+.branched-map-controls {
+  position: absolute;
+  top: var(--s-2);
+  inset-inline-start: var(--s-2);
+  z-index: 2;
+  display: flex;
+  /* flex-direction: column; */
+  gap: var(--s-1);
+  padding: var(--s-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-sm);
+}
+
+/* --- tree nodes (shared by map + flat) ----------------------------------- */
 
 /* A leaf (plain head / branchless route): its chain, with an optional "[" (root). */
 .tnode-leaf {
@@ -78,8 +147,8 @@
 }
 
 /* A "[" bracket embracing each head on its origin (upstream / right) side, so a
-   branch — expanded or collapsed, however tall — reads as one grouped unit. Logical
-   borders keep the opening facing the tail (inline-end / left) under RTL. */
+   branch — however tall — reads as one grouped unit. Logical borders keep the
+   opening facing the tail (inline-end / left) under RTL. */
 .tnode-bracket {
   flex-shrink: 0;
   align-self: stretch;
@@ -89,49 +158,6 @@
   border-inline-end: 0;
   border-start-start-radius: 6px;
   border-end-start-radius: 6px;
-}
-
-/* A folded-away head: a muted, dashed pill-chain that is itself the expand button. */
-.tnode-collapsed {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-1) var(--s-2);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--r-pill);
-  background: transparent;
-  cursor: pointer;
-  transition:
-    border-color 0.15s var(--ease),
-    background 0.15s var(--ease);
-}
-.tnode-collapsed:hover,
-.tnode-collapsed:focus-visible {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-/* The stops inside read as plain (non-editable) pills. */
-.tnode-collapsed .stop {
-  cursor: pointer;
-}
-.tnode-dots {
-  color: var(--text-faint);
-  font-weight: 700;
-  font-size: 1.1rem;
-  line-height: 1;
-}
-.tnode-collapsed:hover .tnode-dots,
-.tnode-collapsed:focus-visible .tnode-dots {
-  color: var(--accent);
-}
-.tnode-count {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  background: var(--surface-hover);
-  padding: 1px 7px;
-  border-radius: var(--r-pill);
-  white-space: nowrap;
 }
 
 /* The tail chain, with a short arm on its upstream (inline-start / right) side that
@@ -170,8 +196,18 @@
   color: var(--warning);
 }
 
-/* Tighter gutters on phones so deep nesting keeps the chains usable. */
+/* Tighter gutters + a roomier viewport on phones so pinch/pan have space and deep
+   nesting keeps the chains usable. Controls drop to a bottom bar under the thumb. */
 @media (max-width: 480px) {
+  .branched-viewport.branched-viewport {
+    height: min(60vh, 420px);
+  }
+  .branched-map-controls {
+    top: auto;
+    bottom: var(--s-2);
+    inset-inline-start: var(--s-2);
+    flex-direction: row;
+  }
   .tnode-heads {
     padding-inline-end: 14px;
     gap: var(--s-2);

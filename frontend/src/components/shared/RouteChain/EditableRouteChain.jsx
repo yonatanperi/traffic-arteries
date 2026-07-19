@@ -26,6 +26,11 @@ import {
 } from "../../ui/icons";
 import "./RouteChain.css";
 
+// A DndContext with no sensors can never start a drag — used to render the chain
+// read-only-for-reorder (stops still edit/insert/remove, just don't drag) inside
+// the branched-route map, where a drag pans the canvas instead.
+const NO_SENSORS = [];
+
 let uid = 0;
 const toItem = (value) => ({ id: `stop-${uid++}`, value });
 const sameValues = (a, b) =>
@@ -69,6 +74,9 @@ function isMatch(value, highlight) {
  *   isJunction    whether this chain is a tail that already has converging heads at
  *                 its start; only then does the leading "+" offer "add head" (a new
  *                 sibling head at the junction, split index 0).
+ *   sortable      whether stops can be drag-reordered (default true). The branched
+ *                 tree passes false: on its pan/zoom map a drag pans the canvas, so
+ *                 pills stay click-to-edit but aren't draggable.
  */
 export default function EditableRouteChain({
   stops,
@@ -79,6 +87,7 @@ export default function EditableRouteChain({
   compromisedPlaces,
   onAddBranch,
   isJunction = false,
+  sortable = true,
 }) {
   // Internal id-keyed model so dnd-kit and the inline editor stay stable across
   // reorders (stop values can duplicate, so they can't be used as keys).
@@ -101,9 +110,10 @@ export default function EditableRouteChain({
     });
   }, [stops]);
 
-  const sensors = useSensors(
+  const pointerSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
+  const sensors = sortable ? pointerSensors : NO_SENSORS;
 
   function emit(next) {
     onChange(next.filter((it) => it.value !== "").map((it) => it.value));
@@ -236,6 +246,7 @@ export default function EditableRouteChain({
                         count={items.length}
                         highlight={highlight}
                         dragging={dragging}
+                        sortable={sortable}
                         compromised={compromisedPlaces?.has(it.value)}
                         onEdit={() => setEditingId(it.id)}
                         onRemove={() => removeStop(it.id)}
@@ -271,6 +282,7 @@ function SortableStop({
   count,
   highlight,
   dragging,
+  sortable = true,
   compromised,
   onEdit,
   onRemove,
@@ -283,6 +295,10 @@ function SortableStop({
     transition,
     isDragging,
   } = useSortable({ id: item.id });
+
+  // When reorder is off (the branched map), the pill is click-to-edit only — no
+  // drag handlers, so a press-drag falls through to the canvas pan underneath.
+  const dragProps = sortable ? { ...attributes, ...listeners } : {};
 
   // CSS.Translate (not CSS.Transform): apply only the x/y translation, never the
   // scaleX/scaleY that rectSortingStrategy adds to make items match the dragged
@@ -328,12 +344,12 @@ function SortableStop({
         (index === count - 1 ? " stop--end" : "") +
         (matched ? " stop--match" : "") +
         (isDragging ? " stop--dragging" : "") +
+        (sortable ? "" : " stop--static") +
         (compromised ? " stop--compromised" : "")
       }
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      {...attributes}
-      {...listeners}
+      {...dragProps}
       onClick={onEdit}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {

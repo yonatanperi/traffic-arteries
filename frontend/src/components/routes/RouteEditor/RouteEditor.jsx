@@ -51,7 +51,11 @@ import "./RouteEditor.css";
 // one of these must not turn into a card drag.
 // `.sel` covers the priority dropdown's *options* too: they render inside the card,
 // and the drag sensor fires on pointerdown — before the option's own mousedown.
-const NO_ROW_DRAG = "button, input, a, .stop, .stop-edit, .ac, .sel";
+// `.branched-viewport` is the branched tree's pan/zoom map: a drag there pans the
+// canvas, so it must not also drag the whole card. (The card can still be reordered
+// by dragging its header/padding, outside the map.)
+const NO_ROW_DRAG =
+  "button, input, a, .stop, .stop-edit, .ac, .sel, .branched-viewport";
 
 // Per-row view state that `routes` itself can't carry: routes.json is a plain
 // array of arrays, with no id to key a React element, a drag item or a pin by.

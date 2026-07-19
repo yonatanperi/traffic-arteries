@@ -93,6 +93,14 @@ export function IconPlus(props) {
   );
 }
 
+export function IconMinus(props) {
+  return (
+    <Svg {...props}>
+      <path d="M5 12h14" />
+    </Svg>
+  );
+}
+
 // Branch — a git-style fork: a trunk with a side branch curving into it.
 export function IconBranch(props) {
   return (
