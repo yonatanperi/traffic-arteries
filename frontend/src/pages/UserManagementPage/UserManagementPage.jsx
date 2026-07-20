@@ -2,7 +2,7 @@ import PageHeader from "../../components/ui/PageHeader";
 import Page from "../../components/layout/Page";
 import Pill from "../../components/ui/Pill";
 import Button from "../../components/ui/Button";
-import Loader from "../../components/ui/Loader/Loader.jsx";
+import LoaderLayout from "../../components/ui/LoaderLayout/LoaderLayout.jsx";
 import EmptyState from "../../components/ui/EmptyState";
 import { useUserManagement } from "./useUserManagement.js";
 import "./UserManagementPage.css";
@@ -57,7 +57,7 @@ export default function UserManagementPage() {
       )}
 
       {loading ? (
-        <Loader label="טוען משתמשים…" />
+        <LoaderLayout label="טוען משתמשים…" />
       ) : users.length === 0 ? (
         <EmptyState title="לא נמצאו משתמשים" />
       ) : (

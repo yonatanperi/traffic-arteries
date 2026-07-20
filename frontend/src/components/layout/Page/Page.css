@@ -2,6 +2,14 @@
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
+  /* height, not min-height: a percentage min-height doesn't count as a
+     definite size for descendants' own height:100% to resolve against, so a
+     lone LoaderLayout child couldn't fill it and collapsed to its own small
+     fallback instead. height:100% is definite, and content taller than that
+     (the normal case) still renders in full — overflow:visible doesn't clip
+     it, it just means the box's own extent stops mattering once content
+     exceeds it. */
+  height: 100%;
   padding: var(--s-7) var(--s-5) calc(var(--s-7) + var(--tabbar-h));
   animation: rise 0.5s var(--ease) both;
 }

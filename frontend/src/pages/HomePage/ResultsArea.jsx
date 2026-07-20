@@ -1,4 +1,4 @@
-import Loader from "../../components/ui/Loader";
+import LoaderLayout from "../../components/ui/LoaderLayout";
 import EmptyState from "../../components/ui/EmptyState";
 import PathResults from "../../components/home/PathResults";
 import Pill from "../../components/ui/Pill";
@@ -25,7 +25,7 @@ export default function ResultsArea({
 }) {
   return (
     <section className="results-area">
-      {loading && <Loader label="מחשב צירים…" />}
+      {loading && <LoaderLayout label="מחשב צירים…" />}
 
       {!loading && result && result.paths.length === 0 && (
         <EmptyState

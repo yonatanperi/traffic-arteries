@@ -1,7 +1,9 @@
 .brain-page {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 90px);
+  /* dvh, not vh: this page's own min-height must track the real visible
+     viewport, or a mobile browser's address-bar collapse leaves a stale gap. */
+  min-height: calc(100dvh - 90px);
 }
 
 .brain-canvas-wrap {
@@ -14,6 +16,6 @@
   flex: 1;
 }
 .brain-canvas-wrap > .empty-state,
-.brain-canvas-wrap > .loader {
+.brain-canvas-wrap > .loader-layout {
   flex: 1;
 }

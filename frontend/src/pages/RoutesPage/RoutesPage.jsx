@@ -46,7 +46,9 @@ export default function RoutesPage() {
   // (when the result is valid). Invalid intermediate states are held locally
   // and saved as soon as they become valid again.
   const routesState = useAutoSave(saveRoutes, (r) => r.every(isRouteValid));
-  const compromisedState = useAutoSave(saveCompromised, (g) => g.every((group) => group.length >= 1));
+  const compromisedState = useAutoSave(saveCompromised, (g) =>
+    g.every((group) => group.length >= 1),
+  );
 
   useEffect(() => {
     Promise.all([getRoutes(), getCompromised()])
@@ -65,7 +67,9 @@ export default function RoutesPage() {
   const suggestions = useMemo(() => {
     if (!routes) return [];
     const set = new Set();
-    routes.forEach((r) => routeStops(r).forEach((p) => p.trim() && set.add(p.trim())));
+    routes.forEach((r) =>
+      routeStops(r).forEach((p) => p.trim() && set.add(p.trim())),
+    );
     return [...set].sort((a, b) => a.localeCompare(b, "he"));
   }, [routes]);
 

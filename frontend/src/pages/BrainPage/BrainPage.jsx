@@ -3,7 +3,7 @@ import GraphView from "../../components/brain/GraphView";
 import BrainToolbar from "../../components/brain/BrainToolbar";
 import NodeDetailPanel from "../../components/brain/NodeDetailPanel";
 import InsightsPanel from "../../components/brain/InsightsPanel";
-import Loader from "../../components/ui/Loader";
+import LoaderLayout from "../../components/ui/LoaderLayout";
 import EmptyState from "../../components/ui/EmptyState";
 import PageHeader from "../../components/ui/PageHeader";
 import Page from "../../components/layout/Page";
@@ -50,6 +50,7 @@ export default function BrainPage() {
           placeOptions={placeOptions}
           onFocusNode={focusNode}
           onZoomFit={() => graphRef.current?.zoomToFit()}
+          onReset={() => graphRef.current?.reheat()}
           onZoomIn={() => graphRef.current?.zoomIn()}
           onZoomOut={() => graphRef.current?.zoomOut()}
           showInsights={showInsights}
@@ -70,7 +71,7 @@ export default function BrainPage() {
       )}
 
       <div className="brain-canvas-wrap">
-        {loading && <Loader label="בונה את הרשת…" />}
+        {loading && <LoaderLayout label="בונה את הרשת…" />}
         {error && (
           <EmptyState
             icon={<IconAlert size={60} />}

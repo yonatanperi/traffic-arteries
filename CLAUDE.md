@@ -141,7 +141,7 @@ etc. almost certainly already exists.**
 - `Select` — the generic dropdown (a native `<select>` in design tokens), for a
   short *closed* set of values (e.g. the route-priority picker). `Autocomplete` is
   the one for searching a long open list of places; don't confuse the two.
-- `ConfirmModal`, `EmptyState`, `Loader`, `PageHeader`, `SegmentedControl` /
+- `ConfirmModal`, `EmptyState`, `LoaderLayout`, `PageHeader`, `SegmentedControl` /
   `SegmentedNav` (tabs vs. router-linked nav), `SwapButton` (start/end swap,
   pairs with `useOriginDestination`).
 - `icons/icons.jsx` — every icon as an inline SVG function component

@@ -35,7 +35,7 @@ const ACCENT_RGB = hexToRgb(ACCENT);
  * a node and its direct connections, monochrome dimming of other connected
  * components, path highlighting (with required waypoint stops painted
  * separately), and a dead-end ring overlay. Imperative controls (fit / zoom
- * / center) are exposed through the ref.
+ * / reheat / center) are exposed through the ref.
  */
 const GraphView = forwardRef(function GraphView(
   {
@@ -50,7 +50,7 @@ const GraphView = forwardRef(function GraphView(
     highlightDeadEnds = false,
     compromisedIds = null,
   },
-  ref
+  ref,
 ) {
   const wrapRef = useRef(null);
   const fgRef = useRef(null);
@@ -104,8 +104,23 @@ const GraphView = forwardRef(function GraphView(
     didInitialFit.current = false;
   }, [data]);
 
+  // The library's default charge (repulsion) is tuned for sparse graphs and
+  // settles this network into a tight, overlapping cluster on its own — the
+  // old manual "reset" button only looked like it fixed that by re-running
+  // the simulation with fresh velocity each click, letting repulsion win a
+  // little more ground each time. Push the repulsion up front instead, so
+  // the very first settle already lands at that fully-spread layout.
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    fg.d3Force("charge")?.strength(-300).distanceMax(1000);
+    fg.d3Force("link")?.distance(70);
+    fg.d3ReheatSimulation();
+  }, [data]);
+
   useImperativeHandle(ref, () => ({
     zoomToFit: () => fgRef.current?.zoomToFit(600, 60),
+    reheat: () => fgRef.current?.d3ReheatSimulation(),
     zoomIn: () => {
       const fg = fgRef.current;
       if (!fg) return;
@@ -140,7 +155,7 @@ const GraphView = forwardRef(function GraphView(
       }
       return "dim";
     },
-    [pathActive, pathNodes, selected, neighbours, componentOf]
+    [pathActive, pathNodes, selected, neighbours, componentOf],
   );
 
   /**
@@ -155,7 +170,7 @@ const GraphView = forwardRef(function GraphView(
       if (waypointIds?.has(id)) return WAYPOINT;
       return null;
     },
-    [compromisedIds, waypointIds]
+    [compromisedIds, waypointIds],
   );
 
   const drawNode = useCallback(
@@ -207,7 +222,14 @@ const GraphView = forwardRef(function GraphView(
         ctx.stroke();
       }
     },
-    [tierOf, degree, highlightDeadEnds, deadEndIds, pathActive, overrideColorOf]
+    [
+      tierOf,
+      degree,
+      highlightDeadEnds,
+      deadEndIds,
+      pathActive,
+      overrideColorOf,
+    ],
   );
 
   /**
@@ -239,7 +261,7 @@ const GraphView = forwardRef(function GraphView(
         }
       });
       candidates.sort(
-        (a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0)
+        (a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0),
       );
 
       const placed = [];
@@ -260,15 +282,18 @@ const GraphView = forwardRef(function GraphView(
               rect.left < r.right &&
               rect.right > r.left &&
               rect.top < r.bottom &&
-              rect.bottom > r.top
+              rect.bottom > r.top,
           );
           if (overlaps) return;
         }
         placed.push(rect);
 
         const tier = tierOf(node.id);
-        const bright = tier === "selected" || tier === "neighbour" ||
-          tier === "normal" || tier === "path";
+        const bright =
+          tier === "selected" ||
+          tier === "neighbour" ||
+          tier === "normal" ||
+          tier === "path";
         ctx.fillStyle = bright ? TEXT : "rgba(154,167,194,0.5)";
         ctx.globalAlpha = bright ? 1 : 0.4;
         ctx.fillText(node.id, node.x, top);
@@ -278,7 +303,7 @@ const GraphView = forwardRef(function GraphView(
       always.forEach((node) => tryPlace(node, true));
       candidates.forEach((node) => tryPlace(node, false));
     },
-    [data, tierOf, degree]
+    [data, tierOf, degree],
   );
 
   const linkColor = useCallback(
@@ -295,7 +320,7 @@ const GraphView = forwardRef(function GraphView(
       const touches = s === selected || t === selected;
       return touches ? "rgba(213,255,64,0.9)" : "rgba(64,65,47,0.2)";
     },
-    [pathActive, pathEdges, selected, overrideColorOf]
+    [pathActive, pathEdges, selected, overrideColorOf],
   );
 
   const linkWidth = useCallback(
@@ -306,7 +331,7 @@ const GraphView = forwardRef(function GraphView(
       if (!selected) return 1;
       return s === selected || t === selected ? 2 : 0.6;
     },
-    [pathActive, pathEdges, selected, overrideColorOf]
+    [pathActive, pathEdges, selected, overrideColorOf],
   );
 
   return (

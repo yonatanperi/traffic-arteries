@@ -9,6 +9,7 @@ import { useOriginDestination } from "../../../hooks/useOriginDestination.js";
 import {
   IconSearch,
   IconFit,
+  IconReset,
   IconPlus,
   IconMinus,
   IconBulb,
@@ -35,8 +36,8 @@ function chipLabel(info, stopCount) {
 
 /**
  * The control strip above the brain canvas. Two modes:
- *   - "explore": search a place + canvas controls (fit / zoom in / zoom out /
- *     insights).
+ *   - "explore": search a place + canvas controls (fit / reset / zoom in /
+ *     zoom out / insights).
  *   - "path": pick origin + destination, find routes, and switch between the
  *     highlighted alternatives.
  *
@@ -50,6 +51,7 @@ export default function BrainToolbar({
   // explore
   onFocusNode,
   onZoomFit,
+  onReset,
   onZoomIn,
   onZoomOut,
   showInsights,
@@ -127,6 +129,15 @@ export default function BrainToolbar({
               aria-label="התאם לתצוגה"
             >
               <IconFit size={18} />
+            </Button>
+            <Button
+              variant="ghost"
+              className="bt-icon"
+              onClick={onReset}
+              title="סדר מחדש"
+              aria-label="סדר מחדש"
+            >
+              <IconReset size={18} />
             </Button>
             <Button
               variant="ghost"
