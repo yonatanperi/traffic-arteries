@@ -83,6 +83,18 @@ Tests are algorithm-focused (`backend/api/tests.py`), anchored on the spec's
 own worked example (routes `[A,B,C,D]`, `[C,M,N,G,E,R]`, `[E,J,K,L,A]`; `K → M`
 must yield `[K, J, E, G, N, M]`).
 
+**Console route lookup** — `find_route` (`backend/api/management/commands/find_route.py`)
+runs the exact same pipeline as `POST /api/path/`/the home page search
+(`rank_candidates` → `select_diverse` twice → top-3), without going through the
+UI or HTTP. Use it to inspect a route's stats (match %, priority tier, merged
+sub-routes) straight from the CLI:
+```bash
+cd backend
+.venv/bin/python manage.py find_route "<start>" "<end>"
+.venv/bin/python manage.py find_route "<start>" "<end>" --via "<stop1>" "<stop2>"
+.venv/bin/python manage.py find_route "<start>" "<end>" --json  # raw {paths, meta, compromisedDetour}
+```
+
 ## Architecture
 
 ```

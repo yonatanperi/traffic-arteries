@@ -1,5 +1,6 @@
 """Algorithm correctness tests, anchored on the spec's own example."""
 
+import contextlib
 import os
 from unittest import mock
 
@@ -10,6 +11,22 @@ from moto import mock_aws
 from .db import Database, ValidationError, expand_route, expand_routes
 from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
 from .graph.search import MinMergeStrategy, avoid_priority_penalty
+
+@contextlib.contextmanager
+def length_mode(crossroads_only):
+    """Run a block under a given :class:`LengthMode`, restoring the previous one.
+
+    The mode is a process-wide static flag, so a test that flips it must put back
+    what it found — not a hardcoded value, or it silently redefines the default
+    for every test after it.
+    """
+    previous = LengthMode.CROSSROADS_ONLY
+    LengthMode.CROSSROADS_ONLY = crossroads_only
+    try:
+        yield
+    finally:
+        LengthMode.CROSSROADS_ONLY = previous
+
 
 # The example from the spec.
 SPEC_ROUTES = [
@@ -109,14 +126,24 @@ class KShortestPathsTests(SimpleTestCase):
 class WaypointTests(SimpleTestCase):
     """Required intermediate stops: real-world simple paths, no pointless detour."""
 
+    # A-B direct; A-C and C-B direct (short way through C); a long *single-route*
+    # road from A to C via Z, X, N, K; and a long *fragmented* one (routes 4..8,
+    # transferring at every other stop) that exists only to be rejected for length.
+    WAYPOINT_ROUTES = [
+        ["A", "B"],                          # 0
+        ["A", "C"],                          # 1
+        ["C", "B"],                          # 2
+        ["A", "Z", "X", "N", "K", "C"],      # 3: long, but one road end to end
+        ["A", "w1", "w2"],                   # 4..8: long AND fragmented
+        ["w2", "w3", "w4"],
+        ["w4", "w5", "w6"],
+        ["w6", "w7", "w8"],
+        ["w8", "w9", "C"],
+    ]
+    LONG_FRAGMENTED = ["A", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "C", "B"]
+
     def setUp(self):
-        # A-B direct; A-C and C-B direct (short way through C); plus a long
-        # detour from A to C via Z, X, N, K.
-        self.finder = RouteFinder(
-            Graph.from_routes(
-                [["A", "B"], ["A", "C"], ["C", "B"], ["A", "Z", "X", "N", "K", "C"]]
-            )
-        )
+        self.finder = RouteFinder(Graph.from_routes(self.WAYPOINT_ROUTES))
 
     def test_route_passes_through_required_stop(self):
         for p in self.finder.k_shortest_paths("A", "B", via=["C"]):
@@ -126,11 +153,28 @@ class WaypointTests(SimpleTestCase):
         for p in self.finder.k_shortest_paths("A", "B", via=["C"]):
             self.assertEqual(len(p), len(set(p)), f"route revisits a node: {p}")
 
-    def test_short_connection_is_not_detoured(self):
-        # The short A-C-B must be chosen; the long A-Z-X-N-K-C-B detour rejected.
+    def test_long_single_road_beats_a_short_transfer(self):
+        # Counting every hop (LengthMode.CROSSROADS_ONLY = False), the long way
+        # round is the *concentrated* one: A-Z-X-N-K-C rides road 3 for 5 of its 6
+        # hops (83%), while the short A-C-B transfers immediately, splitting 50/50
+        # across two roads. Concentration is the objective, so the long ride wins
+        # and the short hop-over comes back as the alternative.
+        #
+        # Under crossroads-only lengths the Z-X-N-K stretch was transparent, so the
+        # two tied and the short route took the length tiebreak. Riding one road
+        # further now beats it outright — the flip is the mode, not a regression.
         paths = self.finder.k_shortest_paths("A", "B", via=["C"])
-        self.assertEqual(paths[0], ["A", "C", "B"])
-        self.assertNotIn(["A", "Z", "X", "N", "K", "C", "B"], paths)
+        self.assertEqual(paths[0], ["A", "Z", "X", "N", "K", "C", "B"])
+        self.assertIn(["A", "C", "B"], paths)
+
+    def test_excessive_detour_is_rejected_by_stretch(self):
+        # WAYPOINT_MAX_STRETCH: an alternative may not exceed the best route
+        # through the required stops by more than 1.5x in stops. The fragmented
+        # w-chain is 12 stops against the best route's 7, so it is dropped even
+        # though k=3 leaves room for it.
+        paths = self.finder.k_shortest_paths("A", "B", via=["C"])
+        self.assertNotIn(self.LONG_FRAGMENTED, paths)
+        self.assertTrue(all(len(p) <= 7 * 1.5 for p in paths))
 
     def test_optimised_stop_order(self):
         # Stops given as [Q, P] are visited in the order that minimises the
@@ -271,14 +315,17 @@ class MergeTests(SimpleTestCase):
         self.assertEqual(best.route_ids, [1, 2])
 
     def test_more_concentrated_corridor_wins(self):
-        # A->R: both corridors merge 2 routes, but concentration decides. Riding
-        # route 1 for the bulk (A-B-C then C..R) is more concentrated than the
-        # balanced 50/50 [A, L, K, J, E, R], so it is the best route.
+        # A->R: both corridors merge 2 routes, so concentration decides. Counting
+        # every hop, [A, L, K, J, E, R] rides route 2 for 4 of its 5 hops (80%),
+        # against 5 of 7 (71%) for the A-B-C-M-N-G-E-R corridor, so it wins.
+        # (Crossroads-only it was the balanced 50/50 one and the other corridor
+        # won — the expected winner follows the length mode, the property under
+        # test does not.)
         routes = self.finder.find_routes("A", "R", k=3)
         best = routes[0]
-        self.assertEqual(best.stops, ["A", "B", "C", "M", "N", "G", "E", "R"])
+        self.assertEqual(best.stops, ["A", "L", "K", "J", "E", "R"])
         self.assertEqual(best.route_count, 2)
-        self.assertIn(["A", "L", "K", "J", "E", "R"], [r.stops for r in routes])
+        self.assertIn(["A", "B", "C", "M", "N", "G", "E", "R"], [r.stops for r in routes])
         self.assertGreater(best.hhi, routes[1].hhi)
 
     def test_via_still_works_with_merges(self):
@@ -297,10 +344,16 @@ class MergeTests(SimpleTestCase):
 
 
 # A graph with two S->T corridors: a long artery (route 0) reached by brief hops
-# (routes 1, 2) — three merged routes but perfectly concentrated — and a balanced
+# (routes 1, 2) — three merged routes but far more concentrated — and a balanced
 # two-route blend (routes 6, 7). Stubs make the interior nodes crossroads.
+#
+# The artery is long enough that it dominates under *either* length mode: with
+# crossroads-only the brief end-hops are length-0 and it scores a perfect 1.0;
+# counting every hop they weigh in, but 6 hops of artery against one hop in and
+# one hop out still beats the 50/50 blend. New stubs go on the end so the earlier
+# routes keep their indices (tests assert on `route_id`).
 CONCENTRATION_ROUTES = [
-    ["x", "a1", "a2", "a3", "y"],   # 0: the artery
+    ["x", "a1", "a2", "a3", "a4", "a5", "y"],   # 0: the artery
     ["S", "x"],                      # 1: entry hop onto the artery
     ["y", "T"],                      # 2: exit hop off the artery
     ["a1", "p1"],                    # 3: stub -> a1 becomes a crossroad
@@ -310,10 +363,13 @@ CONCENTRATION_ROUTES = [
     ["m", "b2", "T"],                # 7: balanced corridor, second half
     ["b1", "q1"],                    # 8: stub -> b1 crossroad
     ["b2", "q2"],                    # 9: stub -> b2 crossroad
+    ["a4", "p4"],                    # 10: stub -> a4 crossroad
+    ["a5", "p5"],                    # 11: stub -> a5 crossroad
 ]
 
-CORRIDOR_A = ["S", "x", "a1", "a2", "a3", "y", "T"]  # merges 3, HHI 1.0
-CORRIDOR_B = ["S", "b1", "m", "b2", "T"]             # merges 2, HHI 0.5
+ARTERY = ["x", "a1", "a2", "a3", "a4", "a5", "y"]
+CORRIDOR_A = ["S", *ARTERY, "T"]          # merges 3, HHI 38/64 (1.0 crossroads-only)
+CORRIDOR_B = ["S", "b1", "m", "b2", "T"]  # merges 2, HHI 0.5
 
 
 class ConcentrationTests(SimpleTestCase):
@@ -324,7 +380,7 @@ class ConcentrationTests(SimpleTestCase):
         self.finder = RouteFinder(self.graph)
 
     def test_evaluate_single_route_is_perfect(self):
-        hhi, runs = evaluate(self.graph, ["x", "a1", "a2", "a3", "y"])
+        hhi, runs = evaluate(self.graph, ARTERY)
         self.assertAlmostEqual(hhi, 1.0)
         self.assertEqual([r.route_id for r in runs], [0])
 
@@ -342,17 +398,22 @@ class ConcentrationTests(SimpleTestCase):
 
     def test_evaluate_no_crossroads_falls_back(self):
         # A chain crossing no crossroads has L == 0; score falls back to 1/n.
+        # Only reachable under crossroads-only lengths — counting every hop, a
+        # chain of >= 2 stops always has length — so the mode is pinned here
+        # rather than left to the default, or the fallback goes untested.
         g = Graph.from_routes([["X", "A", "B"], ["B", "C", "Y"]])
-        hhi, runs = evaluate(g, ["X", "A", "B", "C", "Y"])
+        with length_mode(True):
+            hhi, runs = evaluate(g, ["X", "A", "B", "C", "Y"])
         self.assertAlmostEqual(hhi, 0.5)
         self.assertEqual(sorted({r.route_id for r in runs}), [0, 1])
 
     def test_best_maximises_concentration_even_with_more_merges(self):
-        # Non-monotonic: the 3-route artery corridor (HHI 1.0) beats the balanced
-        # 2-route blend (HHI 0.5) — best may merge MORE routes to stay concentrated.
+        # Non-monotonic: the 3-route artery corridor (HHI 38/64) beats the
+        # balanced 2-route blend (HHI 0.5) — best may merge MORE routes, and be
+        # the longer route, to stay concentrated.
         routes = self.finder.find_routes("S", "T", k=3)
         self.assertEqual(routes[0].stops, CORRIDOR_A)
-        self.assertAlmostEqual(routes[0].hhi, 1.0)
+        self.assertAlmostEqual(routes[0].hhi, 38 / 64)
         self.assertEqual(routes[0].route_count, 3)
 
         self.assertEqual(len(routes), 2)
@@ -373,13 +434,14 @@ class ConcentrationTests(SimpleTestCase):
     def test_length_mode_flag_changes_score(self):
         # Crossroads-only, the brief end-hops are length-0 so the artery is a
         # perfect ride; counting every hop, they weigh in and the score drops.
-        self.assertAlmostEqual(evaluate(self.graph, CORRIDOR_A)[0], 1.0)
-        LengthMode.CROSSROADS_ONLY = False
-        try:
-            hhi = evaluate(self.graph, CORRIDOR_A)[0]
-        finally:
-            LengthMode.CROSSROADS_ONLY = True
-        self.assertAlmostEqual(hhi, 0.5)  # runs 1,4,1 -> (1+16+1)/36
+        # Both modes are asserted explicitly, and the flag is restored to
+        # whatever it *was* — hardcoding the restore silently rewrites the
+        # default for every test that runs after this one.
+        with length_mode(True):
+            self.assertAlmostEqual(evaluate(self.graph, CORRIDOR_A)[0], 1.0)
+        with length_mode(False):
+            # runs of 1, 6 and 1 hops -> (1 + 36 + 1) / 64
+            self.assertAlmostEqual(evaluate(self.graph, CORRIDOR_A)[0], 38 / 64)
 
     def test_evaluate_is_direction_independent(self):
         # The objective must be identical for a chain and its reverse.

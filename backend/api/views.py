@@ -159,27 +159,35 @@ def path(request):
             return places[-1], places[0]
         return places[0], places[-1]
 
-    def run_meta(run, total_hops, start_index):
+    def run_meta(run, total_length, start_index):
         """Metadata for one run, plus its inclusive [start_index, end_index]
         stop range within the result's `stops` list. Runs are contiguous and
         non-overlapping in travel order (adjacent runs share their boundary
         stop), so the caller threads a running offset of `hops` through
-        successive runs — no need to touch concentration.py."""
+        successive runs — no need to touch concentration.py.
+
+        `share` is taken from `run.length`, *not* `run.hops`: length is the term
+        the concentration score is actually built from, so the shares shown to
+        the user square back to the `match` percentage. Under a length mode where
+        the two diverge (`LengthMode.CROSSROADS_ONLY`) using hops here would print
+        shares that contradict the score. The index range still counts hops —
+        that's a position in `stops`, not a weight."""
         origin, dest = run_endpoints(run)
         return {
             "id": run.route_id if isinstance(run.route_id, int) else -1,
             "label": f"{origin} - {dest}",
-            "share": round(run.hops / total_hops * 100) if total_hops else 100,
+            "share": round(run.length / total_length * 100) if total_length else 100,
             "priority": run.priority,
             "startIndex": start_index,
             "endIndex": start_index + run.hops,
         }
 
-    def routes_meta(runs, total_hops):
+    def routes_meta(runs):
+        total_length = sum(run.length for run in runs)
         metas = []
         offset = 0
         for run in runs:
-            metas.append(run_meta(run, total_hops, offset))
+            metas.append(run_meta(run, total_length, offset))
             offset += run.hops
         return metas
 
@@ -208,7 +216,7 @@ def path(request):
             "routeCount": r.route_count,
             "match": round(r.hhi * 100),
             "priority": r.priority,
-            "routes": routes_meta(r.runs, r.total_hops),
+            "routes": routes_meta(r.runs),
         }
         for r in top
     ]

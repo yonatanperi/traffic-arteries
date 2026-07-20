@@ -71,7 +71,7 @@ class LengthMode:
     the property the exact-scoring DP relies on.
     """
 
-    CROSSROADS_ONLY = True
+    CROSSROADS_ONLY = False
 
 
 # How much of an artery's credit each priority level below the best discounts:
