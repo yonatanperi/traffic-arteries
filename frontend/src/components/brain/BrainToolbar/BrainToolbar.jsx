@@ -9,16 +9,13 @@ import { useOriginDestination } from "../../../hooks/useOriginDestination.js";
 import {
   IconSearch,
   IconFit,
-  IconReset,
-  IconPause,
-  IconPlay,
-  IconDownload,
+  IconPlus,
+  IconMinus,
   IconBulb,
   IconRoute,
   IconOrigin,
   IconDestination,
   IconClose,
-  IconAlert,
   IconFocus,
 } from "../../ui/icons";
 import "./BrainToolbar.css";
@@ -38,8 +35,8 @@ function chipLabel(info, stopCount) {
 
 /**
  * The control strip above the brain canvas. Two modes:
- *   - "explore": search a place + canvas controls (fit / reset / pause /
- *     dead-ends / insights / export).
+ *   - "explore": search a place + canvas controls (fit / zoom in / zoom out /
+ *     insights).
  *   - "path": pick origin + destination, find routes, and switch between the
  *     highlighted alternatives.
  *
@@ -53,14 +50,10 @@ export default function BrainToolbar({
   // explore
   onFocusNode,
   onZoomFit,
-  onReset,
-  paused,
-  onTogglePause,
-  highlightDeadEnds,
-  onToggleDeadEnds,
+  onZoomIn,
+  onZoomOut,
   showInsights,
   onToggleInsights,
-  onExport,
   // path
   onSubmitPath,
   onClearPath,
@@ -138,30 +131,20 @@ export default function BrainToolbar({
             <Button
               variant="ghost"
               className="bt-icon"
-              onClick={onReset}
-              title="סדר מחדש"
-              aria-label="סדר מחדש"
+              onClick={onZoomIn}
+              title="הגדל"
+              aria-label="הגדל"
             >
-              <IconReset size={18} />
+              <IconPlus size={18} />
             </Button>
             <Button
               variant="ghost"
               className="bt-icon"
-              onClick={onTogglePause}
-              title={paused ? "המשך תנועה" : "השהה תנועה"}
-              aria-label={paused ? "המשך תנועה" : "השהה תנועה"}
+              onClick={onZoomOut}
+              title="הקטן"
+              aria-label="הקטן"
             >
-              {paused ? <IconPlay size={18} /> : <IconPause size={18} />}
-            </Button>
-            <Button
-              variant="ghost"
-              className={"bt-icon" + (highlightDeadEnds ? " bt-icon--on" : "")}
-              onClick={onToggleDeadEnds}
-              title="הדגש קצוות מבודדים"
-              aria-label="הדגש קצוות מבודדים"
-              aria-pressed={highlightDeadEnds}
-            >
-              <IconAlert size={18} />
+              <IconMinus size={18} />
             </Button>
             <Button
               variant="ghost"
@@ -172,15 +155,6 @@ export default function BrainToolbar({
               aria-pressed={showInsights}
             >
               <IconBulb size={18} />
-            </Button>
-            <Button
-              variant="ghost"
-              className="bt-icon"
-              onClick={onExport}
-              title="שמור כתמונה"
-              aria-label="שמור כתמונה"
-            >
-              <IconDownload size={18} />
             </Button>
           </div>
         </div>

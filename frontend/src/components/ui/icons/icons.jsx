@@ -221,43 +221,6 @@ export function IconFit(props) {
   );
 }
 
-// Reset — circular refresh arrow.
-export function IconReset(props) {
-  return (
-    <Svg {...props}>
-      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-      <path d="M3 3v5h5" />
-    </Svg>
-  );
-}
-
-export function IconPause(props) {
-  return (
-    <Svg {...props}>
-      <rect x="6" y="5" width="4" height="14" rx="1" />
-      <rect x="14" y="5" width="4" height="14" rx="1" />
-    </Svg>
-  );
-}
-
-export function IconPlay(props) {
-  return (
-    <Svg {...props}>
-      <path d="M7 4.5v15l13-7.5-13-7.5Z" />
-    </Svg>
-  );
-}
-
-export function IconDownload(props) {
-  return (
-    <Svg {...props}>
-      <path d="M12 3v12" />
-      <path d="m7 10 5 5 5-5" />
-      <path d="M4 20h16" />
-    </Svg>
-  );
-}
-
 // Insights — a lightbulb.
 export function IconBulb(props) {
   return (

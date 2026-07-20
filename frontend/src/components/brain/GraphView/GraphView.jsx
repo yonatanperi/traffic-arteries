@@ -18,7 +18,6 @@ const TEXT = "#ffffff";
 const WARNING = "#e2c541";
 const COMPROMISED = "#f85149"; // --danger: destinations temporarily unavailable.
 const WAYPOINT = "#58a6ff"; // --info: stops the active path is required to pass through.
-const EXPORT_BG = "#141510"; // --bg-elevated, so exported PNGs aren't transparent.
 
 // Minimum screen-space gap enforced between neighbouring labels.
 const LABEL_SCREEN_PADDING = 4;
@@ -35,8 +34,8 @@ const ACCENT_RGB = hexToRgb(ACCENT);
  * Beyond drag / zoom / pan it supports: hover- and click-to-pin highlighting of
  * a node and its direct connections, monochrome dimming of other connected
  * components, path highlighting (with required waypoint stops painted
- * separately), and a dead-end ring overlay. Imperative controls (fit / reheat
- * / center / export) are exposed through the ref.
+ * separately), and a dead-end ring overlay. Imperative controls (fit / zoom
+ * / center) are exposed through the ref.
  */
 const GraphView = forwardRef(function GraphView(
   {
@@ -50,12 +49,12 @@ const GraphView = forwardRef(function GraphView(
     deadEndIds = null,
     highlightDeadEnds = false,
     compromisedIds = null,
-    paused = false,
   },
   ref
 ) {
   const wrapRef = useRef(null);
   const fgRef = useRef(null);
+  const didInitialFit = useRef(false);
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [hoverNode, setHoverNode] = useState(null);
 
@@ -97,44 +96,31 @@ const GraphView = forwardRef(function GraphView(
     return () => ro.disconnect();
   }, []);
 
-  // Gentle initial zoom-to-fit once the layout settles.
+  // A fresh dataset gets one automatic fit, fired once its layout actually
+  // settles (onEngineStop) rather than after a guessed delay — so the graph
+  // renders at its full extent from the start instead of needing a manual
+  // re-fit once the simulation keeps spreading past an early snapshot.
   useEffect(() => {
-    const t = setTimeout(() => fgRef.current?.zoomToFit(600, 60), 600);
-    return () => clearTimeout(t);
+    didInitialFit.current = false;
   }, [data]);
-
-  // Freeze / resume the simulation on demand.
-  useEffect(() => {
-    const fg = fgRef.current;
-    if (!fg) return;
-    if (paused) fg.pauseAnimation();
-    else fg.resumeAnimation();
-  }, [paused]);
 
   useImperativeHandle(ref, () => ({
     zoomToFit: () => fgRef.current?.zoomToFit(600, 60),
-    reheat: () => fgRef.current?.d3ReheatSimulation(),
+    zoomIn: () => {
+      const fg = fgRef.current;
+      if (!fg) return;
+      fg.zoom(fg.zoom() * 1.4, 300);
+    },
+    zoomOut: () => {
+      const fg = fgRef.current;
+      if (!fg) return;
+      fg.zoom(fg.zoom() / 1.4, 300);
+    },
     centerNode: (id) => {
       const node = data.nodes.find((n) => n.id === id);
       if (!node) return;
       fgRef.current?.centerAt(node.x, node.y, 700);
       fgRef.current?.zoom(3.2, 700);
-    },
-    exportPng: () => {
-      const canvas = wrapRef.current?.querySelector("canvas");
-      if (!canvas) return;
-      // Composite onto the elevated background so the PNG isn't transparent.
-      const out = document.createElement("canvas");
-      out.width = canvas.width;
-      out.height = canvas.height;
-      const ctx = out.getContext("2d");
-      ctx.fillStyle = EXPORT_BG;
-      ctx.fillRect(0, 0, out.width, out.height);
-      ctx.drawImage(canvas, 0, 0);
-      const a = document.createElement("a");
-      a.href = out.toDataURL("image/png");
-      a.download = "traffic-brain.png";
-      a.click();
     },
   }));
 
@@ -331,7 +317,6 @@ const GraphView = forwardRef(function GraphView(
         height={size.height}
         graphData={data}
         backgroundColor="rgba(0,0,0,0)"
-        cooldownTicks={120}
         d3VelocityDecay={0.28}
         nodeRelSize={5}
         nodeLabel={() => ""}
@@ -340,6 +325,11 @@ const GraphView = forwardRef(function GraphView(
         onNodeHover={(n) => setHoverNode(n ? n.id : null)}
         onNodeClick={(n) => onPinNode?.(n ? n.id : null)}
         onBackgroundClick={() => onPinNode?.(null)}
+        onEngineStop={() => {
+          if (didInitialFit.current) return;
+          didInitialFit.current = true;
+          fgRef.current?.zoomToFit(600, 60);
+        }}
         nodeCanvasObject={drawNode}
         onRenderFramePost={paintLabels}
         nodePointerAreaPaint={(node, color, ctx) => {

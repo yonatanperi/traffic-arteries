@@ -110,11 +110,13 @@
     transition: color 0.2s var(--ease);
   }
 
-  .tabbar-item:hover {
-    color: var(--text-muted);
-  }
-
   .tabbar-item--on {
     color: var(--accent);
+  }
+}
+
+@media (max-width: 640px) and (hover: hover) {
+  .tabbar-item:hover {
+    color: var(--text-muted);
   }
 }

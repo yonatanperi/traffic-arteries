@@ -24,7 +24,6 @@ export default function BrainPage() {
   const [pinnedId, setPinnedId] = useState(null);
   const [showInsights, setShowInsights] = useState(false);
   const [highlightDeadEnds, setHighlightDeadEnds] = useState(false);
-  const [paused, setPaused] = useState(false);
 
   function focusNode(id) {
     setPinnedId(id);
@@ -51,14 +50,10 @@ export default function BrainPage() {
           placeOptions={placeOptions}
           onFocusNode={focusNode}
           onZoomFit={() => graphRef.current?.zoomToFit()}
-          onReset={() => graphRef.current?.reheat()}
-          paused={paused}
-          onTogglePause={() => setPaused((p) => !p)}
-          highlightDeadEnds={highlightDeadEnds}
-          onToggleDeadEnds={() => setHighlightDeadEnds((v) => !v)}
+          onZoomIn={() => graphRef.current?.zoomIn()}
+          onZoomOut={() => graphRef.current?.zoomOut()}
           showInsights={showInsights}
           onToggleInsights={() => setShowInsights((v) => !v)}
-          onExport={() => graphRef.current?.exportPng()}
           onSubmitPath={path.submitPath}
           onClearPath={path.clearPath}
           onSelectPathIndex={path.setActivePathIndex}
@@ -105,7 +100,6 @@ export default function BrainPage() {
               deadEndIds={metrics.deadEndIds}
               highlightDeadEnds={highlightDeadEnds}
               compromisedIds={compromisedIds}
-              paused={paused}
             />
 
             {pinnedId && mode === "explore" && (

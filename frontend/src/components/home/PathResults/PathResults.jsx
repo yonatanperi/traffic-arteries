@@ -196,7 +196,7 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                             onMouseLeave={() => setHovered(null)}
                             onClick={() =>
                               setPinned((prev) =>
-                                prev
+                                prev?.pathIndex === i && prev?.chipIndex === j
                                   ? null
                                   : {
                                       pathIndex: i,
