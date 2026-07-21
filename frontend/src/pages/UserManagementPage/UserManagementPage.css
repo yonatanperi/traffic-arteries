@@ -24,12 +24,85 @@
 }
 
 .user-mgmt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
   margin-bottom: var(--s-4);
 }
 
-.user-mgmt-search {
+.user-mgmt-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
   width: 100%;
   max-width: 320px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0 var(--s-3);
+  transition:
+    border-color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease),
+    background 0.2s var(--ease);
+}
+
+.user-mgmt-search-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+  background: var(--surface);
+}
+
+.user-mgmt-search-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.user-mgmt-search-wrap:focus-within .user-mgmt-search-icon {
+  color: var(--accent);
+}
+
+.user-mgmt-search {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.02rem;
+  padding: var(--s-3) 0;
+}
+
+.user-mgmt-search::placeholder {
+  color: var(--text-faint);
+}
+
+.user-mgmt-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.user-mgmt-filter-pill {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    border-color 0.2s,
+    background 0.2s;
+}
+
+.user-mgmt-filter-pill:not(.user-mgmt-filter-pill--on):hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.user-mgmt-filter-pill--on {
+  color: var(--on-accent);
+  background: var(--accent-fill);
+  border-color: transparent;
 }
 
 .user-mgmt-table {
@@ -53,6 +126,39 @@
   color: var(--text-muted);
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.user-mgmt-sort-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+  transition: color 0.15s var(--ease);
+}
+
+.user-mgmt-sort-btn:hover {
+  color: var(--text);
+}
+
+.user-mgmt-sort-icon {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(90deg);
+  transition: transform 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.user-mgmt-sort-icon--active {
+  color: var(--accent);
+}
+
+.user-mgmt-sort-icon--desc {
+  transform: rotate(-90deg);
 }
 
 .user-mgmt-actions {

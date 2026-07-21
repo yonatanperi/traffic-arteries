@@ -60,6 +60,30 @@ MAX_OPTIMIZED_WAYPOINTS = 7
 # This stops an alternative from wandering off on a pointless detour.
 WAYPOINT_MAX_STRETCH = 1.5
 
+# Length pressure on the ranking (see :meth:`RouteFinder._rank`). Concentration
+# (HHI) is a *share-of-total* and so scale-free: a 50/50 split scores the same at
+# 4 crossroads or 15, which lets a monster detour tie the obvious route on
+# rounding noise. The ranking score multiplies HHI by
+# ``(C_min / C) ** LENGTH_EXPONENT`` — a *gentle* preference for the route that
+# crosses fewer intersections among near-equally-concentrated ones. "Length" is
+# the **crossroad distance** (:attr:`Route.crossroad_hops`), not the raw edge
+# count, so a long transparent (shape-point) chain still counts as the one
+# crossroad-to-crossroad hop it is — the same distance notion the tie-break and
+# the CROSSROADS_ONLY length mode already use. The exponent is deliberately
+# small: concentration must stay dominant (a perfect single-artery corridor still
+# beats a shorter fragmented one), so this only breaks ties HHI leaves
+# scale-blind. Larger values start sacrificing real concentration for shortness.
+LENGTH_EXPONENT = 0.15
+
+# The relative quality floor for *alternatives* (see :meth:`select_diverse`). An
+# alternative is only worth showing if its ranking score is at least this
+# fraction of the headline's. Because the bar is *relative* to the #1 route it
+# self-adapts: a perfect headline demands near-perfect alternatives (junk detours
+# vanish), while a mediocre headline keeps its genuinely-comparable ones. The
+# ranked pool is monotone, so with at most a few slots this single floor is also
+# what trims a junk tail ("#1, #2 solid, #3 junk" is exactly q_3 < FLOOR * q_1).
+ALTERNATIVE_FLOOR = 0.65
+
 
 def _add_penalties(*maps):
     """Combine ``{edge_key: cost}`` penalty maps by *adding* the costs.
@@ -91,8 +115,18 @@ class Route:
       * ``route_ids``      — sorted distinct authored-route indices it stitches.
       * ``route_count``    — how many distinct authored routes are merged.
       * ``run_lengths``    — length of each run (in the active length mode), in order.
-      * ``crossroad_hops`` — intersections crossed.
+      * ``crossroad_hops`` — intersections crossed; the crossroad *distance* the
+                             ranking score's length term uses (see
+                             :meth:`RouteFinder._rank`).
       * ``total_hops``     — number of edges.
+      * ``q``              — the *ranking* score: ``hhi`` tempered by a gentle
+                             crossroad-distance preference (see
+                             :meth:`RouteFinder._rank`). Defaults to ``hhi`` and is
+                             filled in once the pool's minimum crossroad distance
+                             is known — it is pool-relative, so a lone ``Route``
+                             carries only its concentration. Used for ordering and
+                             the alternative floor; **never displayed** (``hhi``
+                             remains the reported match).
     """
 
     def __init__(self, stops, hhi, runs, crossroad_hops, priority):
@@ -105,6 +139,7 @@ class Route:
         self.run_lengths = [r.length for r in runs]
         self.crossroad_hops = crossroad_hops
         self.total_hops = max(len(self.stops) - 1, 0)
+        self.q = hhi  # pool-relative ranking score; set by RouteFinder._rank
 
 
 class RouteFinder:
@@ -395,10 +430,22 @@ class RouteFinder:
     def _rank(self, chains):
         """Score each candidate chain and sort the pool once, concentration-first.
 
-        The single expensive ordering step. The key is
-        ``(-hhi, route_count, crossroad_hops, total_hops, canonical orientation)``:
-        highest concentration first, then (among equally concentrated routes)
-        fewest merged routes, fewest intersections, shortest, and a final
+        The single expensive ordering step. Each route's ranking score ``q`` is its
+        concentration tempered by a gentle crossroad-distance preference::
+
+            q = hhi * (C_min / C) ** LENGTH_EXPONENT
+
+        where ``C`` is the route's crossroad distance (:attr:`Route.crossroad_hops`)
+        and ``C_min`` the smallest in this pool (so the factor is ``1.0`` for the
+        route crossing fewest intersections and ``< 1`` for one that detours through
+        more). This is what stops HHI's scale-freeness from ranking a monster detour
+        above the obvious route when they tie on concentration; the small exponent
+        keeps concentration dominant. ``hhi`` itself is untouched — ``q`` is an
+        internal ordering key, never the reported match.
+
+        The sort key is ``(-q, route_count, crossroad_hops, total_hops, canonical
+        orientation)``: best ranking score first, then (among equal ``q``) fewest
+        merged routes, fewest intersections, shortest, and a final
         orientation-independent tie-break so the same corridor sorts the same way
         whichever direction the query is posed. Priority is deliberately **not** in
         this key — the tier gate belongs to :meth:`select_diverse`'s arena, so one
@@ -406,9 +453,15 @@ class RouteFinder:
         re-sorting.
         """
         routes = [self._make_route(nodes) for nodes in chains]
+        min_cross = min((r.crossroad_hops for r in routes if r.crossroad_hops), default=0)
+        for r in routes:
+            # No adjustment when either distance is 0 (a crossroad-free chain,
+            # only reachable in tiny graphs), mirroring evaluate()'s L == 0 branch.
+            if min_cross and r.crossroad_hops:
+                r.q = r.hhi * (min_cross / r.crossroad_hops) ** LENGTH_EXPONENT
         routes.sort(
             key=lambda r: (
-                -r.hhi,
+                -r.q,
                 r.route_count,
                 r.crossroad_hops,
                 r.total_hops,
@@ -444,10 +497,15 @@ class RouteFinder:
 
         A candidate is kept only if it is neither a near-duplicate of an accepted
         route (``max_overlap`` of its edges) nor an excessive detour — more than
-        ``max_stretch`` times the best route's stop count. ``exclude`` is a set of
-        place names; any candidate touching one is dropped from the pool up front,
-        so the arena and diversity budget are computed among the routes that can
-        actually be shown. ``k=None`` keeps every survivor, uncapped by count.
+        ``max_stretch`` times the best route's stop count — nor below the relative
+        quality floor: an alternative whose ranking score is under
+        :data:`ALTERNATIVE_FLOOR` of the headline's is dropped as not worth showing.
+        The headline is always kept, and the floor is measured against *this pass's*
+        headline, so a perfect #1 leaves only near-perfect alternatives while a
+        mediocre #1 keeps its comparable ones. ``exclude`` is a set of place names;
+        any candidate touching one is dropped from the pool up front, so the arena,
+        the floor, and the diversity budget are all computed among the routes that
+        can actually be shown. ``k=None`` keeps every survivor, uncapped by count.
         """
         if not ranked:
             return []
@@ -461,7 +519,7 @@ class RouteFinder:
             ranked,
             key=lambda r: (
                 r.priority if hard else 0,
-                -r.hhi,
+                -r.q,
                 r.route_count,
                 r.crossroad_hops,
                 r.total_hops,
@@ -474,6 +532,13 @@ class RouteFinder:
         accepted_edges = []  # edge set per accepted route, parallel to ``accepted``
 
         def passes(route, edges):
+            # Relative quality floor: an alternative is only worth showing if its
+            # ranking score is within ALTERNATIVE_FLOOR of this pass's headline
+            # (``accepted[0]`` — the route actually shown as #1, so the two
+            # selection passes each floor against their own leader). The headline
+            # itself is always kept (nothing accepted yet).
+            if accepted and route.q < ALTERNATIVE_FLOOR * accepted[0].q:
+                return False
             if any(edges == prior for prior in accepted_edges):
                 return False
             if len(route.stops) > best_stops * max_stretch:

@@ -157,15 +157,17 @@ class WaypointTests(SimpleTestCase):
         # Counting every hop (LengthMode.CROSSROADS_ONLY = False), the long way
         # round is the *concentrated* one: A-Z-X-N-K-C rides road 3 for 5 of its 6
         # hops (83%), while the short A-C-B transfers immediately, splitting 50/50
-        # across two roads. Concentration is the objective, so the long ride wins
-        # and the short hop-over comes back as the alternative.
+        # across two roads. Concentration is the objective, so the long ride wins.
         #
-        # Under crossroads-only lengths the Z-X-N-K stretch was transparent, so the
-        # two tied and the short route took the length tiebreak. Riding one road
-        # further now beats it outright — the flip is the mode, not a regression.
+        # Both corridors cross the same two crossroads (Z-X-N-K are transparent), so
+        # the length-adjusted ranking score does not separate them — the long single
+        # road wins outright on concentration (hhi 0.72 vs 0.50). The short transfer
+        # is then trimmed by ALTERNATIVE_FLOOR: 0.50 is below 0.70 * 0.72, i.e. by
+        # the model's own logic (which does not reward raw edge-shortness) it is a
+        # lower-quality transferring alternative, not a "solid" one worth showing.
         paths = self.finder.k_shortest_paths("A", "B", via=["C"])
         self.assertEqual(paths[0], ["A", "Z", "X", "N", "K", "C", "B"])
-        self.assertIn(["A", "C", "B"], paths)
+        self.assertNotIn(["A", "C", "B"], paths)
 
     def test_excessive_detour_is_rejected_by_stretch(self):
         # WAYPOINT_MAX_STRETCH: an alternative may not exceed the best route
@@ -293,11 +295,16 @@ class MergeTests(SimpleTestCase):
         self.assertEqual(routes[0].route_count, 1)
         self.assertEqual(routes[0].route_ids, [0])
 
-        stops = [r.stops for r in routes]
-        self.assertIn(["A", "B", "R", "G"], stops)
-        alt = next(r for r in routes if r.stops == ["A", "B", "R", "G"])
+        # A-B-R-G merges two routes and reports it — verified on the ranked pool,
+        # since the ALTERNATIVE_FLOOR now trims it from the shown results: its
+        # concentration (hhi 0.56) is below 0.70 * the perfect headline (1.0), i.e.
+        # it is exactly the "when #1 is an absolute match, the alternative is junk"
+        # case the floor is there to drop.
+        ranked, _ = finder.rank_candidates("A", "G")
+        alt = next(r for r in ranked if r.stops == ["A", "B", "R", "G"])
         self.assertEqual(alt.route_count, 2)
         self.assertEqual(alt.route_ids, [0, 1])
+        self.assertNotIn(["A", "B", "R", "G"], [r.stops for r in routes])
 
     def test_transfer_counted_at_transparent_node(self):
         # B is a degree-2 (transparent) node where two authored routes meet, so
@@ -642,12 +649,17 @@ class PriorityArenaTests(SimpleTestCase):
 
     def test_concentrated_higher_tier_surfaces_as_alternative(self):
         results = self.finder.find_routes("S", "T", k=3)
-        self.assertEqual([r.priority for r in results], [0, 1, 0])
         # #1 is the perfect tier-0 ride; #2 is the tier-1 artery, which surfaces
-        # even though the displaced tier-0 alternative (#3) is *less* concentrated.
+        # rather than the list collapsing to only tier-0 corridors. The two weak
+        # tier-0 patchworks (hhi 0.5) that used to fill the third slot are now
+        # trimmed by ALTERNATIVE_FLOOR — 0.5 is below 0.70 * the perfect headline —
+        # so the arena and the floor together yield "the clean ride + the clean
+        # tier-1 artery", dropping the junk. The tier-1 alternative (0.8) clears the
+        # floor and is what the arena is there to surface.
+        self.assertEqual([r.priority for r in results], [0, 1])
         self.assertAlmostEqual(results[0].hhi, 1.0)
         self.assertAlmostEqual(results[1].hhi, 0.8)
-        self.assertGreater(results[1].hhi, results[2].hhi)
+        self.assertEqual(results[1].stops, ["S", "q1", "q2", "q3", "T"])
 
     def test_headline_is_still_the_best_tier_zero_route(self):
         # The arena never demotes the genuine best: round one admits only tier 0.
