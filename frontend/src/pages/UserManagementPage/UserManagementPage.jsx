@@ -81,9 +81,10 @@ export default function UserManagementPage() {
             <Pill
               key={f.value}
               as="button"
-              size="sm"
+              size="lg"
               className={
-                "user-mgmt-filter-pill" + (roleFilter === f.value ? " user-mgmt-filter-pill--on" : "")
+                "user-mgmt-filter-pill" +
+                (roleFilter === f.value ? " user-mgmt-filter-pill--on" : "")
               }
               onClick={() => setRoleFilter(f.value)}
               aria-pressed={roleFilter === f.value}
@@ -112,7 +113,13 @@ export default function UserManagementPage() {
                 key={col.key}
                 type="button"
                 className="user-mgmt-sort-btn"
-                aria-sort={sort.key === col.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+                aria-sort={
+                  sort.key === col.key
+                    ? sort.dir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
                 onClick={() => toggleSort(col.key)}
               >
                 {col.label}
@@ -120,8 +127,12 @@ export default function UserManagementPage() {
                   size={12}
                   className={
                     "user-mgmt-sort-icon" +
-                    (sort.key === col.key ? " user-mgmt-sort-icon--active" : "") +
-                    (sort.key === col.key && sort.dir === "desc" ? " user-mgmt-sort-icon--desc" : "")
+                    (sort.key === col.key
+                      ? " user-mgmt-sort-icon--active"
+                      : "") +
+                    (sort.key === col.key && sort.dir === "desc"
+                      ? " user-mgmt-sort-icon--desc"
+                      : "")
                   }
                 />
               </button>
