@@ -6,8 +6,8 @@
 
 export const PLACE_TYPES = [
   { key: "junction", label: "צמתים", test: (name) => /^צ\.\s*\S/.test(name) },
-  { key: "base", label: "בסיסים", test: (name) => /^(מ\.\s*|מוצב\s+)\S/.test(name) },
   { key: "interchange", label: "מחלפים", test: (name) => /^מחלף\s*\S/.test(name) },
+  { key: "base", label: "בסיסים", test: (name) => /^(מ\.\s*|מוצב\s+)\S/.test(name) },
 ];
 
 /** Returns the matching PLACE_TYPES key for a place name, or null if none match. */

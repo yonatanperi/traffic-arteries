@@ -18,8 +18,7 @@ export function useRouteSearch() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [invalidPlaces, setInvalidPlaces] = useState(() => new Set()); // unknown place names from the last submit attempt
-  const [hiddenTypes, setHiddenTypes] = useState(() => new Set()); // stop types filtered out of the results
-
+  const [hiddenTypes, setHiddenTypes] = useState(() => new Set(["base"])); // stop types filtered out of the results
   const placeSet = useMemo(() => new Set(places), [places]);
 
   // Only interior stops are ever filtered (start/end are always kept), so a
