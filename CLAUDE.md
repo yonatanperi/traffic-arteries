@@ -37,10 +37,13 @@ search; `backend/api/graph/routing.py` generates a pool of candidate corridors
 scores each exactly (`concentration.py`). The pool is sorted **once** by
 concentration (`RouteFinder.rank_candidates`), then the top-3 are assembled by a
 **priority-arena** walk (`RouteFinder.select_diverse`): round one admits only
-tier-0 routes, so the headline result is the best tier-0 corridor; after a slot of
-priority `X` the next round admits `priority ≤ X + 1`. So a *concentrated* higher-tier
-corridor surfaces as an alternative exactly when it out-concentrates the remaining
-better-tier options, and the list descends at most one tier per slot. Splitting
+tier-0 routes, so the headline result is the best tier-0 corridor; after filling
+slot `i` with a route of priority `X` the next round admits `priority ≤ max(i + 1,
+X + 1)`. The `X + 1` term lets a deeper pick open the arena beyond itself; the
+`i + 1` (slot-index) term widens the arena by at least one tier per slot regardless,
+so slot `i` can always reach tier `i` even after a run of same-tier picks. So a
+*concentrated* higher-tier corridor surfaces as an alternative once its slot is deep
+enough or a prior pick has opened the tier — whichever comes first. Splitting
 rank-once from select-cheaply also lets `views.path` select twice over the one
 pool — natural, and compromised-free — without a second sort. Two static flags
 exist to experiment with: `LengthMode.CROSSROADS_ONLY` and `PriorityMode.HARD_TIER`

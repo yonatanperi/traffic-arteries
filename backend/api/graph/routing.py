@@ -539,12 +539,15 @@ class RouteFinder:
         each round has an arena ``X``: only candidates with ``priority <= X`` are
         eligible, and the most concentrated diverse one among them is taken. Round
         one's arena is ``0`` (so the headline result is the best tier-0 route);
-        after a round yields a route of priority ``X`` the next arena is ``X + 1``.
-        A concentrated tier>0 corridor therefore surfaces as an alternative exactly
-        when it out-concentrates the remaining same-or-lower-tier options, and
-        results descend at most one tier per slot. If no candidate is eligible at
-        the current arena (a tier is absent, or none exists at ``0``), the arena
-        jumps to the cheapest priority still present rather than the list
+        after a round fills slot ``i`` with a route of priority ``X`` the next arena
+        is ``max(i + 1, X + 1)``. The ``X + 1`` term lets a deeper pick open the
+        arena beyond itself; the ``i + 1`` (slot-index) term guarantees the arena
+        widens by at least one tier per slot regardless, so slot ``i`` can always
+        reach tier ``i`` even after a run of same-tier picks. A concentrated tier>0
+        corridor therefore surfaces as an alternative once its slot is deep enough or
+        a prior pick has opened the tier, whichever comes first. If no candidate is
+        eligible at the current arena (a tier is absent, or none exists at ``0``),
+        the arena jumps to the cheapest priority still present rather than the list
         collapsing. With ``HARD_TIER`` off, arenas are skipped and selection is
         plain concentration-first.
 
@@ -647,6 +650,11 @@ class RouteFinder:
             accepted.append(picked)
             accepted_edges.append(picked_edges)
             remaining.remove(picked)
-            arena = picked.priority + 1
+            # Next arena widens by at least one tier per slot: ``max(slot index,
+            # picked.priority + 1)``. ``len(accepted)`` is the just-filled count and
+            # so the 0-based index of the next slot, which floors the arena — so slot
+            # ``i`` can always reach tier ``i`` even after a run of same-tier picks,
+            # while a deeper pick still opens the arena the usual +1 beyond itself.
+            arena = max(len(accepted), picked.priority + 1)
 
         return accepted
