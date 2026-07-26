@@ -58,6 +58,42 @@ def single_source_costs(graph, source):
     return costs
 
 
+def min_crossroad_distance(graph, source, target):
+    """Fewest crossroads any path ``source -> target`` can cross, or ``None`` if
+    unreachable.
+
+    Same distance notion as :meth:`~.routing.RouteFinder._crossroad_hops`: every node
+    on the path counts, both endpoints included, transparent (degree-2) shape-points
+    counting for nothing. Entering a node therefore costs 1 or 0, which makes this a
+    0-1 BFS — a deque where free steps go to the front and crossroad steps to the
+    back keeps the queue monotone, so it stays linear rather than needing a heap.
+
+    This is the ranking score's length reference (see :meth:`~.routing.RouteFinder.
+    _rank`). It depends only on the network's shape — never on how routes are rated —
+    which is exactly the point: the reported match % must not move when an artery is
+    re-prioritised.
+    """
+    def weight(node):
+        return 1 if graph.is_crossroad(node) else 0
+
+    if source not in graph or target not in graph:
+        return None
+    best = {source: weight(source)}
+    queue = deque([source])
+    while queue:
+        node = queue.popleft()
+        cost = best[node]
+        for neighbour in graph.neighbors(node):
+            step = weight(neighbour)
+            if neighbour not in best or cost + step < best[neighbour]:
+                best[neighbour] = cost + step
+                if step:
+                    queue.append(neighbour)
+                else:
+                    queue.appendleft(neighbour)
+    return best.get(target)
+
+
 def _routes_on(graph, a, b):
     """Authored routes on edge ``(a, b)``; fall back to the edge as its own route.
 

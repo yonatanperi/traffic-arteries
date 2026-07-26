@@ -162,12 +162,12 @@ class WaypointTests(SimpleTestCase):
         # Both corridors cross the same two crossroads (Z-X-N-K are transparent), so
         # the length-adjusted ranking score does not separate them — the long single
         # road wins outright on concentration (hhi 0.72 vs 0.50). The short transfer
-        # is then trimmed by ALTERNATIVE_FLOOR: 0.50 is below 0.70 * 0.72, i.e. by
-        # the model's own logic (which does not reward raw edge-shortness) it is a
-        # lower-quality transferring alternative, not a "solid" one worth showing.
+        # survives as an alternative: its ratio to the headline is 0.50/0.72 = 0.69,
+        # just above ALTERNATIVE_FLOOR, so the floor rates it comparable-but-worse
+        # rather than junk. It is the boundary case the floor is tuned around.
         paths = self.finder.k_shortest_paths("A", "B", via=["C"])
         self.assertEqual(paths[0], ["A", "Z", "X", "N", "K", "C", "B"])
-        self.assertNotIn(["A", "C", "B"], paths)
+        self.assertIn(["A", "C", "B"], paths)
 
     def test_excessive_detour_is_rejected_by_stretch(self):
         # WAYPOINT_MAX_STRETCH: an alternative may not exceed the best route
@@ -502,10 +502,13 @@ class PriorityTests(SimpleTestCase):
         self.graph = Graph.from_routes(PRIORITY_ROUTES, DOWNGRADED_ARTERY)
         self.finder = RouteFinder(self.graph)
 
-    def test_weight_discounts_a_downgraded_artery(self):
-        # Riding one priority-1 artery end to end: a perfect ride, scored w(1) = 0.8.
+    def test_score_ignores_the_rating_of_the_artery_ridden(self):
+        # Riding one priority-1 artery end to end is a perfect *ride*, so it scores
+        # 1.0: the score says how concentrated the ride is, never how well-rated the
+        # artery is. That the artery is priority-1 shows up as the tier below, which
+        # is the only place a rating is allowed to speak.
         score, runs = evaluate(self.graph, CLEAN_RIDE)
-        self.assertAlmostEqual(score, 0.8)
+        self.assertAlmostEqual(score, 1.0)
         self.assertEqual([r.route_id for r in runs], [4])
         self.assertEqual([r.priority for r in runs], [1])
 
@@ -535,18 +538,23 @@ class PriorityTests(SimpleTestCase):
         self.assertEqual(len(routes), 2)
         self.assertEqual(routes[1].stops, CLEAN_RIDE)
         self.assertEqual(routes[1].priority, 1)
-        self.assertAlmostEqual(routes[1].hhi, 0.8)
+        # hhi is priority-free: riding one artery end to end is a perfect 1.0 however
+        # that artery is rated. Its priority-1 rating shows up as the tier, which is
+        # why this corridor is the fall-through alternative and not the headline.
+        self.assertAlmostEqual(routes[1].hhi, 1.0)
 
     def test_soft_mode_lets_the_better_route_win(self):
-        # Drop the tier from the ranking and the weighted score alone decides, so
-        # the clean (if poorly-rated) ride takes the lead.
+        # Drop the tier from the ranking and concentration alone decides, so the
+        # clean (if poorly-rated) ride takes the lead. Note hhi carries no priority
+        # of its own, so with the arena off nothing else does either: this flag now
+        # makes the ranking fully priority-blind, not merely priority-softened.
         PriorityMode.HARD_TIER = False
         try:
             routes = self.finder.find_routes("S", "T", k=3)
         finally:
             PriorityMode.HARD_TIER = True
         self.assertEqual(routes[0].stops, CLEAN_RIDE)
-        self.assertAlmostEqual(routes[0].hhi, 0.8)
+        self.assertAlmostEqual(routes[0].hhi, 1.0)
 
     def test_avoid_priority_penalty_finds_the_tier_clean_corridor(self):
         # The generator pass that puts the patchwork in the pool at all: confined to
@@ -586,11 +594,12 @@ class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
         self.graph = Graph.from_routes(self.ROUTES, self.PRIORITIES)
 
     def test_score_credits_the_long_run_to_the_downgraded_artery(self):
-        # One 6-long run on the priority-2 artery scores 0.6·36/36 = 0.6; splitting
-        # the same chain across the four well-rated legs scores only 10/36 ≈ 0.28.
-        # So the score-maximising assignment rides the *downgraded* artery.
+        # One 6-long run on the priority-2 artery scores 36/36 = 1.0; splitting the
+        # same chain across the four well-rated legs scores only 10/36 ≈ 0.28. So the
+        # score-maximising assignment rides the *downgraded* artery — and the tier
+        # (asserted below) is what reports that it did.
         score, runs = evaluate(self.graph, self.CHAIN)
-        self.assertAlmostEqual(score, 0.6)
+        self.assertAlmostEqual(score, 1.0)
         self.assertEqual([r.route_id for r in runs], [0])
         self.assertEqual([r.priority for r in runs], [2])
 
@@ -652,13 +661,15 @@ class PriorityArenaTests(SimpleTestCase):
         # #1 is the perfect tier-0 ride; #2 is the tier-1 artery, which surfaces
         # rather than the list collapsing to only tier-0 corridors. The two weak
         # tier-0 patchworks (hhi 0.5) that used to fill the third slot are now
-        # trimmed by ALTERNATIVE_FLOOR — 0.5 is below 0.70 * the perfect headline —
-        # so the arena and the floor together yield "the clean ride + the clean
-        # tier-1 artery", dropping the junk. The tier-1 alternative (0.8) clears the
-        # floor and is what the arena is there to surface.
+        # trimmed by ALTERNATIVE_FLOOR — 0.5 is below the floor times the perfect
+        # headline — so the arena and the floor together yield "the clean ride + the
+        # clean tier-1 artery", dropping the junk. The tier-1 alternative rides its
+        # artery end to end, so its priority-free hhi is a perfect 1.0 too; what
+        # separates the two corridors is the tier, which is exactly what the arena
+        # ranks on.
         self.assertEqual([r.priority for r in results], [0, 1])
         self.assertAlmostEqual(results[0].hhi, 1.0)
-        self.assertAlmostEqual(results[1].hhi, 0.8)
+        self.assertAlmostEqual(results[1].hhi, 1.0)
         self.assertEqual(results[1].stops, ["S", "q1", "q2", "q3", "T"])
 
     def test_headline_is_still_the_best_tier_zero_route(self):

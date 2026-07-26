@@ -47,6 +47,7 @@ from .search import (
     MinMergeStrategy,
     WaypointStrategy,
     avoid_priority_penalty,
+    min_crossroad_distance,
     prefer_route_penalty,
     single_source_costs,
 )
@@ -108,8 +109,16 @@ class Route:
                              rides — ``max`` over ``runs`` (``0`` = rides only the
                              best arteries). The primary ranking key under
                              :data:`~.concentration.PriorityMode.HARD_TIER`.
-      * ``hhi``            — priority-weighted concentration in ``[0, 1]`` (higher is
-                             better — 1.0 means one priority-0 route covers it all).
+      * ``hhi``            — concentration in ``[0, 1]``: the plain Herfindahl
+                             ``Σ (len_i / L)²`` over the sub-routes ridden (1.0 means
+                             a single authored route covers the whole trip). *How well
+                             the route rides one artery*, with no opinion on how that
+                             artery is rated — **priority-free**, so re-prioritising an
+                             authored route provably cannot move it. Priority is
+                             expressed once, by the ``priority`` tier, instead of a
+                             second time inside the score. Exactly the sum of the
+                             squared per-sub-route shares the UI shows, since ``runs``
+                             comes from the same solve.
       * ``runs``           — the contiguous single-route stretches in travel order
                              (:class:`~.concentration.Run` each): the sub-routes.
       * ``route_ids``      — sorted distinct authored-route indices it stitches.
@@ -124,9 +133,11 @@ class Route:
                              :meth:`RouteFinder._rank`). Defaults to ``hhi`` and is
                              filled in once the pool's minimum crossroad distance
                              is known — it is pool-relative, so a lone ``Route``
-                             carries only its concentration. Used for ordering and
-                             the alternative floor; **never displayed** (``hhi``
-                             remains the reported match).
+                             carries only its concentration. It drives the ordering
+                             and the alternative floor, and is what the API reports
+                             as the match % — so the number shown always agrees with
+                             the order the results are shown in, and is free of
+                             priority, which the tier reports on its own.
     """
 
     def __init__(self, stops, hhi, runs, crossroad_hops, priority):
@@ -160,7 +171,7 @@ class RouteFinder:
                              route's by more than this factor.
     """
 
-    def __init__(self, graph, penalty_step=TRANSFER_WEIGHT, max_overlap=0.6, max_stretch=2.5):
+    def __init__(self, graph, penalty_step=TRANSFER_WEIGHT, max_overlap=0.75, max_stretch=2.5):
         self.graph = graph
         self.penalty_step = penalty_step
         self.max_overlap = max_overlap
@@ -229,7 +240,7 @@ class RouteFinder:
                 MinMergeStrategy(graph, start, end),
                 MinMergeStrategy(graph, end, start),
             )
-            return self._rank(chains), self.max_stretch
+            return self._rank(chains, [start, end]), self.max_stretch
 
         # Required stops -> strict simple paths, tightly bounded. Try candidate
         # stop orders cheapest-first and keep the first order that yields a pool.
@@ -239,7 +250,7 @@ class RouteFinder:
                 WaypointStrategy(graph, points),
                 WaypointStrategy(graph, points[::-1]),
             )
-            ranked = self._rank(chains)
+            ranked = self._rank(chains, points)
             if ranked:
                 return ranked, stretch
 
@@ -303,6 +314,28 @@ class RouteFinder:
         scored.sort(key=lambda item: item[0])
         return [points for _, points in scored]
 
+    def _min_crossroad_distance(self, points):
+        """The ranking score's length reference: the fewest crossroads a route through
+        ``points`` (``[start, *required stops, end]``) could possibly cross.
+
+        Chains :func:`~.search.min_crossroad_distance` leg by leg. A required stop sits
+        on two legs and so is counted twice, hence the correction — which keeps this a
+        genuine lower bound on :meth:`_crossroad_hops` of any candidate visiting the
+        points in this order, and therefore keeps the length factor in ``(0, 1]``.
+        Returns ``0`` when a leg is unreachable, which :meth:`_rank` reads as "no
+        length adjustment" rather than dividing by nothing.
+        """
+        total = 0
+        for a, b in zip(points, points[1:]):
+            leg = min_crossroad_distance(self.graph, a, b)
+            if leg is None:
+                return 0
+            total += leg
+        for stop in points[1:-1]:
+            if self.graph.is_crossroad(stop):
+                total -= 1
+        return max(total, 0)
+
     def _crossroad_hops(self, nodes):
         """Intersections on ``nodes`` — counted over all nodes so it is the same
         whichever direction the route is walked (a deep, symmetric tiebreak)."""
@@ -314,6 +347,11 @@ class RouteFinder:
         The tier is the worst priority among the sub-routes :func:`evaluate` credits
         (the chips the UI shows), so it is read straight off ``runs`` rather than
         recomputed — see :func:`~.concentration.tier`.
+
+        One solve answers both: :func:`~.concentration.evaluate` maximises the plain
+        concentration and uses priority only to break ties between equally
+        concentrated readings, so the score, the ``runs`` and their shares are all
+        priority-free while the tier still names the arteries actually ridden.
         """
         hhi, runs = evaluate(self.graph, nodes)
         priority = max((run.priority for run in runs), default=BEST_PRIORITY)
@@ -427,7 +465,7 @@ class RouteFinder:
                 penalty[edge] = penalty.get(edge, 0.0) + self.penalty_step
             yield nodes
 
-    def _rank(self, chains):
+    def _rank(self, chains, points):
         """Score each candidate chain and sort the pool once, concentration-first.
 
         The single expensive ordering step. Each route's ranking score ``q`` is its
@@ -436,12 +474,31 @@ class RouteFinder:
             q = hhi * (C_min / C) ** LENGTH_EXPONENT
 
         where ``C`` is the route's crossroad distance (:attr:`Route.crossroad_hops`)
-        and ``C_min`` the smallest in this pool (so the factor is ``1.0`` for the
-        route crossing fewest intersections and ``< 1`` for one that detours through
-        more). This is what stops HHI's scale-freeness from ranking a monster detour
-        above the obvious route when they tie on concentration; the small exponent
-        keeps concentration dominant. ``hhi`` itself is untouched — ``q`` is an
-        internal ordering key, never the reported match.
+        and ``C_min`` the fewest crossroads *any* route through ``points`` could cross
+        (:func:`~.search.min_crossroad_distance`, chained over the required stops). So
+        the factor is ``1.0`` for a route that detours not at all and ``< 1`` in
+        proportion to how far round it goes. This is what stops HHI's scale-freeness
+        from ranking a monster detour above the obvious route when they tie on
+        concentration; the small exponent keeps concentration dominant.
+
+        ``C_min`` is deliberately a property of the *network*, not of the candidate
+        pool. A pool minimum would be cheaper, but generating candidates depends on
+        priority (there is a pass per tier), so re-rating an artery could change the
+        pool's shortest member and rescale every reported match % with it — the exact
+        surprise this score is meant to avoid. Note the choice is invisible to the
+        ordering either way: ``C_min`` is one factor common to the whole pool, so it
+        cancels out of both the sort and :meth:`select_diverse`'s relative floor, and
+        only sets the scale the percentages are reported on.
+
+        The base :attr:`Route.hhi` is the **priority-free** concentration: ``q``
+        measures *how well the route rides one artery*, and re-rating an authored
+        route must not move it. Priority is expressed once, by the tier gate below,
+        instead of leaking a second time into the score — and since ``q`` is also the
+        reported match %, that keeps the number stable when a priority is edited. The
+        priority weights still do their own job upstream, inside
+        :meth:`_make_route`'s other solve: they pick the credit assignment, so an edge
+        served by both a good and a bad route is credited to the good one, and the
+        tier reads that assignment.
 
         The sort key is ``(-q, route_count, crossroad_hops, total_hops, canonical
         orientation)``: best ranking score first, then (among equal ``q``) fewest
@@ -453,10 +510,11 @@ class RouteFinder:
         re-sorting.
         """
         routes = [self._make_route(nodes) for nodes in chains]
-        min_cross = min((r.crossroad_hops for r in routes if r.crossroad_hops), default=0)
+        min_cross = self._min_crossroad_distance(points)
         for r in routes:
-            # No adjustment when either distance is 0 (a crossroad-free chain,
-            # only reachable in tiny graphs), mirroring evaluate()'s L == 0 branch.
+            # No adjustment when either distance is 0 (nothing between these places
+            # crosses a junction at all — a tiny or purely linear stretch of the
+            # network), mirroring evaluate()'s L == 0 branch.
             if min_cross and r.crossroad_hops:
                 r.q = r.hhi * (min_cross / r.crossroad_hops) ** LENGTH_EXPONENT
         routes.sort(

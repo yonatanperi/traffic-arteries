@@ -106,7 +106,10 @@ def path(request):
     through (visited in an optimised order).
     Response: ``{"paths": [[...], ...], "meta": [{"routeCount", "match",
     "priority", "routes"}, ...], "compromisedDetour": [...]}`` — ``paths`` are the
-    stop chains; ``meta[i]`` gives the match percentage (concentration), the
+    stop chains; ``meta[i]`` gives the match percentage (the *ranking* score
+    ``Route.q`` — priority-free concentration tempered by the crossroad-distance
+    term, so the number shown always agrees with the order the results are listed in
+    and does not move when an artery is re-prioritised), the
     route's ``priority`` *tier* (the worst priority among the sub-routes it rides,
     i.e. the max over ``routes[].priority`` below — why a longer route may outrank a
     shorter one, so the UI must surface it), and which authored routes route ``i``
@@ -167,11 +170,16 @@ def path(request):
         successive runs — no need to touch concentration.py.
 
         `share` is taken from `run.length`, *not* `run.hops`: length is the term
-        the concentration score is actually built from, so the shares shown to
-        the user square back to the `match` percentage. Under a length mode where
-        the two diverge (`LengthMode.CROSSROADS_ONLY`) using hops here would print
-        shares that contradict the score. The index range still counts hops —
-        that's a position in `stops`, not a weight."""
+        the concentration score is actually built from, so the shares shown to the
+        user square back to it: `Σ share²` is `Route.hhi`, of which the `match` %
+        reported alongside is that same value scaled by the ranking length factor (so
+        match sits at or just below what the shares square to). The rare exception is
+        a chain where the priority-free solve behind `hhi` credits its runs
+        differently from the weighted solve these shares come from. Under a length
+        mode where hops and
+        length diverge (`LengthMode.CROSSROADS_ONLY`) using hops here would print
+        shares that contradict the score outright. The index range still counts
+        hops — that's a position in `stops`, not a weight."""
         origin, dest = run_endpoints(run)
         return {
             "id": run.route_id if isinstance(run.route_id, int) else -1,
@@ -214,7 +222,7 @@ def path(request):
     meta = [
         {
             "routeCount": r.route_count,
-            "match": round(r.hhi * 100),
+            "match": round(r.q * 100),
             "priority": r.priority,
             "routes": routes_meta(r.runs),
         }

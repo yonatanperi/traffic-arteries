@@ -21,9 +21,15 @@ Two levels judge a route's quality (and pick the single best result):
    when riding it *as* the good route is at least as concentrated — otherwise the
    concentrated way to ride it is the bad one. (`Graph.edge_priority`, the per-edge
    best, is a separate thing the generators use to hunt for a different corridor.)
-2. **Concentration** — within a tier, a priority-weighted Herfindahl (HHI) score
-   over how the route's length splits across the authored routes it stitches
-   (`w(p) = 1 - 0.2p`). Not fewest hops, not fewest merges.
+2. **Concentration** — within a tier, a Herfindahl (HHI) score over how the route's
+   length splits across the authored routes it stitches. Not fewest hops, not fewest
+   merges. `Route.hhi` is deliberately **priority-free**: priority is the tier's job,
+   so re-rating an artery must never move a route's score (or the match % built on
+   it). The priority weights `w(p) = 1 - 0.2p` still exist inside
+   `concentration.evaluate` and run as a *second* solve whose score is discarded —
+   they decide which artery gets credit for a shared edge, and hence the sub-route
+   chips and the tier. Consequence: with `PriorityMode.HARD_TIER` off, the ranking is
+   fully priority-blind, since the arena is then the only priority mechanism left.
 
 Both are non-additive, so they can't be optimized inside a single shortest-path
 search; `backend/api/graph/routing.py` generates a pool of candidate corridors
@@ -240,9 +246,12 @@ values. The theme is dark-only (no light-mode branch to maintain).
    `compromisedDetour` = compromised places the natural top-`TOP_N` would use) and
    once with `exclude=compromised` (the results actually shown). The `TOP_N` (=3)
    truncation is the only place the result count lives — never a magic `k`.
-5. Response carries `paths` (stop chains), `meta` (per-result HHI as `match`, the
-   priority tier, and which authored routes — labeled by their endpoints — each
-   result merges), and `compromisedDetour`.
+5. Response carries `paths` (stop chains), `meta` (per-result ranking score
+   `Route.q` as `match` — the HHI tempered by the crossroad-distance term, i.e.
+   the very quantity the results are ordered and floored by, so the shown % never
+   contradicts the shown order; raw `hhi` stays internal and is what the per-run
+   `share`s square back to — the priority tier, and which authored routes —
+   labeled by their endpoints — each result merges), and `compromisedDetour`.
 
 ### Frontend/backend contract notes
 

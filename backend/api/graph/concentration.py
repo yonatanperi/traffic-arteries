@@ -108,7 +108,12 @@ def _edge_unit(graph, a, b):
 
 
 def _route_weight(graph, route_id):
-    """How much credit a run on ``route_id`` earns — its priority discount."""
+    """How much credit a run on ``route_id`` earns — its priority discount.
+
+    This no longer scales the score itself (which is priority-free); it is the
+    *tie-break* :func:`evaluate` applies among equally concentrated credit
+    assignments, so a shared edge goes to the better-rated artery.
+    """
     return 1.0 - PRIORITY_STEP * graph.route_priority(route_id)
 
 
@@ -135,28 +140,34 @@ def tier(graph, stops):
 
 
 def evaluate(graph, stops):
-    """Best-case priority-weighted concentration of a stop chain.
+    """Best-case concentration of a stop chain, and the ride it implies.
 
     Returns ``(score, runs)`` for the route-credit assignment that maximises it:
 
-      * ``score`` — the weighted concentration in ``[0, 1]`` (higher is better; it
-        reaches ``1.0`` only by riding a single *priority-0* route the whole way).
+      * ``score`` — the concentration in ``[0, 1]`` (higher is better; it reaches
+        ``1.0`` by riding a single authored route the whole way, whatever its
+        rating — how *good* that artery is belongs to :func:`tier`, not here).
       * ``runs``  — the contiguous single-route stretches, **in travel order**
         (:class:`Run` each), from which callers derive the distinct routes, the
         per-run share, and travel-oriented labels.
 
     The total length ``L = Σ unit`` is independent of the assignment (units are
-    per-edge), so maximising ``score`` is maximising the numerator
-    ``Σ w(priority(r_i))·len(r_i)²``; a tiny secondary preference for fewer
-    transfers keeps the reported assignment clean. When ``L == 0`` (a chain that
-    crosses no crossroads — only possible under ``CROSSROADS_ONLY``) the score falls
-    back to the equal-share value ``Σ w(r)/n²`` over the ``n`` distinct routes (so
-    ``1.0`` for a single priority-0 route), keeping it defined. The result is
-    identical for a chain and its reverse.
+    per-edge), so maximising ``score`` is maximising the numerator ``Σ len(r_i)²``.
+    When ``L == 0`` (a chain that crosses no crossroads — only possible under
+    ``CROSSROADS_ONLY``) the score falls back to the equal-share value ``1/n`` over
+    the ``n`` distinct routes, keeping it defined. The result is identical for a
+    chain and its reverse.
 
-    Because the weights favour well-rated arteries, an edge carried by both a
-    priority-0 and a priority-3 route is credited to the priority-0 one for free —
-    that is simply the assignment that scores higher.
+    **The score is priority-free**, and deliberately so: it answers *how well does
+    this chain ride one artery*, while how well that artery is **rated** is
+    :func:`tier`'s answer, reported separately. Priority therefore cannot move the
+    score, the runs, or their shares — which matters because the API reports the
+    score as the match %, and a number that shifted when an artery was re-rated
+    reads as a bug. Priority does still choose *between* assignments, but only as a
+    tie-break: among the readings of the chain that are equally concentrated, the
+    priority-weighted ``Σ w(r_i)·len(r_i)²`` is maximised, so an edge carried by both
+    a priority-0 and a priority-3 route is credited to the priority-0 one for free.
+    Fewest transfers breaks any remaining tie, keeping the reported assignment clean.
     """
     if len(stops) < 2:
         return 1.0, []
@@ -168,13 +179,19 @@ def evaluate(graph, stops):
 
     weights = {r: _route_weight(graph, r) for routes in memberships for r in routes}
 
-    # DP over edges to choose the credit assignment maximising Σ w(r_i)·len(r_i)².
+    # DP over edges to choose the credit assignment, on a two-level objective:
+    # maximise the plain Σ len(r_i)² first, and only among the assignments that tie
+    # there prefer the priority-weighted Σ w(r_i)·len(r_i)² — i.e. concentration
+    # decides, and priority merely picks which artery gets the credit when the ride
+    # is equally concentrated either way. That ordering is what keeps the score, the
+    # runs and their shares priority-free: re-rating an artery can only change which
+    # of two *equally concentrated* readings of the same chain is reported.
     # State: (route credited to this edge, open run's length k). Stored value:
-    # (closed_numerator, -transfers) — the closed runs' Σ w·len², maximised, then
-    # fewest transfers; the *open* run's w·k² is added when we finalise. Units can
-    # exceed 1, so we close runs explicitly rather than adding an incremental
-    # square term.
-    layer = {(r, units[0]): ((0.0, 0), None) for r in memberships[0]}
+    # (closed_plain, closed_weighted, -transfers) — the closed runs' Σ len² and
+    # Σ w·len², maximised in that order, then fewest transfers; the *open* run's
+    # k² / w·k² is added when we finalise. Units can exceed 1, so we close runs
+    # explicitly rather than adding an incremental square term.
+    layer = {(r, units[0]): ((0.0, 0.0, 0), None) for r in memberships[0]}
     layers = [layer]
 
     for j in range(1, len(edges)):
@@ -182,11 +199,11 @@ def evaluate(graph, stops):
         u = units[j]
         cur = {}
         for (r, k), (value, _) in layers[-1].items():
-            closed, negtr = value
+            plain, closed, negtr = value
             # Continue the current run (only if this edge also carries route r).
             if r in routes:
                 state = (r, k + u)
-                cand = (closed, negtr)
+                cand = (plain, closed, negtr)
                 if state not in cur or cand > cur[state][0]:
                     cur[state] = (cand, (r, k))
             # Or switch to another member route: close this run, open a fresh one.
@@ -194,14 +211,14 @@ def evaluate(graph, stops):
                 if r2 == r:
                     continue
                 state = (r2, u)
-                cand = (closed + weights[r] * k * k, negtr - 1)
+                cand = (plain + k * k, closed + weights[r] * k * k, negtr - 1)
                 if state not in cur or cand > cur[state][0]:
                     cur[state] = (cand, (r, k))
         layers.append(cur)
 
     def final_value(state):
-        (r, k), ((closed, negtr), _) = state, layers[-1][state]
-        return (closed + weights[r] * k * k, negtr)
+        (r, k), ((plain, closed, negtr), _) = state, layers[-1][state]
+        return (plain + k * k, closed + weights[r] * k * k, negtr)
 
     best_state = max(layers[-1], key=final_value)
 
@@ -233,9 +250,8 @@ def evaluate(graph, stops):
 
     if total_length == 0:
         distinct = {run.route_id for run in runs}
-        share = 1.0 / len(distinct) if distinct else 1.0
-        score = sum(weights[r] * share * share for r in distinct) if distinct else 1.0
+        score = 1.0 / len(distinct) if distinct else 1.0
     else:
-        numerator = sum(weights[run.route_id] * run.length * run.length for run in runs)
+        numerator = sum(run.length * run.length for run in runs)
         score = numerator / (total_length * total_length)
     return score, runs

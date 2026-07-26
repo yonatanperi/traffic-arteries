@@ -110,7 +110,7 @@ class Command(BaseCommand):
         meta = [
             {
                 "routeCount": r.route_count,
-                "match": round(r.hhi * 100),
+                "match": round(r.q * 100),
                 "priority": r.priority,
                 "routes": routes_meta(r.runs, r.total_hops),
             }
