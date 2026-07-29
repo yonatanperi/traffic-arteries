@@ -12,7 +12,13 @@ A :class:`Database` owns two JSON objects in an R2 bucket:
     object — it is re-attached from here on every load, so this stays the one place
     it lives.
   * ``edge_routes.json`` — the derived graph, rebuilt on every save so it can be
-    loaded straight from the store without recomputation. Each record is
+    loaded straight from the store without recomputation. It is accompanied by
+    ``edge_routes.fingerprint.json``, recording which routes it was derived from and
+    under which :data:`DERIVATION_VERSION`; a load whose fingerprint doesn't match
+    rebuilds rather than trusting the object (see :meth:`Database._derived_is_stale`).
+    Without that check a ``routes.json`` changed out of band — or a change to the
+    derivation itself — leaves the store serving edges no route asserts, and nothing
+    ever notices. Each record is
     ``[place_a, place_b, [authored route indices on that edge]]``: it carries both
     the topology (the adjacency is reconstructed from the edges) and the route
     provenance the router needs to find the most-concentrated path (riding one
@@ -31,9 +37,20 @@ uses; construct your own :class:`Database` (e.g. in tests, against a mocked
 bucket) with a ``prefix`` to namespace its keys.
 """
 
-from utils.r2_storage import storage
+import hashlib
+import json
+
+from utils.r2_storage import ObjectNotFound, storage
 
 from .graph import BEST_PRIORITY, WORST_PRIORITY, Graph
+
+# Version of the *derivation* — the pipeline that turns ``routes.json`` into
+# ``edge_routes.json`` (:func:`expand_route`, :meth:`Database.fill_missing_destinations`,
+# :meth:`Graph.from_routes`). It is half of the derived object's fingerprint, so
+# **bump it whenever a change to that pipeline would derive different edges from the
+# same routes**: every store then rebuilds on its next load instead of serving edges
+# computed by logic that no longer exists. Nothing else keys off it.
+DERIVATION_VERSION = 1
 
 
 # How many stops a single hop may be elaborated with when re-inserting skipped
@@ -146,6 +163,10 @@ class Database:
         # time for routing/place-picking — routes.json/edge_routes.json never
         # change because of this.
         self.compromised_key = _join_key(prefix, "compromised.json")
+        # What the derived object was built from — see :meth:`_derivation_fingerprint`.
+        # Kept beside the edges rather than inside them so the derived object stays
+        # exactly the record list :meth:`Graph.from_edge_routes` reads.
+        self.fingerprint_key = _join_key(prefix, "edge_routes.fingerprint.json")
 
     # --- persistence primitives -------------------------------------------
 
@@ -289,14 +310,64 @@ class Database:
 
     # --- store lifecycle ---------------------------------------------------
 
-    def _ensure_files(self):
-        if not storage.object_exists(self.routes_key):
+    def _derivation_fingerprint(self, routes):
+        """Identifies the edges ``routes`` derive *under the current derivation*.
+
+        Two independent things can put the derived object out of step with the
+        routes, so the fingerprint has two parts: a digest of the routes exactly as
+        stored (catches a ``routes.json`` changed outside :meth:`save_routes` — seeded,
+        restored from a backup, hand-edited) and :data:`DERIVATION_VERSION` (catches
+        the routes being untouched while the logic that consumed them changed).
+        ``sort_keys`` makes the digest indifferent to key order within a route but
+        not to route order, which is right: the order *is* the route-index space the
+        derived edges reference.
+        """
+        payload = json.dumps(routes, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        return {
+            "version": DERIVATION_VERSION,
+            "routes": hashlib.sha256(payload).hexdigest(),
+        }
+
+    def _derived_is_stale(self, routes):
+        """Whether the stored graph was derived from something other than ``routes``.
+
+        A missing derived object, a missing fingerprint (a store written before
+        fingerprints existed, or seeded without one), or a fingerprint that doesn't
+        match what ``routes`` derive today all mean the same thing: rebuild. Erring
+        toward a rebuild costs one recomputation; erring the other way serves edges
+        that no route asserts — phantom adjacencies the router will happily ride,
+        indefinitely and silently. That asymmetry is the whole reason this exists.
+        """
+        if not storage.object_exists(self.edge_routes_key):
+            return True
+        try:
+            stored = self._read_json(self.fingerprint_key)
+        except ObjectNotFound:
+            return True
+        return stored != self._derivation_fingerprint(routes)
+
+    def _ensure_routes(self):
+        """Guarantee ``routes.json`` exists and the derived graph matches it.
+
+        Returns the routes *exactly as stored* (un-normalised): fetching them is the
+        price of the freshness check either way, so the callers that need them
+        (:meth:`load_routes`, :meth:`load_graph`) take them from here rather than
+        reading the object a second time.
+        """
+        try:
+            routes = self._read_json(self.routes_key)
+        except ObjectNotFound:
             # Start empty; routes are added through the editor.
-            self._atomic_write_json(self.routes_key, [])
-            self._rebuild_graph([])
-        elif not storage.object_exists(self.edge_routes_key):
-            # routes exist but the derived graph is missing/stale — rebuild it.
-            self._rebuild_graph(self._read_json(self.routes_key))
+            routes = []
+            self._atomic_write_json(self.routes_key, routes)
+            self._rebuild_graph(routes)
+            return routes
+        if self._derived_is_stale(routes):
+            self._rebuild_graph(routes)
+        return routes
+
+    def _ensure_compromised(self):
+        """Guarantee ``compromised.json`` exists (it has nothing derived from it)."""
         if not storage.object_exists(self.compromised_key):
             self._atomic_write_json(self.compromised_key, [])
 
@@ -312,6 +383,12 @@ class Database:
 
         Only the edges are persisted — priorities are *not* derived data, so they
         stay in ``routes.json`` and are re-attached at load time.
+
+        ``routes`` must be what ``routes.json`` holds (or is about to hold), because
+        it is also what gets fingerprinted: :meth:`save_routes` writes the cleaned
+        routes and rebuilds from those same ones, :meth:`_ensure_routes` rebuilds
+        from what it just read. Rebuilding from anything else would stamp a
+        fingerprint that no later load can reproduce, so every load would rebuild.
 
         Branched routes are flattened by :func:`expand_routes` first, so the graph
         is built from one flat subroute per tree node. Authoring three tail-sharing
@@ -335,6 +412,10 @@ class Database:
         )
         graph = Graph.from_routes(filled, priorities)
         self._atomic_write_json(self.edge_routes_key, graph.edge_routes_records)
+        # Stamped last, on purpose: if this write is the one that fails, the store is
+        # left with edges and no fingerprint, which reads as stale and rebuilds. The
+        # other order would leave a fingerprint vouching for edges never written.
+        self._atomic_write_json(self.fingerprint_key, self._derivation_fingerprint(routes))
         return graph
 
     @staticmethod
@@ -452,6 +533,18 @@ class Database:
 
     # --- public API --------------------------------------------------------
 
+    @staticmethod
+    def _normalised(routes):
+        """Stored routes in the uniform ``{"places", "priority"[, "branches"]}`` shape."""
+        return [
+            {
+                "places": route_places(route),
+                "priority": route_priority(route),
+                **({"branches": route_branches(route)} if route_branches(route) else {}),
+            }
+            for route in routes
+        ]
+
     def load_routes(self):
         """The authored routes, always in the ``{"places", "priority"}`` shape.
 
@@ -459,15 +552,7 @@ class Database:
         normalised here (as all-best-priority) so every caller sees one shape, and
         rewritten in the new shape on the next save.
         """
-        self._ensure_files()
-        return [
-            {
-                "places": route_places(route),
-                "priority": route_priority(route),
-                **({"branches": route_branches(route)} if route_branches(route) else {}),
-            }
-            for route in self._read_json(self.routes_key)
-        ]
+        return self._normalised(self._ensure_routes())
 
     def load_expanded_routes(self):
         """The authored routes flattened to one ``{"places", "priority"}`` per subroute.
@@ -484,12 +569,17 @@ class Database:
 
         The edges come from the derived file; the priorities come from the expanded
         routes (``routes.json`` stays their single source of truth), aligned to the
-        graph's route indices — one per tree node.
+        graph's route indices — one per tree node. Both therefore describe the same
+        routes: :meth:`_ensure_routes` has rebuilt the edges first if they didn't.
+
+        The routes read for the freshness check are expanded here directly instead
+        of calling :meth:`load_expanded_routes`, which would fetch ``routes.json`` a
+        second time for a value already in hand.
         """
-        self._ensure_files()
+        routes = self._normalised(self._ensure_routes())
         return Graph.from_edge_routes(
             self._read_json(self.edge_routes_key),
-            [route["priority"] for route in self.load_expanded_routes()],
+            [route["priority"] for route in expand_routes(routes)],
         )
 
     def save_routes(self, routes):
@@ -503,7 +593,7 @@ class Database:
         return cleaned
 
     def load_compromised(self):
-        self._ensure_files()
+        self._ensure_compromised()
         return self._read_json(self.compromised_key)
 
     def compromised_places(self):

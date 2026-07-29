@@ -76,7 +76,7 @@ WAYPOINT_MAX_STRETCH = 1.5
 # stay dominant (a perfect single-artery corridor still beats a shorter
 # fragmented one), so this only breaks ties HHI leaves scale-blind. Larger values
 # start sacrificing real concentration for shortness.
-LENGTH_EXPONENT = 0.15
+LENGTH_EXPONENT = 0.6
 
 # The relative quality floor for *alternatives* (see :meth:`select_diverse`). An
 # alternative is only worth showing if its ranking score is at least this

@@ -8,9 +8,11 @@ import boto3
 from django.test import SimpleTestCase
 from moto import mock_aws
 
+from . import db as db_module
 from .db import Database, ValidationError, expand_route, expand_routes
 from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
 from .graph.search import MinMergeStrategy, avoid_priority_penalty
+from utils.r2_storage import storage
 
 @contextlib.contextmanager
 def length_mode(crossroads_only):
@@ -1069,3 +1071,107 @@ class BranchedRouteStorageTests(R2BackedTestCase):
         tree_top = [r.stops for r in tree_finder.select_diverse(tree_ranked, k=None)]
         self.assertEqual(flat_top, tree_top)
         self.assertEqual(flat_top[0], ["H2a", "J", "T1", "T2"])
+
+
+class DerivedGraphFreshnessTests(R2BackedTestCase):
+    """The derived graph must never outlive the routes it was derived from.
+
+    ``edge_routes.json`` is only rebuilt on save, so anything that changes
+    ``routes.json`` behind the store's back — or changes the derivation itself —
+    used to leave the router riding edges no route asserts, silently and forever.
+    Every load now checks a fingerprint and rebuilds on any mismatch.
+    """
+
+    # A converging tree: two heads that meet only at the shared tail. The heads'
+    # last stops (H1b, H2b) must NEVER be adjacent to each other — welding them is
+    # exactly what a stale derived object looked like in the wild.
+    TREE = [
+        {
+            "places": ["T1", "T2"],
+            "priority": 0,
+            "branches": [{"places": ["H1a", "H1b"]}, {"places": ["H2a", "H2b"]}],
+        }
+    ]
+
+    def edges(self):
+        return {
+            frozenset((a, b)) for a, b, _ in storage.download_json(self.db.edge_routes_key)
+        }
+
+    def write_routes_out_of_band(self, routes):
+        """Change routes.json without going through save_routes (no rebuild)."""
+        storage.upload_json(self.db.routes_key, routes)
+
+    def test_heads_of_a_tree_are_not_welded_together(self):
+        self.db.save_routes(self.TREE)
+        self.assertNotIn(frozenset(("H1b", "H2b")), self.edges())
+        self.assertIn(frozenset(("H1b", "T1")), self.edges())
+        self.assertIn(frozenset(("H2b", "T1")), self.edges())
+
+    def test_out_of_band_route_change_rebuilds_on_load(self):
+        self.db.save_routes(self.TREE)
+        extended = [{**self.TREE[0], "branches": [
+            {"places": ["H1a", "H1b"]}, {"places": ["H2a", "H2b", "H2c"]},
+        ]}]
+        self.write_routes_out_of_band(extended)
+        graph = self.db.load_graph()
+        self.assertIn(frozenset(("H2b", "H2c")), self.edges())
+        self.assertIn("H2c", graph.places())
+
+    def test_restoring_a_mismatched_backup_rebuilds(self):
+        # Restoring an *older* derived object (+ its fingerprint) over current
+        # routes — copying a data/ backup over a live store. The fingerprint
+        # travels with the edges it describes, so the mismatch against the routes
+        # actually present is what catches it.
+        self.db.save_routes([{"places": ["OLD1", "OLD2"], "priority": 0}])
+        old_edges = storage.download_json(self.db.edge_routes_key)
+        old_fingerprint = storage.download_json(self.db.fingerprint_key)
+
+        self.db.save_routes(self.TREE)
+        storage.upload_json(self.db.edge_routes_key, old_edges)
+        storage.upload_json(self.db.fingerprint_key, old_fingerprint)
+
+        self.db.load_graph()
+        self.assertNotIn(frozenset(("OLD1", "OLD2")), self.edges())
+        self.assertIn(frozenset(("H1b", "T1")), self.edges())
+
+    def test_tampered_derived_object_alone_is_not_detected(self):
+        # The boundary of the guard, pinned deliberately: the fingerprint answers
+        # "which routes were these derived from", not "has this file been edited".
+        # Hand-editing edge_routes.json while routes.json stays put is therefore
+        # invisible — catching it would mean downloading and digesting the edges on
+        # every load, including loads that never read them.
+        self.db.save_routes(self.TREE)
+        records = storage.download_json(self.db.edge_routes_key)
+        storage.upload_json(self.db.edge_routes_key, records + [["H1b", "H2b", [0]]])
+        self.db.load_graph()
+        self.assertIn(frozenset(("H1b", "H2b")), self.edges())
+
+    def test_derivation_version_bump_rebuilds(self):
+        self.db.save_routes(self.TREE)
+        storage.upload_json(self.db.edge_routes_key, [["bogus", "edge", [0]]])
+        with mock.patch.object(db_module, "DERIVATION_VERSION", db_module.DERIVATION_VERSION + 1):
+            self.db.load_graph()
+        self.assertNotIn(frozenset(("bogus", "edge")), self.edges())
+
+    def test_missing_fingerprint_rebuilds(self):
+        # A store seeded (or written) before fingerprints existed has none.
+        self.db.save_routes(self.TREE)
+        storage.upload_json(self.db.edge_routes_key, [["bogus", "edge", [0]]])
+        boto3.client("s3", region_name="us-east-1").delete_object(
+            Bucket=_R2_TEST_ENV["R2_BUCKET_NAME"], Key=self.db.fingerprint_key
+        )
+        self.db.load_graph()
+        self.assertNotIn(frozenset(("bogus", "edge")), self.edges())
+
+    def test_fresh_store_does_not_rebuild(self):
+        # The check must be cheap in the common case: a matching fingerprint means
+        # no recomputation at all, however many times the store is read.
+        self.db.save_routes(self.TREE)
+        with mock.patch.object(
+            Database, "_rebuild_graph", autospec=True
+        ) as rebuild:
+            self.db.load_graph()
+            self.db.load_routes()
+            self.db.load_expanded_routes()
+        rebuild.assert_not_called()

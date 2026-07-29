@@ -212,6 +212,17 @@ values. The theme is dark-only (no light-mode branch to maintain).
   `[[place_a, place_b, [authored route indices]], ...]`. The adjacency is
   reconstructed from these edges — there's no separate adjacency file. This is
   what `Graph.from_edge_routes` loads.
+- **`edge_routes.fingerprint.json`** guards that derived file against drift:
+  `{version, routes}` — `DERIVATION_VERSION` plus a digest of `routes.json` as
+  stored. Every load checks it (`Database._derived_is_stale`) and rebuilds on any
+  mismatch, so a `routes.json` changed outside `save_routes` (seeded, restored,
+  hand-edited) or a change to the derivation itself can't leave the router riding
+  edges no route asserts. **Bump `DERIVATION_VERSION` whenever a change to
+  `expand_route` / `fill_missing_destinations` / `Graph.from_routes` would derive
+  different edges from the same routes** — that's what makes existing stores
+  rebuild instead of serving output of logic that no longer exists. Tampering with
+  the derived file alone is deliberately *not* detected (see
+  `DerivedGraphFreshnessTests`); it fingerprints the input, not the output.
 - Before building the graph, routes pass through
   `Database.fill_missing_destinations`: if one route hops directly `D → B`
   while another spells out `D, E, F, B`, the skipped stops get spliced back in

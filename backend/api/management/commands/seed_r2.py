@@ -17,9 +17,16 @@ from django.core.management.base import BaseCommand
 
 from utils.r2_storage import storage
 
-# The three objects the store owns. Each local filename maps 1:1 to its R2 key
-# (the app uses bare, unprefixed keys — see api/db.py).
-SEED_FILES = ["routes.json", "edge_routes.json", "compromised.json"]
+# The objects the store owns. Each local filename maps 1:1 to its R2 key (the app
+# uses bare, unprefixed keys — see api/db.py). The fingerprint is what tells the
+# app the seeded edges really were derived from the seeded routes; seeding without
+# it is safe but costs one rebuild on the first load.
+SEED_FILES = [
+    "routes.json",
+    "edge_routes.json",
+    "edge_routes.fingerprint.json",
+    "compromised.json",
+]
 
 
 class Command(BaseCommand):
