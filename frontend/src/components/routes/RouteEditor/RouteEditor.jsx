@@ -175,11 +175,21 @@ export default function RouteEditor({
     );
   }, [routes.length]);
 
-  // Every route edit is a patch onto the route object, so the fields the edit
-  // doesn't touch (notably the priority) ride along untouched.
+  // A partial edit (e.g. the priority alone) patched onto the route object, so
+  // the fields the edit doesn't touch ride along untouched.
   function patchRoute(index, patch) {
+    replaceRoute(index, { ...routes[index], ...patch });
+  }
+
+  // A whole-route edit (the tree editor) *replaces* the route — never merges.
+  // A tree edit can legitimately drop a field: collapsing a junction leaves a
+  // route with no `branches` key at all, and merging that onto the old object
+  // would resurrect the very heads the edit just removed (while their stops are
+  // already folded into the tail). The tree ops carry `priority` through
+  // themselves, so nothing needs the old object.
+  function replaceRoute(index, nextRoute) {
     const next = routes.slice();
-    next[index] = { ...routes[index], ...patch };
+    next[index] = nextRoute;
     onChange(next);
   }
 
@@ -205,7 +215,7 @@ export default function RouteEditor({
   }
 
   function reverseRouteAt(index) {
-    patchRoute(index, reverseRoute(routes[index]));
+    replaceRoute(index, reverseRoute(routes[index]));
   }
 
   function removeRoute(index) {
@@ -369,7 +379,7 @@ export default function RouteEditor({
                   pinned={rows[i].pinned}
                   filteredOut={Boolean(filtering) && !matched.has(i)}
                   compromisedPlaces={compromisedPlaces}
-                  onChangeRoute={(nextRoute) => patchRoute(i, nextRoute)}
+                  onChangeRoute={(nextRoute) => replaceRoute(i, nextRoute)}
                   onChangePriority={(priority) => patchRoute(i, { priority })}
                   onRemoveRoute={() => removeRoute(i)}
                   onDuplicateRoute={() => duplicateRoute(i)}
