@@ -1,6 +1,19 @@
 /* Layout otherwise comes from the shared .page / .page-header styles and the
    RouteEditor / CompromisedEditor components. */
 
-.page-tabs {
+/* Tabs at the start of the row, the undo/redo pair pushed to the other end.
+   The row carries the bottom margin the tabs used to own. */
+.routes-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s-3);
   margin-bottom: var(--s-5);
+}
+
+.routes-history {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
 }

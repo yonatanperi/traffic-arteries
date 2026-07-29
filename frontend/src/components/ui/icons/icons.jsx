@@ -303,6 +303,27 @@ export function IconEyeOff(props) {
   );
 }
 
+// Undo — an arrow curving back on itself. Deliberately *not* mirrored for RTL:
+// the counter-clockwise arrow is what users read as "undo" in any direction.
+export function IconUndo(props) {
+  return (
+    <Svg {...props}>
+      <path d="M4 8v6h6" />
+      <path d="M20 17a8 8 0 0 0-8-8 8 8 0 0 0-6 2.7L4 14" />
+    </Svg>
+  );
+}
+
+// Redo — the mirror of IconUndo.
+export function IconRedo(props) {
+  return (
+    <Svg {...props}>
+      <path d="M20 8v6h-6" />
+      <path d="M4 17a8 8 0 0 1 8-8 8 8 0 0 1 6 2.7L20 14" />
+    </Svg>
+  );
+}
+
 // Hub — a busy node, drawn as a star burst.
 export function IconHub(props) {
   return (
