@@ -27,6 +27,7 @@ import {
   IconDuplicate,
   IconPin,
   IconBranch,
+  IconSwap,
 } from "../../ui/icons";
 import {
   expandRoute,
@@ -34,6 +35,7 @@ import {
   cloneRoute,
   renameStop,
   leafCount,
+  reverseRoute,
 } from "../../../utils/branches.js";
 import {
   useGetUrlParams,
@@ -202,6 +204,10 @@ export default function RouteEditor({
     });
   }
 
+  function reverseRouteAt(index) {
+    patchRoute(index, reverseRoute(routes[index]));
+  }
+
   function removeRoute(index) {
     onChange(routes.filter((_, i) => i !== index));
     setRows((prev) => prev.filter((_, i) => i !== index));
@@ -367,6 +373,7 @@ export default function RouteEditor({
                   onChangePriority={(priority) => patchRoute(i, { priority })}
                   onRemoveRoute={() => removeRoute(i)}
                   onDuplicateRoute={() => duplicateRoute(i)}
+                  onReverseRoute={() => reverseRouteAt(i)}
                   onTogglePin={() => togglePin(i)}
                   onRenameStop={requestRename}
                 />
@@ -422,12 +429,17 @@ function RouteRow({
   onChangePriority,
   onRemoveRoute,
   onDuplicateRoute,
+  onReverseRoute,
   onTogglePin,
   onRenameStop,
 }) {
   const { places, priority } = route;
   const origins = leafCount(route); // number of converging origin heads (1 = plain)
   const branched = origins > 1;
+  // Hovering the reverse button previews the flipped order (via the chain's own
+  // drag-reorder animation) without touching the route — nothing persists until
+  // the click. Leaving without clicking just lets the preview relax back.
+  const [reversePreview, setReversePreview] = useState(false);
   // A plain route needs both endpoints; a branched one is validated per-head.
   const tooShort = !branched && places.length < 2;
   const destination = places[places.length - 1];
@@ -543,6 +555,20 @@ function RouteRow({
           >
             <IconDuplicate size={16} />
           </IconButton>
+          {!branched && (
+            <IconButton
+              ariaLabel={`הפוך את כיוון ציר ${index + 1}`}
+              title="הפוך כיוון"
+              onMouseEnter={() => setReversePreview(true)}
+              onMouseLeave={() => setReversePreview(false)}
+              onClick={() => {
+                onReverseRoute();
+                setReversePreview(false);
+              }}
+            >
+              <IconSwap size={16} />
+            </IconButton>
+          )}
         </>
       }
       onRemove={onRemoveRoute}
@@ -562,6 +588,7 @@ function RouteRow({
         highlight={highlight}
         onRenameStop={onRenameStop}
         compromisedPlaces={compromisedPlaces}
+        previewReversed={reversePreview}
       />
     </EditableGroupRow>
   );

@@ -171,7 +171,7 @@ class RouteFinder:
                              route's by more than this factor.
     """
 
-    def __init__(self, graph, penalty_step=TRANSFER_WEIGHT, max_overlap=0.75, max_stretch=2.5):
+    def __init__(self, graph, penalty_step=TRANSFER_WEIGHT, max_overlap=0.99, max_stretch=2.5):
         self.graph = graph
         self.penalty_step = penalty_step
         self.max_overlap = max_overlap

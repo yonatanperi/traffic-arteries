@@ -73,6 +73,9 @@ function measureFitScale(ref) {
  *   route     { places, priority, branches? } — the whole tree
  *   onChange  (nextRoute) => void
  *   suggestions / highlight / onRenameStop / compromisedPlaces — passed to every chain.
+ *   previewReversed  hover-preview only (non-branched routes): show the root chain's
+ *                 stops in reverse order via its own drag-reorder animation, without
+ *                 touching `route` — the reverse button is the only thing that sets it.
  */
 export default function BranchedChain({
   route,
@@ -81,6 +84,7 @@ export default function BranchedChain({
   highlight,
   onRenameStop,
   compromisedPlaces,
+  previewReversed = false,
 }) {
   // A branched route lives on the pan/zoom map; a plain (branchless) route is the
   // bare inline chain. This split drives two things: the leading "[" bracket
@@ -99,6 +103,8 @@ export default function BranchedChain({
     compromisedPlaces,
     sortable: true,
     wrapEvery: branched ? 6 : null,
+    // Only ever true for the root chain of a non-branched route (see prop doc).
+    previewReversed,
   };
 
   // The most zoomed-OUT state is the whole tree fitting the viewport: minScale is
@@ -245,6 +251,7 @@ function TreeNode({ ctx, node, path, bracket = false }) {
       highlight={ctx.highlight}
       onRenameStop={ctx.onRenameStop}
       compromisedPlaces={ctx.compromisedPlaces}
+      previewReversed={ctx.previewReversed}
     />
   );
 

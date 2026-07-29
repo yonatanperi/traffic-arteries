@@ -146,6 +146,11 @@ export function renameStop(route, oldValue, newValue) {
   return mapNode(route);
 }
 
+/** Reverse the stop order of a non-tree (leaf, unbranched) route. */
+export function reverseRoute(route) {
+  return { ...route, places: route.places.slice().reverse() };
+}
+
 /** Deep copy of a route (for duplicate — heads and their chains included). */
 export function cloneRoute(route) {
   const cloneNode = (node) => ({

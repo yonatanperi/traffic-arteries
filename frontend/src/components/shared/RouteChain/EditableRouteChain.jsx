@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext,
@@ -100,6 +100,10 @@ function isMatch(value, highlight) {
  *                 stacked as a column of `.chain-line`s, rather than wrapping to fit
  *                 its box. Null (default) = the plain single flowing row that wraps
  *                 to fit, as before. The branched map passes 6.
+ *   previewReversed  render the stops back-to-front (same ids, so it rides the same
+ *                 drag-reorder animation) without emitting a change — a caller (the
+ *                 route editor's reverse button) toggles this on hover to preview
+ *                 the flip, and a click commits it via `onChange` instead.
  */
 export default function EditableRouteChain({
   stops,
@@ -114,6 +118,7 @@ export default function EditableRouteChain({
   showStart = true,
   showEnd = true,
   wrapEvery = null,
+  previewReversed = false,
 }) {
   // Internal id-keyed model so dnd-kit and the inline editor stay stable across
   // reorders (stop values can duplicate, so they can't be used as keys).
@@ -140,6 +145,48 @@ export default function EditableRouteChain({
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
   const sensors = sortable ? pointerSensors : NO_SENSORS;
+
+  // A manual FLIP for the reverse-preview flip specifically: dnd-kit only
+  // animates a reorder that happens *during* a live drag it's tracking (see
+  // `defaultAnimateLayoutChanges` — it requires `wasDragging`), so a
+  // programmatic reorder like this one would otherwise just snap. `.animate()`
+  // (Web Animations API) runs outside of React's style reconciliation, so it
+  // can't fight the `style` object dnd-kit itself writes on the same elements.
+  const chainItemRefs = useRef(new Map());
+  const prevRectsRef = useRef(new Map());
+  const prevPreviewRef = useRef(previewReversed);
+  useLayoutEffect(() => {
+    // Document-relative, not viewport-relative: hovering the button can itself
+    // scroll it into view, and a raw getBoundingClientRect() delta across that
+    // scroll would read as a giant (wrong) jump instead of the real reorder.
+    const nextRects = new Map();
+    chainItemRefs.current.forEach((el, itemId) => {
+      const r = el.getBoundingClientRect();
+      nextRects.set(itemId, { left: r.left + window.scrollX, top: r.top + window.scrollY });
+    });
+
+    // Only the transition into/out of the preview gets this treatment — a real
+    // drag animates itself, and add/remove/edit are meant to be instant.
+    if (prevPreviewRef.current !== previewReversed) {
+      nextRects.forEach((rect, itemId) => {
+        const prev = prevRectsRef.current.get(itemId);
+        if (!prev) return;
+        const dx = prev.left - rect.left;
+        const dy = prev.top - rect.top;
+        if (!dx && !dy) return;
+        chainItemRefs.current.get(itemId)?.animate(
+          [
+            { transform: `translate(${dx}px, ${dy}px)` },
+            { transform: "translate(0, 0)" },
+          ],
+          { duration: 200, easing: "ease" },
+        );
+      });
+    }
+
+    prevRectsRef.current = nextRects;
+    prevPreviewRef.current = previewReversed;
+  });
 
   // On the branched map the pill lives inside a scaled canvas, so dnd-kit's
   // screen-pixel drag delta paints at `delta * scale` and drifts from the cursor.
@@ -239,7 +286,14 @@ export default function EditableRouteChain({
 
   // One stop: its pill (or inline editor) plus the "+"/chevron gap after it.
   const renderStop = (it, i) => (
-    <li className="chain-item" key={it.id}>
+    <li
+      className="chain-item"
+      key={it.id}
+      ref={(el) => {
+        if (el) chainItemRefs.current.set(it.id, el);
+        else chainItemRefs.current.delete(it.id);
+      }}
+    >
       {editingId === it.id ? (
         <StopEditor
           initial={it.value}
@@ -254,7 +308,9 @@ export default function EditableRouteChain({
           count={items.length}
           highlight={highlight}
           dragging={dragging}
-          sortable={sortable}
+          // A hover preview shows the flipped order but isn't itself draggable —
+          // it's not a real state to reorder from, just a glimpse of the reverse.
+          sortable={sortable && !previewReversed}
           showStart={showStart}
           showEnd={showEnd}
           compromised={compromisedPlaces?.has(it.value)}
@@ -278,8 +334,13 @@ export default function EditableRouteChain({
     </li>
   );
 
+  // Purely a display order: reversed for the hover preview, otherwise identical
+  // to `items`. Every mutation (drag/add/remove/edit) still reads and writes
+  // `items` itself — the preview never touches the real state.
+  const displayItems = previewReversed ? [...items].reverse() : items;
+
   let body;
-  if (items.length === 0) {
+  if (displayItems.length === 0) {
     body = (
       <li className="chain-item">
         <Button
@@ -297,13 +358,13 @@ export default function EditableRouteChain({
     // so the container measures to the widest line — keeping the map's fit/zoom
     // and pan bounds honest (a flex-wrap container mis-measures to the full
     // single-line width, since intrinsic sizing ignores in-flow line breaks).
-    const per = rowSize(items.length, wrapEvery);
+    const per = rowSize(displayItems.length, wrapEvery);
     const lines = [];
-    for (let start = 0, r = 0; start < items.length; start += per, r++) {
+    for (let start = 0, r = 0; start < displayItems.length; start += per, r++) {
       lines.push(
         <li className="chain-line" key={`line-${r}`}>
           {r === 0 && lead}
-          {items
+          {displayItems
             .slice(start, start + per)
             .map((it, k) => renderStop(it, start + k))}
         </li>,
@@ -314,7 +375,7 @@ export default function EditableRouteChain({
     body = (
       <>
         {lead}
-        {items.map(renderStop)}
+        {displayItems.map(renderStop)}
       </>
     );
   }
@@ -332,7 +393,7 @@ export default function EditableRouteChain({
       onDragCancel={() => setDragging(false)}
     >
       <SortableContext
-        items={items.map((it) => it.id)}
+        items={displayItems.map((it) => it.id)}
         strategy={rectSortingStrategy}
       >
         <ol
