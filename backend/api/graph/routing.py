@@ -40,7 +40,7 @@ than once over a single ranked pool.
 
 import itertools
 
-from .concentration import PriorityMode, evaluate
+from .concentration import LengthMode, PriorityMode, evaluate
 from .core import BEST_PRIORITY, path_edges
 from .search import (
     TRANSFER_WEIGHT,
@@ -63,17 +63,19 @@ WAYPOINT_MAX_STRETCH = 1.5
 
 # Length pressure on the ranking (see :meth:`RouteFinder._rank`). Concentration
 # (HHI) is a *share-of-total* and so scale-free: a 50/50 split scores the same at
-# 4 crossroads or 15, which lets a monster detour tie the obvious route on
-# rounding noise. The ranking score multiplies HHI by
-# ``(C_min / C) ** LENGTH_EXPONENT`` — a *gentle* preference for the route that
-# crosses fewer intersections among near-equally-concentrated ones. "Length" is
-# the **crossroad distance** (:attr:`Route.crossroad_hops`), not the raw edge
-# count, so a long transparent (shape-point) chain still counts as the one
-# crossroad-to-crossroad hop it is — the same distance notion the tie-break and
-# the CROSSROADS_ONLY length mode already use. The exponent is deliberately
-# small: concentration must stay dominant (a perfect single-artery corridor still
-# beats a shorter fragmented one), so this only breaks ties HHI leaves
-# scale-blind. Larger values start sacrificing real concentration for shortness.
+# 4 hops or 15, which lets a monster detour tie the obvious route on rounding
+# noise. The ranking score multiplies HHI by ``(C_min / C) ** LENGTH_EXPONENT`` —
+# a *gentle* preference for the shorter route among near-equally-concentrated
+# ones. "Length" (:attr:`Route.crossroad_hops`) is whatever the active
+# :class:`~.concentration.LengthMode` says it is — the same units
+# :func:`~.concentration.evaluate` sums for the HHI itself, so this length term
+# never tempers a score with a unit the score doesn't use. Under
+# ``CROSSROADS_ONLY`` that's the crossroad distance, not the raw edge count, so a
+# long transparent (shape-point) chain still counts as the one crossroad-to-
+# crossroad hop it is. The exponent is deliberately small: concentration must
+# stay dominant (a perfect single-artery corridor still beats a shorter
+# fragmented one), so this only breaks ties HHI leaves scale-blind. Larger values
+# start sacrificing real concentration for shortness.
 LENGTH_EXPONENT = 0.15
 
 # The relative quality floor for *alternatives* (see :meth:`select_diverse`). An
@@ -124,15 +126,15 @@ class Route:
       * ``route_ids``      — sorted distinct authored-route indices it stitches.
       * ``route_count``    — how many distinct authored routes are merged.
       * ``run_lengths``    — length of each run (in the active length mode), in order.
-      * ``crossroad_hops`` — intersections crossed; the crossroad *distance* the
-                             ranking score's length term uses (see
-                             :meth:`RouteFinder._rank`).
+      * ``crossroad_hops`` — the route's length, in the active
+                             :class:`~.concentration.LengthMode` units (crossroads
+                             crossed, or plain hop count) — the length term the
+                             ranking score uses (see :meth:`RouteFinder._rank`).
       * ``total_hops``     — number of edges.
       * ``q``              — the *ranking* score: ``hhi`` tempered by a gentle
-                             crossroad-distance preference (see
-                             :meth:`RouteFinder._rank`). Defaults to ``hhi`` and is
-                             filled in once the pool's minimum crossroad distance
-                             is known — it is pool-relative, so a lone ``Route``
+                             length preference (see :meth:`RouteFinder._rank`).
+                             Defaults to ``hhi`` and is filled in once the pool's
+                             minimum length is known — it is pool-relative, so a lone ``Route``
                              carries only its concentration. It drives the ordering
                              and the alternative floor, and is what the API reports
                              as the match % — so the number shown always agrees with
@@ -242,7 +244,7 @@ class RouteFinder:
             )
             return self._rank(chains, [start, end]), self.max_stretch
 
-        # Required stops -> strict simple paths, tightly bounded. Try candidate
+        # Required stops -> leg-wise simple paths, tightly bounded. Try candidate
         # stop orders cheapest-first and keep the first order that yields a pool.
         stretch = min(self.max_stretch, WAYPOINT_MAX_STRETCH)
         for points in self._ordered_point_lists(start, end, waypoints):
@@ -315,15 +317,18 @@ class RouteFinder:
         return [points for _, points in scored]
 
     def _min_crossroad_distance(self, points):
-        """The ranking score's length reference: the fewest crossroads a route through
-        ``points`` (``[start, *required stops, end]``) could possibly cross.
+        """The ranking score's length reference: the shortest a route through
+        ``points`` (``[start, *required stops, end]``) could possibly be, in the
+        active :class:`~.concentration.LengthMode` units.
 
-        Chains :func:`~.search.min_crossroad_distance` leg by leg. A required stop sits
-        on two legs and so is counted twice, hence the correction — which keeps this a
-        genuine lower bound on :meth:`_crossroad_hops` of any candidate visiting the
-        points in this order, and therefore keeps the length factor in ``(0, 1]``.
-        Returns ``0`` when a leg is unreachable, which :meth:`_rank` reads as "no
-        length adjustment" rather than dividing by nothing.
+        Chains :func:`~.search.min_crossroad_distance` leg by leg. Under
+        ``CROSSROADS_ONLY`` a required stop sits on two legs and so is counted
+        twice, hence the correction — which keeps this a genuine lower bound on
+        :meth:`_crossroad_hops` of any candidate visiting the points in this order,
+        and therefore keeps the length factor in ``(0, 1]``. Off that mode each leg
+        is plain hop distance, which concatenates across legs with no double-count
+        to correct for. Returns ``0`` when a leg is unreachable, which :meth:`_rank`
+        reads as "no length adjustment" rather than dividing by nothing.
         """
         total = 0
         for a, b in zip(points, points[1:]):
@@ -331,14 +336,24 @@ class RouteFinder:
             if leg is None:
                 return 0
             total += leg
-        for stop in points[1:-1]:
-            if self.graph.is_crossroad(stop):
-                total -= 1
+        if LengthMode.CROSSROADS_ONLY:
+            for stop in points[1:-1]:
+                if self.graph.is_crossroad(stop):
+                    total -= 1
         return max(total, 0)
 
     def _crossroad_hops(self, nodes):
-        """Intersections on ``nodes`` — counted over all nodes so it is the same
-        whichever direction the route is walked (a deep, symmetric tiebreak)."""
+        """``nodes``' length for the ranking reference, in the active
+        :class:`~.concentration.LengthMode` units — the same units
+        :func:`~.concentration.evaluate` sums for the HHI, so the ranking's length
+        term never tempers a score with a unit the score doesn't use.
+
+        Under ``CROSSROADS_ONLY`` this is intersections crossed, counted over all
+        nodes so it is the same whichever direction the route is walked (a deep,
+        symmetric tiebreak); otherwise it's the plain hop count.
+        """
+        if not LengthMode.CROSSROADS_ONLY:
+            return max(len(nodes) - 1, 0)
         return sum(1 for node in nodes if self.graph.is_crossroad(node))
 
     def _make_route(self, nodes):
@@ -473,8 +488,9 @@ class RouteFinder:
 
             q = hhi * (C_min / C) ** LENGTH_EXPONENT
 
-        where ``C`` is the route's crossroad distance (:attr:`Route.crossroad_hops`)
-        and ``C_min`` the fewest crossroads *any* route through ``points`` could cross
+        where ``C`` is the route's length (:attr:`Route.crossroad_hops`, in the active
+        :class:`~.concentration.LengthMode` units) and ``C_min`` the shortest *any*
+        route through ``points`` could be in those same units
         (:func:`~.search.min_crossroad_distance`, chained over the required stops). So
         the factor is ``1.0`` for a route that detours not at all and ``< 1`` in
         proportion to how far round it goes. This is what stops HHI's scale-freeness

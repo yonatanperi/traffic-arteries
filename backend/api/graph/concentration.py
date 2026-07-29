@@ -100,8 +100,15 @@ class PriorityMode:
     HARD_TIER = True
 
 
-def _edge_unit(graph, a, b):
-    """Length ``edge (a, b)`` contributes — direction-independent (see LengthMode)."""
+def edge_unit(graph, a, b):
+    """Length ``edge (a, b)`` contributes — direction-independent (see LengthMode).
+
+    Public because :mod:`.routing` and :mod:`.search` also need "length" for the
+    ranking score's crossroad-distance reference, and that reference must use the
+    same units :func:`evaluate` sums for the HHI itself, per the active
+    :class:`LengthMode` — otherwise the ranking would temper a score with a length
+    notion the score doesn't use.
+    """
     if LengthMode.CROSSROADS_ONLY:
         return (1 if graph.is_crossroad(a) else 0) + (1 if graph.is_crossroad(b) else 0)
     return 1
@@ -174,7 +181,7 @@ def evaluate(graph, stops):
 
     edges = list(zip(stops, stops[1:]))
     memberships = [graph.routes_on(a, b) or (edge_key(a, b),) for a, b in edges]
-    units = [_edge_unit(graph, a, b) for a, b in edges]
+    units = [edge_unit(graph, a, b) for a, b in edges]
     total_length = sum(units)
 
     weights = {r: _route_weight(graph, r) for routes in memberships for r in routes}

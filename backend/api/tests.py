@@ -124,11 +124,12 @@ class KShortestPathsTests(SimpleTestCase):
 
 
 class WaypointTests(SimpleTestCase):
-    """Required intermediate stops: real-world simple paths, no pointless detour."""
+    """Required intermediate stops: real-world routes, no pointless detour."""
 
     # A-B direct; A-C and C-B direct (short way through C); a long *single-route*
-    # road from A to C via Z, X, N, K; and a long *fragmented* one (routes 4..8,
-    # transferring at every other stop) that exists only to be rejected for length.
+    # road from A to C via Z, X, N, K; a long *fragmented* one (routes 4..8,
+    # transferring at every other stop) that exists only to be rejected for
+    # length; and a dead-end spur C-P, reachable only by turning around.
     WAYPOINT_ROUTES = [
         ["A", "B"],                          # 0
         ["A", "C"],                          # 1
@@ -139,19 +140,47 @@ class WaypointTests(SimpleTestCase):
         ["w4", "w5", "w6"],
         ["w6", "w7", "w8"],
         ["w8", "w9", "C"],
+        ["C", "P"],                          # 9: dead end (P has degree 1)
     ]
     LONG_FRAGMENTED = ["A", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "C", "B"]
 
     def setUp(self):
         self.finder = RouteFinder(Graph.from_routes(self.WAYPOINT_ROUTES))
 
+    @staticmethod
+    def _legs(path, stops):
+        """Split a stop chain into its legs — the stretches between required stops."""
+        legs, current = [], [path[0]]
+        for node in path[1:]:
+            current.append(node)
+            if node in stops:
+                legs.append(current)
+                current = [node]
+        legs.append(current)
+        return [leg for leg in legs if len(leg) > 1]
+
     def test_route_passes_through_required_stop(self):
         for p in self.finder.k_shortest_paths("A", "B", via=["C"]):
             self.assertIn("C", p)
 
-    def test_no_revisits_with_waypoints(self):
-        for p in self.finder.k_shortest_paths("A", "B", via=["C"]):
-            self.assertEqual(len(p), len(set(p)), f"route revisits a node: {p}")
+    def test_no_loops_within_a_leg(self):
+        # Simplicity is scoped to the leg, not the whole route: retracing across a
+        # required stop is legitimate (it is how a spur is left), looping inside
+        # one leg never is.
+        for p in self.finder.k_shortest_paths("A", "B", via=["P"]):
+            for leg in self._legs(p, {"P"}):
+                self.assertEqual(len(leg), len(set(leg)), f"leg loops on itself: {leg}")
+
+    def test_dead_end_stop_is_reachable(self):
+        # P hangs off C by a single edge, so the only way out of P is back through
+        # C. Requiring a globally simple path makes P — and every other degree-1
+        # place — unroutable as a required stop; the leg-wise rule finds it.
+        paths = self.finder.k_shortest_paths("A", "B", via=["P"])
+        self.assertTrue(paths, "no route through a dead-end required stop")
+        for p in paths:
+            self.assertIn("P", p)
+            i = p.index("P")
+            self.assertEqual((p[i - 1], p[i + 1]), ("C", "C"))
 
     def test_long_single_road_beats_a_short_transfer(self):
         # Counting every hop (LengthMode.CROSSROADS_ONLY = False), the long way
@@ -202,7 +231,8 @@ class WaypointTests(SimpleTestCase):
 
 
 class TransparencyTests(SimpleTestCase):
-    """Nodes with <=2 connections are transparent: only crossroads count."""
+    """Nodes with <=2 connections are transparent: under CROSSROADS_ONLY, only
+    crossroads count toward the ranking length reference."""
 
     def assert_full_chain(self, graph, path):
         """Every consecutive pair in a returned route is a real graph edge."""
@@ -217,10 +247,13 @@ class TransparencyTests(SimpleTestCase):
         self.assertEqual(graph.degree("C"), 3)  # crossroad
 
     def test_transparent_chain_counts_as_one_hop(self):
-        # A long transparent chain A..B is ONE crossroad-to-crossroad hop, so it
-        # beats the two-hop route through crossroad M -- even though it has far
-        # more nodes. Under the old edge-count model M's route (2 edges) would
-        # have won over the chain (6 edges); this is the shortest-path change.
+        # Under CROSSROADS_ONLY, a long transparent chain A..B is ONE
+        # crossroad-to-crossroad hop, so it beats the two-hop route through
+        # crossroad M -- even though it has far more nodes. The ranking's length
+        # reference follows the active LengthMode (matching what evaluate() sums
+        # for the HHI itself), so under the default plain-hop-count mode the
+        # shorter M route wins instead -- raw hops is exactly the unit that mode
+        # says "length" means.
         graph = Graph.from_routes(
             [
                 ["A", "l1", "l2", "l3", "l4", "l5", "B"],  # long transparent road
@@ -229,10 +262,17 @@ class TransparencyTests(SimpleTestCase):
             ]
         )
         finder = RouteFinder(graph)
-        paths = finder.k_shortest_paths("A", "B", k=3)
-        self.assertEqual(paths[0], ["A", "l1", "l2", "l3", "l4", "l5", "B"])
-        self.assertIn(["A", "M", "B"], paths)
-        for p in paths:
+
+        default_paths = finder.k_shortest_paths("A", "B", k=3)
+        self.assertEqual(default_paths[0], ["A", "M", "B"])
+        self.assertIn(["A", "l1", "l2", "l3", "l4", "l5", "B"], default_paths)
+
+        with length_mode(True):
+            crossroad_paths = finder.k_shortest_paths("A", "B", k=3)
+        self.assertEqual(crossroad_paths[0], ["A", "l1", "l2", "l3", "l4", "l5", "B"])
+        self.assertIn(["A", "M", "B"], crossroad_paths)
+
+        for p in default_paths + crossroad_paths:
             self.assert_full_chain(graph, p)
 
     def test_parallel_roads_are_distinct_alternatives(self):

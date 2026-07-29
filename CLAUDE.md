@@ -240,7 +240,12 @@ values. The theme is dark-only (no light-mode branch to maintain).
      route (`prefer_route_penalty`) plus an edge-penalty diversity backfill, to
      build the candidate pool.
    - With `via`: `WaypointStrategy` over optimized stop orderings (bounded by
-     `MAX_OPTIMIZED_WAYPOINTS`; a small TSP over hop-count heuristics).
+     `MAX_OPTIMIZED_WAYPOINTS`; a small TSP over hop-count heuristics). Its
+     no-revisit rule is scoped to the **leg** (the stretch between consecutive
+     required stops), not the whole route: a required stop may be a dead end, and
+     the only way out is back the way you came. Demanding one globally simple path
+     makes every degree-1 place unroutable as a `via` and rejects many ordinary
+     via-queries outright; a loop *inside* a leg is still banned.
    - Each candidate is scored exactly by `concentration.evaluate` (the HHI) and
      the pool is sorted once, concentration-first.
 4. `finder.select_diverse(ranked, k=None, exclude=…)` — a cheap priority-arena
@@ -250,7 +255,9 @@ values. The theme is dark-only (no light-mode branch to maintain).
    once with `exclude=compromised` (the results actually shown). The `TOP_N` (=3)
    truncation is the only place the result count lives — never a magic `k`.
 5. Response carries `paths` (stop chains), `meta` (per-result ranking score
-   `Route.q` as `match` — the HHI tempered by the crossroad-distance term, i.e.
+   `Route.q` as `match` — the HHI tempered by a length term (crossroad distance,
+   or plain hop count, per `LengthMode.CROSSROADS_ONLY` — the same unit
+   `evaluate()` sums for the HHI itself), i.e.
    the very quantity the results are ordered and floored by, so the shown % never
    contradicts the shown order; raw `hhi` stays internal and is what the per-run
    `share`s square back to — the priority tier, and which authored routes —

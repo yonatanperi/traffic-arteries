@@ -24,6 +24,7 @@ import heapq
 import itertools
 from collections import deque
 
+from .concentration import LengthMode
 from .core import edge_key
 
 # Safety valve for the waypoint search: give up (return "no route") after
@@ -59,25 +60,34 @@ def single_source_costs(graph, source):
 
 
 def min_crossroad_distance(graph, source, target):
-    """Fewest crossroads any path ``source -> target`` can cross, or ``None`` if
-    unreachable.
-
-    Same distance notion as :meth:`~.routing.RouteFinder._crossroad_hops`: every node
-    on the path counts, both endpoints included, transparent (degree-2) shape-points
-    counting for nothing. Entering a node therefore costs 1 or 0, which makes this a
-    0-1 BFS — a deque where free steps go to the front and crossroad steps to the
-    back keeps the queue monotone, so it stays linear rather than needing a heap.
+    """Shortest ``source -> target`` distance, in the active :class:`~.concentration.
+    LengthMode` units, or ``None`` if unreachable.
 
     This is the ranking score's length reference (see :meth:`~.routing.RouteFinder.
-    _rank`). It depends only on the network's shape — never on how routes are rated —
-    which is exactly the point: the reported match % must not move when an artery is
-    re-prioritised.
+    _rank`), so it must use the same length notion :func:`~.concentration.evaluate`
+    sums for the HHI itself — otherwise the ranking tempers a score with a unit the
+    score never used. It depends only on the network's shape — never on how routes
+    are rated — which is exactly the point: the reported match % must not move when
+    an artery is re-prioritised.
+
+    Under plain hop counting (``CROSSROADS_ONLY = False``) every edge costs 1, so
+    this is just unweighted shortest-path distance. Under ``CROSSROADS_ONLY`` every
+    node on the path counts, both endpoints included, transparent (degree-2)
+    shape-points counting for nothing — entering a node costs 1 or 0, which makes
+    this a 0-1 BFS (a deque where free steps go to the front and crossroad steps to
+    the back keeps the queue monotone, so it stays linear rather than needing a
+    heap). Same distance notion as :meth:`~.routing.RouteFinder._crossroad_hops`
+    either way.
     """
+    if source not in graph or target not in graph:
+        return None
+
+    if not LengthMode.CROSSROADS_ONLY:
+        return single_source_costs(graph, source).get(target)
+
     def weight(node):
         return 1 if graph.is_crossroad(node) else 0
 
-    if source not in graph or target not in graph:
-        return None
     best = {source: weight(source)}
     queue = deque([source])
     while queue:
@@ -217,15 +227,25 @@ class MinMergeStrategy(RouteStrategy):
 
 
 class WaypointStrategy(RouteStrategy):
-    """Merge-minimising simple route visiting ``points`` in order.
+    """Merge-minimising route visiting ``points`` in order.
 
-    The whole route is a simple path — no node visited twice — that touches the
-    required stops in the given order, carrying the same ``active_route`` state as
-    :class:`MinMergeStrategy`:
+    The route touches the required stops in the given order and is simple *leg by
+    leg*, carrying the same ``active_route`` state as :class:`MinMergeStrategy`:
 
-      * a node already on the path is never re-entered (no revisits);
+      * no node is re-entered **within a leg** — a leg being the stretch between
+        two consecutive required stops, which is where a pointless loop would be;
       * a required stop may only be entered when it is the *next* one due;
       * among equal-cost frontiers the earliest-discovered wins (deterministic).
+
+    Simplicity is deliberately scoped to the leg, not to the whole route. A
+    required stop can be a **dead end** (``נחל עוז`` and 26 other places in the
+    live network have degree 1) or sit behind a bridge, and the only way back out
+    is the way you came in — so the leg that leaves it must re-cross nodes the
+    leg that arrived already used. Demanding one globally simple path makes every
+    such stop unroutable, and in a sparse road network it also rejects plenty of
+    ordinary via-queries that simply have no simple path visiting the stops in
+    order. Retracing across a leg boundary is what driving to a spur and back
+    actually looks like; looping inside one leg is not, and stays banned.
 
     Like :class:`MinMergeStrategy`, dominated states are pruned via a ``best``
     dict keyed on ``(node, active_route, reached)`` — the same approximation:
@@ -234,9 +254,11 @@ class WaypointStrategy(RouteStrategy):
     avoids a revisit the cheap one can't. Without this pruning the search
     re-explores the same state once per distinct path prefix, which blows up
     combinatorially (and reliably burns through :data:`SEARCH_STATE_CAP`)
-    whenever a required stop sits on a well-connected hub.
+    whenever a required stop sits on a well-connected hub. Note ``reached`` is
+    already part of that key, so scoping the visited set to the leg costs no
+    extra states — the legs were separated in the pruning key all along.
 
-    :meth:`find` returns ``(nodes, route_seq)`` or ``(None, None)`` if no simple
+    :meth:`find` returns ``(nodes, route_seq)`` or ``(None, None)`` if no such
     route visits every stop in order.
     """
 
@@ -250,13 +272,16 @@ class WaypointStrategy(RouteStrategy):
         last = len(points) - 1  # index of the final stop (the end)
 
         counter = itertools.count()
-        # Heap entries: (cost, tie, node, active_route, reached, nodes, route_seq).
-        heap = [(0.0, next(counter), points[0], None, 1, (points[0],), ())]
+        # Heap entries: (cost, tie, node, active_route, reached, nodes, route_seq,
+        # leg) — `leg` being the nodes visited since the last required stop, i.e.
+        # the set the no-revisit rule applies to. It resets at every stop.
+        heap = [(0.0, next(counter), points[0], None, 1, (points[0],), (),
+                 frozenset((points[0],)))]
         best = {(points[0], None, 1): 0.0}
         explored = 0
 
         while heap:
-            cost, _, node, active, reached, nodes, route_seq = heapq.heappop(heap)
+            cost, _, node, active, reached, nodes, route_seq, leg = heapq.heappop(heap)
             if reached > last:
                 return list(nodes), route_seq  # reached the final stop, in order
 
@@ -269,17 +294,21 @@ class WaypointStrategy(RouteStrategy):
 
             target = points[reached]
             for neighbour in graph.neighbors(node):
-                # The final step may land back on the start node (a round trip
-                # where start == end); every other repeat is forbidden.
-                revisits = neighbour in nodes
-                if revisits and not (neighbour == target and reached == last):
+                # No looping back onto this leg. Reaching the target is always
+                # allowed — that is how a dead-end stop is left (back out through
+                # the node you came in by) and how a round trip closes on its own
+                # start when start == end.
+                if neighbour in leg and neighbour != target:
                     continue
                 # A required stop is only enterable as the current target.
                 if neighbour in point_set and neighbour != target:
                     continue
                 pen = penalty.get(edge_key(node, neighbour), 0.0)
                 hop = 1.0 if graph.is_crossroad(neighbour) else 0.0
-                new_reached = reached + 1 if neighbour == target else reached
+                reaches_stop = neighbour == target
+                new_reached = reached + 1 if reaches_stop else reached
+                # A stop starts the next leg, so the visited set restarts there.
+                new_leg = frozenset((neighbour,)) if reaches_stop else leg | {neighbour}
                 for route in _routes_on(graph, node, neighbour):
                     transfer = 0.0 if route == active else 1.0
                     new_cost = cost + TRANSFER_WEIGHT * transfer + hop + pen
@@ -289,7 +318,7 @@ class WaypointStrategy(RouteStrategy):
                         heapq.heappush(
                             heap,
                             (new_cost, next(counter), neighbour, route, new_reached,
-                             nodes + (neighbour,), route_seq + (route,)),
+                             nodes + (neighbour,), route_seq + (route,), new_leg),
                         )
 
         return None, None
