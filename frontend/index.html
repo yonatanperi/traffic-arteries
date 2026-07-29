@@ -2,7 +2,13 @@
 <html lang="he" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover is required for env(safe-area-inset-*) to resolve to
+         anything but 0 — the mobile tab bar (NavBar.css) relies on it to clear
+         the iPhone home indicator. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <title>צירי תנועה</title>
   </head>
   <body>

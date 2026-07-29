@@ -1,3 +1,5 @@
+/* Home page. */
+
 .search-panel {
   padding: var(--s-5);
   display: flex;
@@ -44,6 +46,25 @@
 
 .results-area {
   margin-top: var(--s-6);
+}
+
+/* The "no route found" state keeps the shared EmptyState component, but picks
+   up the same panel language as the idle banner here so the two don't clash.
+   The scoping keeps BrainPage/UserManagementPage on the stock look. */
+.results-area .empty-state {
+  padding: var(--s-6) var(--s-5);
+  border-style: solid;
+  border-radius: var(--r-xl);
+}
+.results-area .empty-state--warning {
+  background:
+    radial-gradient(
+      120% 90% at 50% 0%,
+      rgba(var(--warning-rgb), 0.1),
+      transparent 62%
+    ),
+    var(--surface);
+  border-color: rgba(var(--warning-rgb), 0.35);
 }
 
 .type-filters {
@@ -121,6 +142,11 @@
 
   .results-area {
     margin-top: var(--s-5);
+  }
+
+  .results-area .empty-state {
+    padding: var(--s-5) var(--s-4);
+    border-radius: var(--r-lg);
   }
 
   /* Filters are a horizontal strip that scrolls rather than wrapping into

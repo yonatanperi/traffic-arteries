@@ -2,7 +2,8 @@ import LoaderLayout from "../../components/ui/LoaderLayout";
 import EmptyState from "../../components/ui/EmptyState";
 import PathResults from "../../components/home/PathResults";
 import Pill from "../../components/ui/Pill";
-import { IconAlert, IconCompass } from "../../components/ui/icons";
+import IdleBanner from "./IdleBanner.jsx";
+import { IconAlert } from "../../components/ui/icons";
 import { PLACE_TYPES } from "../../utils/placeTypes.js";
 
 function detourMessage(destinations) {
@@ -67,13 +68,7 @@ export default function ResultsArea({
         </>
       )}
 
-      {!loading && !result && !error && (
-        <EmptyState
-          icon={<IconCompass size={60} />}
-          title="מוכנים לצאת לדרך"
-          message="הזינו שתי נקודות למעלה כדי לגלות את הצירים האפשריים ביניהן."
-        />
-      )}
+      {!loading && !result && !error && <IdleBanner />}
     </section>
   );
 }

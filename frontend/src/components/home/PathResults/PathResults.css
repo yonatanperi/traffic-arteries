@@ -3,25 +3,65 @@
   gap: var(--s-4);
 }
 
-.result-card {
+/* Compounded with .card (the JSX applies both) so these reliably override the
+   shared card rules regardless of stylesheet order. */
+.card.result-card {
+  position: relative;
   padding: var(--s-5);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
   animation: rise 0.45s var(--ease) both;
   transition:
     border-color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease),
     transform 0.2s var(--ease);
 }
-.result-card:first-child {
-  border-color: var(--border-strong);
+
+/* The headline result. Keyed off the explicit class rather than :first-child so
+   it tracks what the JSX actually marks as best. */
+.card.result-card--best {
+  border-color: rgba(var(--accent-rgb), 0.28);
   background:
-    linear-gradient(180deg, var(--accent-gradient-soft), transparent 55%),
+    radial-gradient(
+      120% 80% at 50% 0%,
+      rgba(var(--accent-rgb), 0.1),
+      transparent 60%
+    ),
     var(--surface);
 }
+/* Gradient hairline rim — the same motif as the idle banner's panel. */
+.card.result-card--best::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.55),
+    rgba(var(--accent-rgb), 0.06) 45%,
+    transparent 75%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
 /* Hover-capable pointers only: on touch the lifted state sticks after a tap
    until something else is tapped, which reads as the card being stuck. */
 @media (hover: hover) {
-  .result-card:hover {
+  .card.result-card:hover {
     transform: translateY(-2px);
-    border-color: var(--border-strong);
+    /* border-color: rgba(var(--accent-rgb), 0.35); */
+    box-shadow:
+      var(--shadow-lg),
+      0 0 25px -12px rgba(var(--accent-rgb), 0.45);
   }
 }
 
@@ -51,13 +91,22 @@
   border-color: var(--border-strong);
 }
 
-/* .copy-btn--done {
+/* The "copied" flash. The JSX applies this class for 1.6s after a copy. */
+.copy-btn--done {
   color: var(--on-accent);
   background: var(--accent-fill);
   border-color: transparent;
-} */
+}
+.copy-btn--done:hover {
+  color: var(--on-accent);
+  background: var(--accent-fill-hover);
+  border-color: transparent;
+}
 
 .result-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
   font-size: 1.2rem;
 }
 
@@ -67,6 +116,7 @@
   gap: var(--s-2);
   color: var(--text-muted);
   font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .result-meta {
@@ -88,6 +138,7 @@
   border: 1px solid var(--border-strong);
   color: var(--text-muted);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Which authored routes this result stitches together. */
@@ -133,6 +184,7 @@
 .merge-route-share {
   font-weight: 700;
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 /* The route's tier: the worst source-route priority it was forced to ride. Ranking
@@ -163,14 +215,16 @@
 }
 
 @media (max-width: 640px) {
-  .result-card {
+  .card.result-card {
     padding: var(--s-4);
+    border-radius: var(--r-lg);
   }
   .result-head {
     margin-bottom: var(--s-3);
   }
   .result-title {
     font-size: 1.05rem;
+    gap: var(--s-2);
   }
   .result-meta {
     margin-bottom: var(--s-4);
