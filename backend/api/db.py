@@ -8,9 +8,12 @@ A :class:`Database` owns two JSON objects in an R2 bucket:
     tree of alternate heads whose leaves each share the downstream tail (see
     :func:`expand_route`). The tree is flattened to one flat subroute per leaf before
     the graph is built, so a branched route and the equivalent set of flat routes
-    derive identical edges. The priority is *not* copied into the derived graph
-    object — it is re-attached from here on every load, so this stays the one place
-    it lives.
+    derive identical edges. **Any head may state a ``priority`` of its own**, which
+    rates the whole corridor it generates (that head, down the shared tail, to the
+    destination) without touching its sibling heads; a head that states none inherits
+    its parent's, so the root's priority is the tree-wide default. The priority is
+    *not* copied into the derived graph object — it is re-attached from here on every
+    load, so this stays the one place it lives.
   * ``edge_routes.json`` — the derived graph, rebuilt on every save so it can be
     loaded straight from the store without recomputation. It is accompanied by
     ``edge_routes.fingerprint.json``, recording which routes it was derived from and
@@ -82,7 +85,21 @@ def route_places(route):
 
 def route_priority(route):
     """The priority of a stored route (``BEST_PRIORITY`` if it doesn't state one)."""
-    return route.get("priority", BEST_PRIORITY) if isinstance(route, dict) else BEST_PRIORITY
+    return node_priority(route, BEST_PRIORITY)
+
+
+def node_priority(node, inherited):
+    """The priority a tree node rides at: its own if it states one, else ``inherited``.
+
+    Only the root is required to state a priority; a head that states one *overrides*
+    it for the corridors it generates, and one that doesn't simply inherits. That is
+    what keeps a head's rating local — a sibling head resolves its own priority down
+    its own ancestor chain and never sees this one's.
+    """
+    if not isinstance(node, dict):
+        return inherited
+    priority = node.get("priority")
+    return inherited if priority is None else priority
 
 
 def route_branches(route):
@@ -103,40 +120,44 @@ def expand_route(route):
 
         subroute(leaf) = leaf.places + parent.places + … + root.places
 
-    A flat route (no branches) is itself the sole leaf and yields exactly
-    ``[route.places]`` — identical to authoring it the old way. Emitted in the
+    Returns one ``{"places", "priority"}`` entry per leaf: the chain, and the
+    priority it rides at — the leaf's own if it states one, otherwise the nearest
+    ancestor's (see :func:`node_priority`). Priority is resolved *here*, on the way
+    down, because that is the only place a leaf's ancestor chain exists: two leaves
+    of the same tree can legitimately come out at different priorities, and each
+    one's is decided purely by its own spine.
+
+    A flat route (no branches) is itself the sole leaf and yields exactly one entry
+    for ``route.places`` — identical to authoring it the old way. Emitted in the
     branches' pre-order; that ordering *is* the route-index space the derived
     graph, its priorities and the path labels all share.
     """
     leaves = []
 
-    def walk(node, downstream):
+    def walk(node, downstream, inherited):
         # `downstream` is the chain from this node's parent junction to the
         # destination; this node's own stops flow into its front.
         full = route_places(node) + downstream
+        priority = node_priority(node, inherited)
         branches = route_branches(node)
         if branches:
             for branch in branches:
-                walk(branch, full)
+                walk(branch, full, priority)
         else:
-            leaves.append(full)  # a leaf head — exactly one subroute
+            # A leaf head — exactly one subroute, rated by its own spine.
+            leaves.append({"places": full, "priority": priority})
 
-    walk(route, [])
+    walk(route, [], BEST_PRIORITY)
     return leaves
 
 
 def expand_routes(routes):
     """Every authored route flattened to its subroutes, as ``{"places", "priority"}``.
 
-    Concatenation of :func:`expand_route` over ``routes`` in order; each subroute
-    inherits its route's single priority (branches carry no priority of their own).
+    Concatenation of :func:`expand_route` over ``routes`` in order — the flat view
+    the derived graph's route indices line up with.
     """
-    expanded = []
-    for route in routes:
-        priority = route_priority(route)
-        for chain in expand_route(route):
-            expanded.append({"places": chain, "priority": priority})
-    return expanded
+    return [subroute for route in routes for subroute in expand_route(route)]
 
 
 def _join_key(prefix, name):
@@ -196,13 +217,29 @@ class Database:
             raise ValidationError(f"{label} חייב לכלול לפחות {word}.")
         return places
 
+    @staticmethod
+    def _clean_priority(raw, label):
+        """Validate one priority value (shared by the root and every head)."""
+        # bool is an int subclass, and True would silently become priority 1.
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise ValidationError(f"עדיפות של {label} אינה תקינה.")
+        if not BEST_PRIORITY <= raw <= WORST_PRIORITY:
+            raise ValidationError(
+                f"עדיפות של {label} חייבת להיות בין {BEST_PRIORITY} ל-{WORST_PRIORITY}."
+            )
+        return raw
+
     @classmethod
     def _clean_branches(cls, raw_branches, label):
         """Recursively validate/normalise a node's branches (converging heads).
 
-        Each branch is ``{"places": [≥1 stop], "branches": [...]}`` — its stops flow
-        into this node's first stop; no join index (convergence is always at the
-        tail's start). Sub-branches converge into the branch's own first stop.
+        Each branch is ``{"places": [≥1 stop], "priority": 0..3?, "branches": [...]}``
+        — its stops flow into this node's first stop; no join index (convergence is
+        always at the tail's start). Sub-branches converge into the branch's own first
+        stop. ``priority`` is *optional* here, unlike on the root: absent means
+        "inherit", and it is only written back when the head actually states one, so
+        an inherited head stays the exact shape it had before this feature existed
+        (and re-rating the route keeps carrying it along).
         """
         if not isinstance(raw_branches, list):
             raise ValidationError(f"ההסתעפויות של {label} אינן רשימה.")
@@ -213,6 +250,9 @@ class Database:
                 raise ValidationError(f"{blabel} אינה תקינה.")
             places = cls._clean_places(branch.get("places"), blabel, minimum=1)
             entry = {"places": places}
+            priority = branch.get("priority")
+            if priority is not None:
+                entry["priority"] = cls._clean_priority(priority, blabel)
             sub = cls._clean_branches(branch.get("branches", []), blabel)
             if sub:
                 entry["branches"] = sub
@@ -228,7 +268,8 @@ class Database:
         with no branches (a plain corridor) needs at least two non-empty places; a
         route that has branches is a *shared tail* whose own ``places`` needs at
         least one (the heads supply the origin side). ``priority`` is an int in
-        ``[BEST_PRIORITY, WORST_PRIORITY]``; ``branches`` is optional (see
+        ``[BEST_PRIORITY, WORST_PRIORITY]`` — required on the route (it is the
+        tree-wide default), optional on each head; ``branches`` is optional (see
         :meth:`_clean_branches`). Place names are trimmed of surrounding whitespace.
 
         Both the bare-list and object shapes are accepted so a routes file written
@@ -258,16 +299,7 @@ class Database:
             if not branches and len(places) < 2:
                 raise ValidationError(f"{label} חייב לכלול לפחות שתי נקודות.")
 
-            # bool is an int subclass, and True would silently become priority 1.
-            if isinstance(raw_priority, bool) or not isinstance(raw_priority, int):
-                raise ValidationError(f"עדיפות של {label} אינה תקינה.")
-            if not BEST_PRIORITY <= raw_priority <= WORST_PRIORITY:
-                raise ValidationError(
-                    f"עדיפות של {label} חייבת להיות בין "
-                    f"{BEST_PRIORITY} ל-{WORST_PRIORITY}."
-                )
-
-            entry = {"places": places, "priority": raw_priority}
+            entry = {"places": places, "priority": cls._clean_priority(raw_priority, label)}
             # Only carry `branches` when there are any, so a flat route stays the
             # exact `{"places", "priority"}` shape it had before this feature.
             if branches:
@@ -402,10 +434,9 @@ class Database:
         # leaf (see :meth:`fill_missing_destinations`).
         chains, priorities, groups = [], [], []
         for index, route in enumerate(routes):
-            priority = route_priority(route)
-            for chain in expand_route(route):
-                chains.append(chain)
-                priorities.append(priority)
+            for subroute in expand_route(route):
+                chains.append(subroute["places"])
+                priorities.append(subroute["priority"])
                 groups.append(index)
         filled = self.fill_missing_destinations(
             chains, lazy_gap, confirmed_gap, route_groups=groups

@@ -10,7 +10,11 @@ between two places. Full-stack Django REST Framework + React, with a
 filesystem JSON store (no SQL). The UI is Hebrew/RTL.
 
 **The routing objective is concentration, not shortest-path**, gated by a hard
-priority tier. Each authored route carries a `priority` (int `0..3`, `0` = best).
+priority tier. Each authored route carries a `priority` (int `0..3`, `0` = best) —
+and a *branched* route carries one **per head**: a head's rating covers the corridor
+it generates (that head, down the shared tail, to the destination) and no sibling's,
+so the tree's leaves can ride at different priorities. The root's own `priority` is
+a plain route's single rating, and the fallback for any head never rated.
 Two levels judge a route's quality (and pick the single best result):
 
 1. **Tier** — the worst priority among the sub-routes a route actually *rides*: the
@@ -204,10 +208,15 @@ values. The theme is dark-only (no light-mode branch to maintain).
 ### The filesystem store (`backend/api/db.py`)
 
 - **`routes.json`** is the source of truth: routes exactly as authored, each
-  `{"places": [...], "priority": 0..3}`. A bare `[...]` list (the pre-priority
-  shape) still loads, as priority 0, and is upgraded on the next save. Priority is
-  deliberately **not** copied into the derived graph file — `load_graph()`
-  re-attaches it from here, so this stays the one place it lives.
+  `{"places": [...], "priority": 0..3}`, optionally with `"branches"` (a converging
+  tree of heads — see `expand_route`). A bare `[...]` list (the pre-priority
+  shape) still loads, as priority 0, and is upgraded on the next save. A head may
+  carry its own `"priority"`; absent means it inherits its parent's, so `expand_route`
+  resolves each leaf's on the way down and returns `{"places", "priority"}` per
+  subroute. Priority is deliberately **not** copied into the derived graph file —
+  `load_graph()` re-attaches it from here, so this stays the one place it lives.
+  The editor shows the route-level picker only for a *plain* route: a tree has no
+  single priority to state, so each head is rated on its own chip in the tree.
 - **`edge_routes.json`** is derived and rebuilt on every save:
   `[[place_a, place_b, [authored route indices]], ...]`. The adjacency is
   reconstructed from these edges — there's no separate adjacency file. This is

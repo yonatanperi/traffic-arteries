@@ -999,10 +999,18 @@ class BranchedRouteExpansionTests(SimpleTestCase):
         }
     ]
 
+    @staticmethod
+    def _chains(route):
+        """Just the place chains of an expansion (priority asserted separately)."""
+        return [subroute["places"] for subroute in expand_route(route)]
+
     def test_flat_route_expands_to_itself(self):
-        self.assertEqual(expand_route(["A", "B", "C"]), [["A", "B", "C"]])
         self.assertEqual(
-            expand_route({"places": ["A", "B", "C"], "priority": 1}), [["A", "B", "C"]]
+            expand_route(["A", "B", "C"]), [{"places": ["A", "B", "C"], "priority": 0}]
+        )
+        self.assertEqual(
+            expand_route({"places": ["A", "B", "C"], "priority": 1}),
+            [{"places": ["A", "B", "C"], "priority": 1}],
         )
 
     def test_branched_expands_to_the_flat_subroutes(self):
@@ -1027,14 +1035,64 @@ class BranchedRouteExpansionTests(SimpleTestCase):
             ],
         }
         self.assertEqual(
-            expand_route(route),
+            self._chains(route),
             [["A", "B", "C", "D", "E"], ["X", "C", "D", "E"]],
         )
 
     def test_tail_may_be_a_single_stop(self):
         # Heads converging straight into the destination — an alternate final approach.
         route = {"places": ["B"], "priority": 0, "branches": [{"places": ["A"]}, {"places": ["Q"]}]}
-        self.assertEqual(expand_route(route), [["A", "B"], ["Q", "B"]])
+        self.assertEqual(self._chains(route), [["A", "B"], ["Q", "B"]])
+
+
+class HeadPriorityTests(SimpleTestCase):
+    """A head may rate the corridor it generates without touching its siblings."""
+
+    def _priorities(self, route):
+        return [subroute["priority"] for subroute in expand_route(route)]
+
+    def test_head_priority_applies_to_its_own_subroute_only(self):
+        # Two heads into a shared tail; only the second is downgraded.
+        route = {
+            "places": ["J", "T"],
+            "priority": 0,
+            "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 2}],
+        }
+        self.assertEqual(self._priorities(route), [0, 2])
+        # The tail is ridden by both, at each rider's own priority — the head's
+        # rating covers the whole corridor it generates, tail included.
+        self.assertEqual(
+            [s["places"] for s in expand_route(route)], [["H1", "J", "T"], ["H2", "J", "T"]]
+        )
+
+    def test_head_without_a_priority_inherits_the_route_default(self):
+        route = {
+            "places": ["J", "T"],
+            "priority": 2,
+            "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 0}],
+        }
+        self.assertEqual(self._priorities(route), [2, 0])
+
+    def test_priority_inherits_down_the_spine_and_the_nearest_wins(self):
+        # Tail D,E; head C (rated 1) splits into A,B (unrated → 1) and X (rated 3).
+        route = {
+            "places": ["D", "E"],
+            "priority": 0,
+            "branches": [
+                {
+                    "places": ["C"],
+                    "priority": 1,
+                    "branches": [{"places": ["A", "B"]}, {"places": ["X"], "priority": 3}],
+                },
+                {"places": ["Y"]},
+            ],
+        }
+        self.assertEqual(self._priorities(route), [1, 3, 0])
+
+    def test_zero_on_a_head_overrides_rather_than_reads_as_absent(self):
+        # 0 is falsy *and* the best priority — it must still beat an inherited 3.
+        route = {"places": ["T"], "priority": 3, "branches": [{"places": ["H"], "priority": 0}]}
+        self.assertEqual(self._priorities(route), [0])
 
 
 class BranchedRouteStorageTests(R2BackedTestCase):
@@ -1089,6 +1147,75 @@ class BranchedRouteStorageTests(R2BackedTestCase):
             self.db.save_routes(
                 [{"places": ["A", "B"], "priority": 0, "branches": [{"places": []}]}]
             )
+
+    def test_roundtrip_preserves_a_head_priority(self):
+        saved = self.db.save_routes(
+            [
+                {
+                    "places": ["J", "T"],
+                    "priority": 0,
+                    "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 2}],
+                }
+            ]
+        )
+        self.assertEqual(saved, self.db.load_routes())
+        # Stated on the head that has one, absent on the head that inherits.
+        self.assertEqual(saved[0]["branches"], [{"places": ["H1"]}, {"places": ["H2"], "priority": 2}])
+
+    def test_load_graph_rates_each_head_separately(self):
+        self.db.save_routes(
+            [
+                {
+                    "places": ["J", "T"],
+                    "priority": 0,
+                    "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 3}],
+                }
+            ]
+        )
+        graph = self.db.load_graph()
+        # Leaf 0 (H1) inherits the route's 0; leaf 1 (H2) rides at its own 3.
+        self.assertEqual([graph.route_priority(0), graph.route_priority(1)], [0, 3])
+        # The shared tail carries both subroutes, so its *edge* priority is the
+        # better of them — a head's downgrade doesn't spoil the road for its sibling.
+        self.assertEqual(graph.edge_priority("J", "T"), 0)
+
+    def test_rejects_out_of_range_head_priority(self):
+        with self.assertRaises(ValidationError):
+            self.db.save_routes(
+                [{"places": ["T"], "priority": 0, "branches": [{"places": ["A"], "priority": 9}]}]
+            )
+
+    def test_rejects_non_int_head_priority(self):
+        with self.assertRaises(ValidationError):
+            self.db.save_routes(
+                [{"places": ["T"], "priority": 0, "branches": [{"places": ["A"], "priority": True}]}]
+            )
+
+    def test_head_priority_matches_authoring_the_subroutes_flat(self):
+        """The whole point: a rated head is exactly the equivalent flat route."""
+        flat_db = Database(prefix="flat")
+        tree_db = Database(prefix="tree")
+        flat_db.save_routes(
+            [
+                {"places": ["H1", "J", "T"], "priority": 0},
+                {"places": ["H2", "J", "T"], "priority": 3},
+            ]
+        )
+        tree_db.save_routes(
+            [
+                {
+                    "places": ["J", "T"],
+                    "priority": 0,
+                    "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 3}],
+                }
+            ]
+        )
+        flat_graph, tree_graph = flat_db.load_graph(), tree_db.load_graph()
+        self.assertEqual(flat_graph.edge_routes_records, tree_graph.edge_routes_records)
+        self.assertEqual(
+            [flat_graph.route_priority(i) for i in (0, 1)],
+            [tree_graph.route_priority(i) for i in (0, 1)],
+        )
 
     def test_pathfinding_matches_flat_authoring(self):
         flat_db = Database(prefix="flat")

@@ -22,12 +22,16 @@ export function priorityLabel(priority) {
 }
 
 /**
- * Every selectable priority, in order — feeds the routes editor's dropdown.
- * The label carries the whole phrase (`עדיפות א׳`), so the control reads as one
- * unit rather than a bare letter sitting next to a separate caption.
+ * Every selectable priority, in order — feeds every priority picker in the routes
+ * editor (a plain route's, and each head of a branched one). The label carries the
+ * whole phrase (`עדיפות א׳`), so the control reads as one unit rather than a bare
+ * letter sitting next to a separate caption.
  */
+// `priority` doubles `value`; it's the field every renderer reads for the dot and
+// the letter, so an option always carries what it *shows* under one name.
 export const PRIORITY_OPTIONS = PRIORITY_LETTERS.map((_, value) => ({
   value,
+  priority: value,
   label: priorityLabel(value),
 }));
 

@@ -10,11 +10,16 @@
  *   - a node's `branches` are upstream heads whose last stop is adjacent to this
  *     node's first stop (`places[0]`); they nest — a head can split further
  *     upstream into sub-heads.
- *   - the root also carries `priority` (one per whole tree; heads carry none).
+ *   - priority is per *head*, not per route: a head's rating covers the corridor it
+ *     generates (itself down the shared tail) and no sibling's. The root's own
+ *     `priority` is a plain route's one rating, and the fallback any head that was
+ *     never rated still rides at — see `effectivePriority`.
  *
  * A node is addressed by a `path` array of branch indices: `[]` is the root
  * (tail), `[0]` its first head, `[0, 1]` that head's second sub-head, and so on.
  */
+
+import { BEST_PRIORITY } from "./priorities.js";
 
 /** A node's heads (`[]` when it has none / the field is absent). */
 function branchesOf(node) {
@@ -23,22 +28,41 @@ function branchesOf(node) {
 
 const isLeaf = (node) => branchesOf(node).length === 0;
 
+/** A node's *own* priority declaration — `null` when it inherits one. */
+function declaredPriority(node) {
+  return node?.priority ?? null;
+}
+
 /**
  * Flatten a route to its subroutes — the chain from each *leaf* head down the
- * shared tail to the destination (`leaf.places + … + root.places`). A flat route
- * (no branches) is its own sole leaf and yields exactly `[route.places]`.
+ * shared tail to the destination (`leaf.places + … + root.places`), each with the
+ * priority it rides at. A flat route (no branches) is its own sole leaf and yields
+ * exactly one entry for `route.places`.
+ *
+ * Priority is resolved on the way down, exactly as the backend does it: a leaf
+ * rides at its own declaration if it has one, otherwise its nearest ancestor's. So
+ * rating one head rates only the corridors that descend from it — a sibling head
+ * resolves down its own spine and never sees it.
  */
 export function expandRoute(route) {
   const leaves = [];
-  const walk = (node, downstream) => {
+  const walk = (node, downstream, inherited) => {
     // `downstream` is the chain from this node's parent junction to the
     // destination; this node's own stops flow into its front.
     const full = [...node.places, ...downstream];
-    if (isLeaf(node)) leaves.push(full);
-    else for (const head of branchesOf(node)) walk(head, full);
+    const priority = declaredPriority(node) ?? inherited;
+    if (isLeaf(node)) leaves.push({ places: full, priority });
+    else for (const head of branchesOf(node)) walk(head, full, priority);
   };
-  walk(route, []);
+  walk(route, [], BEST_PRIORITY);
   return leaves;
+}
+
+/** Every distinct priority ridden by this route's subroutes, best first. */
+export function routePriorities(route) {
+  return [...new Set(expandRoute(route).map((r) => r.priority))].sort(
+    (a, b) => a - b,
+  );
 }
 
 /** Every stop name in a route (tail + all heads, recursive). */
@@ -86,6 +110,28 @@ export function patchNodePlaces(route, path, places) {
 }
 
 /**
+ * The priority the node at `path` rides at: its own declaration, else the nearest
+ * one above it (the root's, ultimately). A head only *has* its own once someone
+ * rates it — routes authored before per-head priorities, and heads never touched
+ * since, still ride at the route's, and this is what reports that.
+ */
+export function effectivePriority(route, path) {
+  let node = route;
+  let priority = declaredPriority(route) ?? BEST_PRIORITY;
+  for (const i of path) {
+    node = branchesOf(node)[i];
+    priority = declaredPriority(node) ?? priority;
+  }
+  return priority;
+}
+
+/** State the priority of the node at `path` outright (heads are never left unset
+ *  once rated — there is no route-wide priority behind them to defer to). */
+export function setNodePriority(route, path, priority) {
+  return updateAt(route, path, (node) => ({ ...node, priority }));
+}
+
+/**
  * Branch the segment at `path` at `splitIndex` (an index into its `places`): the
  * stops from `splitIndex` on become the shared tail, the stops before it become
  * one head, and a fresh empty head is added beside it — two equal siblings
@@ -120,6 +166,10 @@ export function branchAt(route, path, splitIndex) {
  * head, the parent collapses — the lone head's stops fold back onto the front of
  * the parent's tail (and the head's own sub-heads become the parent's), so a
  * junction never lingers with just one way through it.
+ *
+ * The merged segment takes the surviving head's priority when it declared one:
+ * that head's rating is what the corridors running through it ride at, and folding
+ * the two segments into one must not silently re-rate them to the tail's.
  */
 export function removeBranch(route, path) {
   const parentPath = path.slice(0, -1);
@@ -129,10 +179,9 @@ export function removeBranch(route, path) {
     if (kept.length !== 1) return withBranches(parent, kept);
     // Collapse: the sole remaining head merges into the parent's tail.
     const [only] = kept;
-    return withBranches(
-      { ...parent, places: [...only.places, ...parent.places] },
-      branchesOf(only),
-    );
+    const merged = { ...parent, places: [...only.places, ...parent.places] };
+    if (declaredPriority(only) !== null) merged.priority = only.priority;
+    return withBranches(merged, branchesOf(only));
   });
 }
 

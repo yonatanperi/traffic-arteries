@@ -9,10 +9,13 @@ import {
   IconMinus,
   IconFit,
 } from "../../ui/icons";
+import PrioritySelect from "./PrioritySelect";
 import {
   branchAt,
   removeBranch,
   patchNodePlaces,
+  effectivePriority,
+  setNodePriority,
 } from "../../../utils/branches.js";
 import { ScaleRefContext } from "./scaleContext.js";
 import "./BranchedChain.css";
@@ -68,6 +71,10 @@ function measureFitScale(ref) {
  * Every segment is an <EditableRouteChain>; its "+" offers "add stop" or "branch"
  * (split at that gap into converging heads). Emits the whole next route object, so
  * the route's priority rides along untouched.
+ *
+ * Each head also carries its own <PrioritySelect> at its tip: a branched route has
+ * no single priority — each head rates the corridor it generates (itself → down the
+ * shared tail → the destination), and rating one leaves its siblings alone.
  *
  * props:
  *   route     { places, priority, branches? } — the whole tree
@@ -273,16 +280,32 @@ function TreeNode({ ctx, node, path, bracket = false }) {
           const headPath = [...path, i];
           return (
             <li className="tnode-head" key={i}>
-              <IconButton
-                size="sm"
-                danger
-                className="tnode-remove"
-                ariaLabel="מחק ראש"
-                title="מחק ראש"
-                onClick={() => ctx.onChange(removeBranch(ctx.route, headPath))}
-              >
-                <IconClose size={13} />
-              </IconButton>
+              <div className="tnode-head-tools">
+                <IconButton
+                  size="sm"
+                  danger
+                  className="tnode-remove"
+                  ariaLabel="מחק ראש"
+                  title="מחק ראש"
+                  onClick={() => ctx.onChange(removeBranch(ctx.route, headPath))}
+                >
+                  <IconClose size={13} />
+                </IconButton>
+                {/* The head's priority — it rates every corridor that runs from
+                    here down the shared tail, and nothing else in the tree. Shown
+                    as the priority the head *rides at*, which for a head that has
+                    never been rated is the one it takes from the segment it
+                    converges into; picking a value here always states it outright. */}
+                <PrioritySelect
+                  compact
+                  value={effectivePriority(ctx.route, headPath)}
+                  onChange={(priority) =>
+                    ctx.onChange(setNodePriority(ctx.route, headPath, priority))
+                  }
+                  aria-label="עדיפות הראש"
+                  title="עדיפות המסלול מראש זה ועד היעד. אינה משפיעה על ראשים אחרים."
+                />
+              </div>
               <span className="tnode-bracket" aria-hidden="true" />
               <div className="tnode-head-body">
                 <TreeNode ctx={ctx} node={head} path={headPath} />

@@ -179,10 +179,19 @@
   background: var(--border-strong);
 }
 
-/* Per-head delete — sits at the head's upstream tip. */
-.tnode-remove {
+/* Per-head controls — delete over priority, stacked at the head's upstream tip so
+   they cost the tree width once, not twice. Centred on the head's own vertical
+   middle, like the connector stub opposite them. */
+.tnode-head-tools {
   flex-shrink: 0;
   align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.tnode-remove {
+  flex-shrink: 0;
 }
 
 .tnode-warn {

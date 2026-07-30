@@ -19,8 +19,8 @@ import Pill from "../../ui/Pill";
 import IconButton from "../../ui/IconButton";
 import EditableList from "../../ui/EditableList";
 import EditableGroupRow from "../../ui/EditableGroupRow";
-import Select from "../../ui/Select";
 import BranchedChain from "./BranchedChain";
+import PrioritySelect, { PriorityDot } from "./PrioritySelect";
 import {
   IconSearch,
   IconAlert,
@@ -32,6 +32,7 @@ import {
 import {
   expandRoute,
   routeStops,
+  routePriorities,
   cloneRoute,
   renameStop,
   leafCount,
@@ -43,8 +44,9 @@ import {
 } from "../../../hooks/useUrlParams.js";
 import {
   BEST_PRIORITY,
-  PRIORITY_OPTIONS,
   isDowngraded,
+  priorityLabel,
+  priorityLetter,
 } from "../../../utils/priorities.js";
 import "./RouteEditor.css";
 
@@ -114,7 +116,7 @@ function analyzeConnectivity(routes) {
   // A branched route contributes every subroute's edges (a branch connects into
   // the trunk), so expand each route to its chains before unioning.
   routes.forEach((route) => {
-    expandRoute(route).forEach((places) => {
+    expandRoute(route).forEach(({ places }) => {
       places.forEach((place) => find(place));
       for (let i = 1; i < places.length; i++) {
         union(places[i - 1], places[i]);
@@ -144,7 +146,9 @@ function analyzeConnectivity(routes) {
  * Full editor for the routes list.
  *
  * props:
- *   routes     array of { places: [place names], priority: 0..3 } (0 = best)
+ *   routes     array of { places: [place names], priority: 0..3 } (0 = best), each
+ *              optionally branched — see utils/branches.js. A branched route's
+ *              `priority` is the tree default; a head may state its own.
  *   onChange   (nextRoutes) => void
  *   suggestions  list of known place names (feeds the add-stop dropdown)
  *   compromisedPlaces  Set of destination names currently marked unavailable
@@ -407,24 +411,6 @@ export default function RouteEditor({
   );
 }
 
-/**
- * A priority option: a dot shaded by how far the priority is from the best, then
- * the label. The ramp is what a bare letter can't convey — that these four values
- * are ordered, and that picking a later one costs the route something.
- */
-function renderPriorityOption(option) {
-  return (
-    <>
-      <span
-        className="priority-dot"
-        style={{ "--priority-step": option.value }}
-        aria-hidden="true"
-      />
-      {option.label}
-    </>
-  );
-}
-
 function RouteRow({
   id,
   index,
@@ -445,7 +431,19 @@ function RouteRow({
 }) {
   const { places, priority } = route;
   const origins = leafCount(route); // number of converging origin heads (1 = plain)
-  const branched = origins > 1;
+  // Whether this route is a *tree* — asked of the branches themselves, not of the
+  // leaf count: a route with a single head still has a head chip to rate, a tail
+  // that may be one stop, and no meaningful "reverse", exactly like a bushier one.
+  const branched = (route.branches?.length ?? 0) > 0;
+  // The priorities the route's corridors actually ride at — one per head on a tree.
+  // The *worst* is what the card warns about (one bad corridor is enough). A tree
+  // has no priority control in its header, so the badge below is where the header
+  // says anything about rating at all — worth showing as soon as there's something
+  // to say: more than one value, or a downgrade.
+  const ridden = routePriorities(route);
+  const worstPriority = ridden[ridden.length - 1];
+  const showPrioritySpread =
+    branched && (ridden.length > 1 || isDowngraded(worstPriority));
   // Hovering the reverse button previews the flipped order (via the chain's own
   // drag-reorder animation) without touching the route — nothing persists until
   // the click. Leaving without clicking just lets the preview relax back.
@@ -478,7 +476,7 @@ function RouteRow({
     disconnected && "route-row--disconnected",
     hasCompromised && "route-row--compromised",
     pinned && "route-row--pinned",
-    isDowngraded(priority) && "route-row--downgraded",
+    isDowngraded(worstPriority) && "route-row--downgraded",
     isDragging && "route-row--dragging",
   ]
     .filter(Boolean)
@@ -498,13 +496,27 @@ function RouteRow({
                 ? `יעד: ${destination}`
                 : `${places[0]} - ${destination}`}
             </Pill>
-            {branched && (
+            {origins > 1 && (
               <Pill
                 size="sm"
                 className="route-branch-count"
                 title="מספר המקורות המתכנסים אל היעד"
               >
                 <IconBranch size={12} /> {`${origins} מקורות`}
+              </Pill>
+            )}
+            {showPrioritySpread && (
+              <Pill
+                size="sm"
+                className="route-priority-spread"
+                title="העדיפויות שנקבעו לראשי הציר. לכל ראש עדיפות משלו — היא חלה על המסלול מאותו ראש ועד היעד."
+              >
+                {ridden.map((p) => (
+                  <PriorityDot key={p} priority={p} />
+                ))}
+                {ridden.length > 1
+                  ? `עדיפויות ${ridden.map(priorityLetter).join(", ")}`
+                  : priorityLabel(worstPriority)}
               </Pill>
             )}
           </>
@@ -534,19 +546,18 @@ function RouteRow({
       }
       actions={
         <>
-          <Select
-            size="md"
-            className={
-              "route-priority" +
-              (isDowngraded(priority) ? " route-priority--downgraded" : "")
-            }
-            value={priority}
-            onChange={onChangePriority}
-            options={PRIORITY_OPTIONS}
-            renderOption={renderPriorityOption}
-            aria-label={`עדיפות ציר ${index + 1}`}
-            title="עדיפות הציר — א׳ היא הטובה ביותר. ציר בעדיפות נמוכה ישמש רק אם אין דרך אחרת."
-          />
+          {/* Only a plain corridor has *one* priority to state. A tree doesn't: each
+              head generates its own corridor and is rated on its own head chip, so a
+              route-level picker here would be claiming a rating the router never
+              applies. The header reports the spread instead (see the badge). */}
+          {!branched && (
+            <PrioritySelect
+              value={priority}
+              onChange={onChangePriority}
+              aria-label={`עדיפות ציר ${index + 1}`}
+              title="עדיפות הציר — א׳ היא הטובה ביותר. ציר בעדיפות נמוכה ישמש רק אם אין דרך אחרת."
+            />
+          )}
           <IconButton
             className={"route-pin" + (pinned ? " route-pin--on" : "")}
             ariaLabel={
