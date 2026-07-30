@@ -10,7 +10,7 @@ from moto import mock_aws
 
 from . import db as db_module
 from .db import Database, ValidationError, expand_route, expand_routes
-from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
+from .graph import TIER_EXEMPT_LENGTH, Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
 from .graph.search import MinMergeStrategy, avoid_priority_penalty
 from utils.r2_storage import storage
 
@@ -514,26 +514,29 @@ class ConcentrationTests(SimpleTestCase):
 # Two S->T corridors that put the tier and the score in direct conflict:
 #   * the "patchwork" [S, c1, c2, c3, T] stitches four *well-rated* routes — poorly
 #     concentrated (it transfers at every stop) but never leaves priority 0.
-#   * the "clean ride" [S, q1, q2, T] is a single artery end to end — perfectly
-#     concentrated, and shorter — but that artery is rated below best.
-# Stubs (routes 5..9) make the interior nodes crossroads so they carry length.
+#   * the "clean ride" [S, q1, q2, q3, T] is a single artery end to end — perfectly
+#     concentrated, and shorter — but that artery is rated below best. Its run is 4
+#     edges long, past TIER_EXEMPT_LENGTH (3), so the downgrade still bites — see
+#     PriorityTierExemptionTests for a run short enough to be exempt.
+# Stubs (routes 5..10) make the interior nodes crossroads so they carry length.
 PRIORITY_ROUTES = [
     ["S", "c1"],              # 0: patchwork, leg 1
     ["c1", "c2"],             # 1: patchwork, leg 2
     ["c2", "c3"],             # 2: patchwork, leg 3
     ["c3", "T"],              # 3: patchwork, leg 4
-    ["S", "q1", "q2", "T"],   # 4: the clean single artery
-    ["c1", "z1"],             # 5..9: stubs -> the interior nodes are crossroads
+    ["S", "q1", "q2", "q3", "T"],   # 4: the clean single artery
+    ["c1", "z1"],             # 5..10: stubs -> the interior nodes are crossroads
     ["c2", "z2"],
     ["c3", "z3"],
     ["q1", "z4"],
     ["q2", "z5"],
+    ["q3", "z6"],
 ]
 # Only the clean artery is downgraded; every other route stays best-priority.
-DOWNGRADED_ARTERY = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+DOWNGRADED_ARTERY = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
 
-PATCHWORK = ["S", "c1", "c2", "c3", "T"]   # tier 0, score 0.28 — badly concentrated
-CLEAN_RIDE = ["S", "q1", "q2", "T"]        # tier 1, score 0.80 — but poorly rated
+PATCHWORK = ["S", "c1", "c2", "c3", "T"]         # tier 0, score 0.25 — badly concentrated
+CLEAN_RIDE = ["S", "q1", "q2", "q3", "T"]        # tier 1, score 1.0 — but poorly rated
 
 
 class PriorityTests(SimpleTestCase):
@@ -607,6 +610,35 @@ class PriorityTests(SimpleTestCase):
         # Unconstrained, the same search takes the clean (downgraded) artery — which
         # is exactly why the tier-clean corridor needs a pass of its own.
         self.assertEqual(strategy.find({})[0], CLEAN_RIDE)
+
+
+class PriorityTierExemptionTests(SimpleTestCase):
+    """A run of length <= TIER_EXEMPT_LENGTH doesn't count against the tier,
+    whatever its artery is rated: briefly touching a downgraded artery isn't the
+    same as riding it. A longer run on the very same artery still inherits the
+    downgrade normally — this only softens *short* rides."""
+
+    SHORT_RIDE = ["S", "p1", "p2", "T"]         # 3 edges == TIER_EXEMPT_LENGTH
+    LONG_RIDE = ["S", "p1", "p2", "p3", "T"]    # 4 edges: past the threshold
+
+    def test_a_short_ride_on_a_downgraded_artery_is_exempt(self):
+        self.assertEqual(len(self.SHORT_RIDE) - 1, TIER_EXEMPT_LENGTH)
+        graph = Graph.from_routes([self.SHORT_RIDE], [2])
+        self.assertEqual(tier(graph, self.SHORT_RIDE), 0)
+
+    def test_a_longer_ride_on_the_same_artery_is_not_exempt(self):
+        self.assertGreater(len(self.LONG_RIDE) - 1, TIER_EXEMPT_LENGTH)
+        graph = Graph.from_routes([self.LONG_RIDE], [2])
+        self.assertEqual(tier(graph, self.LONG_RIDE), 2)
+
+    def test_exemption_does_not_touch_the_raw_run_priority(self):
+        # tier() reads tier_priority(run) for the arena; the raw run.priority (what
+        # the UI chip shows, and what the DP's tie-break weights) still reports the
+        # artery's true rating regardless of the exemption.
+        graph = Graph.from_routes([self.SHORT_RIDE], [2])
+        _, runs = evaluate(graph, self.SHORT_RIDE)
+        self.assertEqual([r.priority for r in runs], [2])
+        self.assertEqual(tier(graph, self.SHORT_RIDE), 0)
 
 
 class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):

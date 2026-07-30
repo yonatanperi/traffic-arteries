@@ -40,7 +40,7 @@ than once over a single ranked pool.
 
 import itertools
 
-from .concentration import LengthMode, PriorityMode, evaluate
+from .concentration import LengthMode, PriorityMode, evaluate, tier_priority
 from .core import BEST_PRIORITY, path_edges
 from .search import (
     TRANSFER_WEIGHT,
@@ -359,9 +359,11 @@ class RouteFinder:
     def _make_route(self, nodes):
         """Wrap a stop chain in a scored :class:`Route` (exact concentration + tier).
 
-        The tier is the worst priority among the sub-routes :func:`evaluate` credits
-        (the chips the UI shows), so it is read straight off ``runs`` rather than
-        recomputed — see :func:`~.concentration.tier`.
+        The tier is the worst tier-priority among the sub-routes :func:`evaluate`
+        credits (the chips the UI shows), so it is read straight off ``runs``
+        rather than recomputed — see :func:`~.concentration.tier` (this inlines the
+        same :func:`~.concentration.tier_priority` reduction to avoid a second,
+        redundant :func:`evaluate` solve).
 
         One solve answers both: :func:`~.concentration.evaluate` maximises the plain
         concentration and uses priority only to break ties between equally
@@ -369,7 +371,7 @@ class RouteFinder:
         priority-free while the tier still names the arteries actually ridden.
         """
         hhi, runs = evaluate(self.graph, nodes)
-        priority = max((run.priority for run in runs), default=BEST_PRIORITY)
+        priority = max((tier_priority(run) for run in runs), default=BEST_PRIORITY)
         return Route(nodes, hhi, runs, self._crossroad_hops(nodes), priority)
 
     def _bidirectional_chains(self, forward, reverse):

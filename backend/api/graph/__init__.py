@@ -15,7 +15,8 @@ The public objects:
   * :class:`PriorityMode` — static flag toggling whether priority is a hard tier or
     only a weight on the score.
   * :func:`evaluate` scores a chain; :func:`tier` gives the worst priority among
-    the sub-routes it rides.
+    the sub-routes it rides, reading each run's :func:`tier_priority` — 0 for a
+    run of length ``<= TIER_EXEMPT_LENGTH``, its real priority otherwise.
 
 Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.search`
 (single-route generator strategies over ``(node, active-route)`` state),
@@ -23,7 +24,7 @@ Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.search`
 generation, scoring and diverse selection).
 """
 
-from .concentration import LengthMode, PriorityMode, evaluate, tier
+from .concentration import TIER_EXEMPT_LENGTH, LengthMode, PriorityMode, evaluate, tier, tier_priority
 from .core import BEST_PRIORITY, WORST_PRIORITY, Graph
 from .routing import Route, RouteFinder
 
@@ -35,6 +36,8 @@ __all__ = [
     "PriorityMode",
     "BEST_PRIORITY",
     "WORST_PRIORITY",
+    "TIER_EXEMPT_LENGTH",
     "evaluate",
     "tier",
+    "tier_priority",
 ]

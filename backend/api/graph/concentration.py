@@ -12,7 +12,10 @@ well-rated arteries beats one whose concentrated corridor rides a badly-rated on
 *however long the detour*. Because the tier reads the ridden sub-routes, a road
 that is *also* served by a good route only escapes the downgrade when riding it as
 that good route is at least as concentrated — otherwise the concentrated way to
-ride it is the bad one, and the tier says so.
+ride it is the bad one, and the tier says so. A run of length ``<=
+TIER_EXEMPT_LENGTH`` is exempt from this regardless (:func:`tier_priority`): a
+brief touch of a few edges isn't a *ride*, so it doesn't downgrade the tier —
+only a run past that length inherits its artery's rating.
 
 **2. The score** (:func:`evaluate`) — *how well* does it ride them? For a route split
 into maximal contiguous runs ``r_1 … r_n``, each on a single authored route, we take
@@ -80,6 +83,27 @@ class LengthMode:
 # two priority-0 arteries (0.5), but riding one priority-3 artery (0.4) loses to it.
 PRIORITY_STEP = 0.2
 
+# A run this short or shorter (in the active LengthMode's units) doesn't count
+# against the tier, whatever the ridden artery is rated: it's a brief touch, not
+# a ride. Only :func:`tier_priority` reads this — the raw `run.priority` (the chip
+# shown in the UI, and the tie-break weights above) is untouched.
+TIER_EXEMPT_LENGTH = 3
+
+
+def tier_priority(run):
+    """The priority a run counts as *for the tier only* — 0 if it's short enough.
+
+    A run of length ``<= TIER_EXEMPT_LENGTH`` is exempt: briefly touching a
+    badly-rated artery for a handful of edges doesn't downgrade the whole route,
+    only genuinely *riding* one does. Longer runs keep their real
+    ``run.priority``. This never touches ``run.priority`` itself — that field
+    still reports the artery's true rating for display and for the DP's
+    priority tie-break.
+    """
+    if run.length <= TIER_EXEMPT_LENGTH:
+        return BEST_PRIORITY
+    return run.priority
+
 
 class PriorityMode:
     """Static switch for how hard route priority bites (flip to experiment).
@@ -125,25 +149,27 @@ def _route_weight(graph, route_id):
 
 
 def tier(graph, stops):
-    """The route's priority: the worst priority among the sub-routes it *rides*.
+    """The route's priority: the worst tier-priority among the sub-routes it *rides*.
 
     The sub-routes are the maximal single-route runs of the max-HHI credit
     assignment (:func:`evaluate`) — exactly the breakdown the UI shows as chips. A
     route is therefore rated by the arteries it actually rides: if riding one
     authored route as far as possible means riding a downgraded one, the route
-    inherits that downgrade.
+    inherits that downgrade — unless the ride is short enough to be exempt, see
+    :func:`tier_priority`.
 
     This is deliberately **assignment-dependent**. An edge may also be served by a
     better-rated route, but that only rescues the tier when riding it *as* that
     better route is at least as concentrated — because then :func:`evaluate` credits
     the run there anyway (a higher weight at equal length scores higher). When the
     downgraded route is the only one that spans the stretch in a single run, that is
-    genuinely the corridor being ridden, and the tier says so. Contrast
-    :meth:`~.core.Graph.edge_priority`, the *per-edge* best, which the generators use
-    to hunt for a physically different, better-rated corridor.
+    genuinely the corridor being ridden, and the tier says so (unless it's a brief
+    touch, per :func:`tier_priority`). Contrast :meth:`~.core.Graph.edge_priority`,
+    the *per-edge* best, which the generators use to hunt for a physically
+    different, better-rated corridor.
     """
     _, runs = evaluate(graph, stops)
-    return max((run.priority for run in runs), default=BEST_PRIORITY)
+    return max((tier_priority(run) for run in runs), default=BEST_PRIORITY)
 
 
 def evaluate(graph, stops):
