@@ -48,6 +48,15 @@ const toItem = (value) => ({ id: `stop-${uid++}`, value });
 const sameValues = (a, b) =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
+// Typing (or pasting) "X, Y" into a stop editor means two stops, not one
+// pill literally named "X, Y" — split on commas and drop empties (a
+// trailing/doubled comma), regardless of the exact spacing around them.
+const splitStops = (text) =>
+  text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
 // A stop is "highlighted" if its value matches any of the active search terms.
 // `highlight` may be a single lowercased string (results usage) or an array of
 // lowercased terms (the editor's multi-filter search).
@@ -234,26 +243,40 @@ export default function EditableRouteChain({
   // `keepAdding` is set when the commit came from Enter / picking a suggestion,
   // so a fresh add can immediately roll into the next one.
   function commitEdit(id, value, keepAdding) {
-    const text = value.trim();
     const prev = items.find((it) => it.id === id);
     const wasAdding = id === addingId;
+    // A comma-separated commit (typed or pasted) fans out into one item per
+    // part, in place of the single item being edited; the first part reuses
+    // its id so the pill keeps its identity, the rest are fresh items.
+    const parts = splitStops(value);
+    const replacement = parts.map((v, i) =>
+      i === 0 ? { ...prev, value: v } : toItem(v),
+    );
 
-    const next = text
-      ? items.map((it) => (it.id === id ? { ...it, value: text } : it))
-      : items.filter((it) => it.id !== id);
+    const next = items.flatMap((it) => (it.id === id ? replacement : [it]));
     setItems(next);
     setAddingId(null);
     emit(next);
 
-    // Renaming an existing stop: let the parent offer to change every instance.
-    if (text && !wasAdding && prev && prev.value && prev.value !== text) {
-      onRenameStop?.(prev.value, text);
+    // Renaming an existing stop: only a genuine 1:1 rename (no split, no
+    // clearing) qualifies — the parent's "propagate everywhere" prompt makes
+    // no sense once the edit fans out into several stops.
+    if (
+      parts.length === 1 &&
+      !wasAdding &&
+      prev &&
+      prev.value &&
+      prev.value !== parts[0]
+    ) {
+      onRenameStop?.(prev.value, parts[0]);
     }
 
-    // Continuous add: after committing a freshly-added stop via Enter/select,
-    // open a new empty stop right after it so the user can keep adding.
-    if (text && wasAdding && keepAdding) {
-      const idx = next.findIndex((it) => it.id === id);
+    // Continuous add: after committing a freshly-added stop (or a pasted run
+    // of several) via Enter/select, open a new empty stop right after the
+    // last one so the user can keep adding.
+    if (replacement.length && wasAdding && keepAdding) {
+      const lastId = replacement[replacement.length - 1].id;
+      const idx = next.findIndex((it) => it.id === lastId);
       const fresh = toItem("");
       const withNew = next.slice();
       withNew.splice(idx + 1, 0, fresh);

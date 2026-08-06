@@ -11,7 +11,7 @@ from moto import mock_aws
 from . import db as db_module
 from .db import Database, ValidationError, expand_route, expand_routes
 from .graph import TIER_EXEMPT_LENGTH, Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
-from .graph.search import MinMergeStrategy, avoid_priority_penalty
+from .graph.search import MinMergeStrategy, avoid_priority_penalty, prefer_route_penalty
 from utils.r2_storage import storage
 
 @contextlib.contextmanager
@@ -146,6 +146,19 @@ class WaypointTests(SimpleTestCase):
     ]
     LONG_FRAGMENTED = ["A", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "C", "B"]
 
+    # A *through* stop: V hangs off the highway at J but has its own way onward to
+    # T, so nothing forces a route through it to double back. That way onward is
+    # deliberately fragmented (routes 2..4), which makes retracing J the route with
+    # *fewer* transfers — i.e. the one the generator would return if revisits were
+    # free. This is the shape of the live network's "via צ. רבדים" query.
+    THROUGH_STOP_ROUTES = [
+        ["S", "h1", "J", "h2", "T"],  # 0: one highway, end to end
+        ["J", "V"],                   # 1: the turn-off onto V
+        ["V", "c1"],                  # 2..4: V's own way onward, transferring
+        ["c1", "c2"],                 #       at every stop
+        ["c2", "T"],
+    ]
+
     def setUp(self):
         self.finder = RouteFinder(Graph.from_routes(self.WAYPOINT_ROUTES))
 
@@ -172,6 +185,23 @@ class WaypointTests(SimpleTestCase):
         for p in self.finder.k_shortest_paths("A", "B", via=["P"]):
             for leg in self._legs(p, {"P"}):
                 self.assertEqual(len(leg), len(set(leg)), f"leg loops on itself: {leg}")
+
+    def test_no_avoidable_retracing(self):
+        # Retracing is a last resort, not a free move: V can be driven straight
+        # through, so no candidate may back out of it onto the highway — even
+        # though that route merges fewer authored routes than carrying on does.
+        finder = RouteFinder(Graph.from_routes(self.THROUGH_STOP_ROUTES))
+        paths = finder.k_shortest_paths("S", "T", via=["V"])
+        self.assertTrue(paths, "no route through the required stop")
+        for p in paths:
+            self.assertEqual(len(p), len(set(p)), f"route doubles back needlessly: {p}")
+
+    def test_retracing_is_no_more_than_forced(self):
+        # When retracing *is* forced, it is minimal: leaving the P spur costs one
+        # revisit — C, the node P hangs off — and every other node is driven once.
+        for p in self.finder.k_shortest_paths("A", "B", via=["P"]):
+            repeated = sorted(node for node in set(p) if p.count(node) > 1)
+            self.assertEqual(repeated, ["C"], f"route retraces more than forced: {p}")
 
     def test_dead_end_stop_is_reachable(self):
         # P hangs off C by a single edge, so the only way out of P is back through
@@ -537,6 +567,63 @@ DOWNGRADED_ARTERY = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
 
 PATCHWORK = ["S", "c1", "c2", "c3", "T"]         # tier 0, score 0.25 — badly concentrated
 CLEAN_RIDE = ["S", "q1", "q2", "q3", "T"]        # tier 1, score 1.0 — but poorly rated
+
+
+class ArteryPairTests(SimpleTestCase):
+    """A corridor made of *two* long arteries in sequence must reach the pool.
+
+    Biasing toward one artery fills everything around it with whatever is
+    shortest, not whatever is most concentrated — an off-artery edge and a route
+    transfer cost the same in the generator. So each artery's own pass pairs it
+    with the cheap fragmented filler, and the corridor that rides both never gets
+    proposed. This is the live ``מחסום בזק -> צאלים via צ. רבדים`` case, boiled
+    down to the smallest network that reproduces it.
+    """
+
+    # S -> M by one long road (A, 6 hops) or a short fragmented pair (P+Q, 4);
+    # M -> E by a long trunk plus tail (T 8 + L 2) or four one-hop scraps (r1..r4).
+    PAIR_ROUTES = [
+        ["S", "a1", "a2", "a3", "a4", "a5", "M"],              # 0: A, the long approach
+        ["S", "p1", "X"],                                      # 1: P }  short but
+        ["X", "q1", "M"],                                      # 2: Q }  fragmented
+        ["M", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "N"],  # 3: T, the trunk
+        ["N", "l1", "E"],                                      # 4: L, the tail
+        ["M", "y1"],                                           # 5..8: four scraps,
+        ["y1", "y2"],                                          #       short but as
+        ["y2", "y3"],                                          #       fragmented as
+        ["y3", "E"],                                           #       it gets
+    ]
+    #      A + T + L : (6² + 8² + 2²) / 16² = 0.406  <- most concentrated
+    #      P + Q + T + L : (2² + 2² + 8² + 2²) / 14² = 0.388   (what prefer(T) finds)
+    #      A + r1..r4 : (6² + 1 + 1 + 1 + 1) / 10²  = 0.400    (what prefer(A) finds)
+    PAIRED = ["S", "a1", "a2", "a3", "a4", "a5", "M",
+              "t1", "t2", "t3", "t4", "t5", "t6", "t7", "N", "l1", "E"]
+
+    def setUp(self):
+        self.finder = RouteFinder(Graph.from_routes(self.PAIR_ROUTES))
+
+    def test_two_artery_corridor_is_generated(self):
+        ranked, _ = self.finder.rank_candidates("S", "E")
+        self.assertIn(self.PAIRED, [r.stops for r in ranked])
+
+    def test_two_artery_corridor_is_the_most_concentrated(self):
+        # It is not merely present — it is the best-concentrated thing in the pool,
+        # which is what makes its absence a real loss rather than a missing extra.
+        ranked, _ = self.finder.rank_candidates("S", "E")
+        best = max(ranked, key=lambda r: r.hhi)
+        self.assertEqual(best.stops, self.PAIRED)
+        self.assertEqual(best.route_count, 3)  # A, T, L — no fragmented filler
+
+    def test_single_artery_passes_alone_would_miss_it(self):
+        # The premise: neither one-artery bias proposes this corridor, so the pool
+        # would not contain it without the pair pass. Guards the test from quietly
+        # passing for the wrong reason if generation changes.
+        graph = self.finder.graph
+        for route_id in (0, 3):  # A and T, the two arteries it rides
+            nodes, _ = MinMergeStrategy(graph, "S", "E").find(
+                prefer_route_penalty(graph, route_id)
+            )
+            self.assertNotEqual(nodes, self.PAIRED)
 
 
 class PriorityTests(SimpleTestCase):

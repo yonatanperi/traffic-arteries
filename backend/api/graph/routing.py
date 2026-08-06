@@ -18,7 +18,14 @@ chains and scores each one exactly:
   2. **Rank** — :meth:`RouteFinder.rank_candidates` scores each chain's exact
      concentration and sorts the pool once, best-concentration-first. This is the
      only expensive step, and it happens once per query.
-  3. **Select** — :meth:`RouteFinder.select_diverse` walks that ranked pool with a
+  3. **Refine** — a one-artery bias fills everything around its stint with the
+     *shortest* filler rather than the most concentrated one, so a corridor whose
+     optimum is two long arteries in sequence is never proposed by any single pass.
+     :meth:`RouteFinder._artery_pair_chains` searches the leading arteries two at a
+     time to close exactly that gap, and the few new chains are scored and merged
+     into the pool. It needs round 2's scores to know which arteries to combine,
+     which is why generation is two rounds and not one.
+  4. **Select** — :meth:`RouteFinder.select_diverse` walks that ranked pool with a
      *priority arena*: round 1 admits only tier-0 routes and picks the most
      concentrated diverse one; after yielding a route of priority ``X`` the next
      round admits priority ``≤ X + 1``. So a concentrated tier>0 corridor surfaces
@@ -56,6 +63,15 @@ from .search import (
 # order optimisation impractical, so we fall back to the caller's order.
 MAX_OPTIMIZED_WAYPOINTS = 7
 
+# How many arteries the pair pass combines (see :meth:`RouteFinder._artery_pair_chains`):
+# the dominant artery of each of the best this-many *distinct*-artery candidates,
+# tried two at a time. Measured over 50 random queries on the live network, against
+# the one-artery pool alone: 2 seeds already lift the top-3 in 36 of them for +1%
+# query time, 3 lift 37 for +3%, and 4 and 5 buy exactly one more hit for +6% and
+# +10%. The curve is flat past 3, so 3 is where it stops paying — not a guess, and
+# worth re-measuring if generation changes.
+PAIR_SEED_ARTERIES = 3
+
 # With required stops we keep alternatives tight: a route may not exceed the
 # best route through those stops by more than this factor (measured in stops).
 # This stops an alternative from wandering off on a pointless detour.
@@ -85,7 +101,22 @@ LENGTH_EXPONENT = 0.5
 # vanish), while a mediocre headline keeps its genuinely-comparable ones. The
 # ranked pool is monotone, so with at most a few slots this single floor is also
 # what trims a junk tail ("#1, #2 solid, #3 junk" is exactly q_3 < FLOOR * q_1).
-ALTERNATIVE_FLOOR = 0.65
+ALTERNATIVE_FLOOR = 0.3
+
+
+def _rank_key(route):
+    """The pool's sort key: best ranking score first, then fewest merged routes,
+    fewest intersections, shortest, and an orientation-independent tie-break so the
+    same corridor sorts the same way whichever direction the query is posed. See
+    :meth:`RouteFinder._rank` for why priority is deliberately absent.
+    """
+    return (
+        -route.q,
+        route.route_count,
+        route.crossroad_hops,
+        route.total_hops,
+        min(tuple(route.stops), tuple(route.stops[::-1])),  # canonical orientation
+    )
 
 
 def _add_penalties(*maps):
@@ -238,25 +269,44 @@ class RouteFinder:
         if not waypoints:
             if start == end:
                 return [self._make_route([start])], self.max_stretch
-            chains = self._bidirectional_chains(
+            ranked = self._ranked_pool(
                 MinMergeStrategy(graph, start, end),
                 MinMergeStrategy(graph, end, start),
+                [start, end],
             )
-            return self._rank(chains, [start, end]), self.max_stretch
+            return ranked, self.max_stretch
 
         # Required stops -> leg-wise simple paths, tightly bounded. Try candidate
         # stop orders cheapest-first and keep the first order that yields a pool.
         stretch = min(self.max_stretch, WAYPOINT_MAX_STRETCH)
         for points in self._ordered_point_lists(start, end, waypoints):
-            chains = self._bidirectional_chains(
+            ranked = self._ranked_pool(
                 WaypointStrategy(graph, points),
                 WaypointStrategy(graph, points[::-1]),
+                points,
             )
-            ranked = self._rank(chains, points)
             if ranked:
                 return ranked, stretch
 
         return [], stretch
+
+    def _ranked_pool(self, forward, reverse, points):
+        """The whole ranked pool for one point sequence: generate, rank, refine, re-rank.
+
+        Two rounds, because the second one needs the first one's answer to know what
+        to try: :meth:`_generate` biases toward one artery at a time, and only once
+        those are scored is it clear which arteries actually carry a corridor here —
+        which is what :meth:`_artery_pair_chains` combines. The refinement round is
+        scored on its own and merged, never re-solving round one.
+        """
+        ranked = self._rank(self._bidirectional_chains(forward, reverse), points)
+        if not ranked:
+            return ranked
+        extra = self._artery_pair_chains(forward, reverse, ranked)
+        if extra:
+            ranked.extend(self._score(extra, points))
+            ranked.sort(key=_rank_key)
+        return ranked
 
     def k_shortest_paths(self, start, end, k=3, via=None):
         """Backward-compatible view of :meth:`find_routes`: just the stop chains."""
@@ -444,6 +494,69 @@ class RouteFinder:
 
         return self._dedup_chains(c for c in chains if c and len(c) >= 2)
 
+    def _artery_pair_chains(self, forward, reverse, ranked):
+        """Chains biased toward **two** arteries at once — the corridor no
+        one-artery pass can generate.
+
+        :func:`~.search.prefer_route_penalty` charges the same
+        :data:`~.search.TRANSFER_WEIGHT` for one off-artery edge as the search
+        charges for one route transfer. So while the *stint* on the preferred
+        artery comes out right, everything around it is filled by whatever is
+        **shortest**, not by whatever is most concentrated: a filler that rides one
+        artery four edges further loses to a fragmented one that saves four edges.
+        A corridor whose optimum is two long arteries in sequence therefore never
+        appears in the pool — each artery's own pass pairs it with the cheap filler
+        and neither pass ever proposes the two together. (Live example: ``מחסום
+        בזק → צאלים via צ. רבדים``, where riding *מחסום בזק - כביש 6* into *כביש 6
+        - נחל עוז* beats everything one-artery biasing produces, and only shows up
+        when a required stop happens to pin the first half.)
+
+        Stacking both arteries' penalties fixes it directly: an edge on either one
+        is charged nothing, an edge on neither is charged twice, so the search rides
+        one into the other and neither has to be the filler. The pairs worth trying
+        are read off round one — the dominant artery of each of the best
+        :data:`PAIR_SEED_ARTERIES` distinct-artery candidates, i.e. the arteries
+        already proven to carry a real corridor between these places, which is why
+        this cannot run before round one is scored.
+        """
+        graph = self.graph
+        seen = {frozenset(path_edges(route.stops)) for route in ranked}
+        chains = []
+        for a, b in itertools.combinations(self._leading_arteries(ranked), 2):
+            penalty = _add_penalties(
+                prefer_route_penalty(graph, a), prefer_route_penalty(graph, b)
+            )
+            for strategy, backwards in ((forward, False), (reverse, True)):
+                nodes, _ = strategy.find(penalty)
+                if not nodes or len(nodes) < 2:
+                    continue
+                if backwards:
+                    nodes = nodes[::-1]
+                edges = frozenset(path_edges(nodes))
+                if edges not in seen:  # the pair usually re-finds a corridor we have
+                    seen.add(edges)
+                    chains.append(nodes)
+        return chains
+
+    @staticmethod
+    def _leading_arteries(ranked, limit=PAIR_SEED_ARTERIES):
+        """The dominant arteries of the best ``limit`` candidates that don't repeat one.
+
+        "Dominant" is the longest run — the artery the candidate mostly *is*.
+        Walking the ranked pool and skipping repeats is what makes these ``limit``
+        genuinely different arteries rather than one artery's near-duplicates.
+        """
+        arteries = []
+        for route in ranked:
+            if not route.runs:
+                continue
+            artery = max(route.runs, key=lambda run: run.length).route_id
+            if artery not in arteries:
+                arteries.append(artery)
+                if len(arteries) == limit:
+                    break
+        return arteries
+
     def _crosses_forced_below(self, nodes, floor):
         """Whether ``nodes`` crosses an edge the ``floor`` constraint would ban — an
         edge whose *best* available route is still worse-rated than ``floor``, so it
@@ -527,6 +640,21 @@ class RouteFinder:
         ranked pool can be selected over with different priority behaviour without
         re-sorting.
         """
+        routes = self._score(chains, points)
+        routes.sort(key=_rank_key)
+        return routes
+
+    def _score(self, chains, points):
+        """Score chains into :class:`Route` objects with their ``q`` filled in, unsorted.
+
+        Split out of :meth:`_rank` so a later pass can *extend* an already-ranked
+        pool (see :meth:`_artery_pair_chains`) by scoring only its own new chains
+        and re-sorting, instead of re-running :func:`~.concentration.evaluate` over
+        candidates that were already solved. Safe precisely because ``q``'s length
+        reference is the network's ``C_min``, not the pool's: a route's score does
+        not depend on what else is in the pool, so scores computed in two rounds
+        are directly comparable.
+        """
         routes = [self._make_route(nodes) for nodes in chains]
         min_cross = self._min_crossroad_distance(points)
         for r in routes:
@@ -535,15 +663,6 @@ class RouteFinder:
             # network), mirroring evaluate()'s L == 0 branch.
             if min_cross and r.crossroad_hops:
                 r.q = r.hhi * (min_cross / r.crossroad_hops) ** LENGTH_EXPONENT
-        routes.sort(
-            key=lambda r: (
-                -r.q,
-                r.route_count,
-                r.crossroad_hops,
-                r.total_hops,
-                min(tuple(r.stops), tuple(r.stops[::-1])),  # canonical orientation
-            )
-        )
         return routes
 
     def select_diverse(self, ranked, k=None, max_stretch=None, exclude=None):

@@ -260,14 +260,32 @@ values. The theme is dark-only (no light-mode branch to maintain).
      route (`prefer_route_penalty`) plus an edge-penalty diversity backfill, to
      build the candidate pool.
    - With `via`: `WaypointStrategy` over optimized stop orderings (bounded by
-     `MAX_OPTIMIZED_WAYPOINTS`; a small TSP over hop-count heuristics). Its
+     `MAX_OPTIMIZED_WAYPOINTS`; a small TSP over hop-count heuristics). Its *hard*
      no-revisit rule is scoped to the **leg** (the stretch between consecutive
      required stops), not the whole route: a required stop may be a dead end, and
      the only way out is back the way you came. Demanding one globally simple path
      makes every degree-1 place unroutable as a `via` and rejects many ordinary
-     via-queries outright; a loop *inside* a leg is still banned.
+     via-queries outright; a loop *inside* a leg is still banned. Retracing across
+     a leg boundary is nevertheless a **last resort, not a free move**: revisits
+     are counted and minimised *lexicographically first*, ahead of transfers, hops
+     and every penalty in the map, so a globally simple route always wins when one
+     exists and a forced one doubles back as little as the road allows. Backing out
+     of a junction you could have driven straight through reads as a bug however
+     well the route scores — which is why that ordering outranks even
+     `avoid_priority_penalty`'s ban.
    - Each candidate is scored exactly by `concentration.evaluate` (the HHI) and
      the pool is sorted once, concentration-first.
+   - Then one **refinement round** (`_artery_pair_chains`): a single-artery bias
+     charges the same `TRANSFER_WEIGHT` for an off-artery edge as for a route
+     transfer, so it fills everything around its stint with the *shortest* filler,
+     not the most concentrated one — and a corridor whose optimum is two long
+     arteries in sequence is proposed by no single-artery pass at all. Stacking two
+     arteries' penalties finds it; the pairs tried are the dominant arteries of the
+     best `PAIR_SEED_ARTERIES` distinct-artery candidates, which is why this can
+     only run *after* round one is scored. The new chains are scored and merged
+     into the existing pool (`_score` + one re-sort), never re-solving round one —
+     sound because `q`'s length reference is the **network's** `C_min`, not the
+     pool's, so a route's score doesn't depend on what else is in the pool.
 4. `finder.select_diverse(ranked, k=None, exclude=…)` — a cheap priority-arena
    greedy pick (neither near-duplicates by `max_overlap` nor excessive detours by
    `max_stretch`), run **twice** over the one ranked pool: once natural (the
@@ -282,6 +300,10 @@ values. The theme is dark-only (no light-mode branch to maintain).
    contradicts the shown order; raw `hhi` stays internal and is what the per-run
    `share`s square back to — the priority tier, and which authored routes —
    labeled by their endpoints — each result merges), and `compromisedDetour`.
+   The match % is **only comparable within one query**: its length term divides by
+   `C_min`, the shortest a route through *these* required stops could be, so adding
+   a `via` raises the floor and the identical corridor reports a higher %. Two
+   queries' percentages say nothing about each other.
 
 ### Frontend/backend contract notes
 
