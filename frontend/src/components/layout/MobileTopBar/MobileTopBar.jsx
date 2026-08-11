@@ -1,28 +1,24 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import Logo from "../Logo";
-import Button from "../../ui/Button";
 import IconButton from "../../ui/IconButton";
-import { IconMenu, IconClose, IconUser, IconLogout } from "../../ui/icons";
+import { IconMenu, IconClose, IconLogout } from "../../ui/icons";
 import { useAuth } from "../../../hooks/useAuth.js";
 import "./MobileTopBar.css";
 
 /**
- * The phone-width chrome: mark at the inline start, auth action and (only when
- * there is somewhere else to go) a hamburger at the inline end. Rendered
- * alongside the desktop navbar by NavBar, which owns the role-filtered `links`
- * and shows exactly one of the two per breakpoint.
+ * The phone-width chrome for a *signed-in* user — NavBar renders this one only
+ * then, and leaves a guest the desktop bar, which already fits a phone.
+ *
+ * The bar is exactly the desktop navbar's greeting and nothing else; every
+ * action (the sections, and the logout) lives behind the hamburger, so it stays
+ * a greeting and one control however many sections a role unlocks.
  *
  * Deliberately *not* sticky: it scrolls away with the page so the home page's
  * trip bar is the only thing pinned to the top of a results list.
  */
 export default function MobileTopBar({ links }) {
-  const { isAuthenticated, user, logout } = useAuth();
+  const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
-
-  // A guest only ever has the home link — a menu holding one item people are
-  // already looking at is just a button that does nothing.
-  const hasMenu = links.length > 1;
 
   useEffect(() => {
     if (!open) return;
@@ -35,45 +31,18 @@ export default function MobileTopBar({ links }) {
 
   return (
     <header className="mtopbar">
-      <NavLink to="/" className="mtopbar-brand" aria-label="צירי תנועה — לדף הבית">
-        <Logo size={34} />
-      </NavLink>
+      <span className="mtopbar-hello">שלום, {user.first_name}</span>
 
       <div className="mtopbar-actions">
-        {isAuthenticated ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="mtopbar-auth"
-            onClick={logout}
-          >
-            <IconLogout size={16} />
-            התנתקות
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            as={NavLink}
-            to="/login"
-            variant="ghost"
-            className="mtopbar-auth"
-          >
-            <IconUser size={16} />
-            התחברות
-          </Button>
-        )}
-
-        {hasMenu && (
-          <IconButton
-            size="lg"
-            className="mtopbar-menu-btn"
-            ariaLabel={open ? "סגירת התפריט" : "פתיחת התפריט"}
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? <IconClose size={22} /> : <IconMenu size={22} />}
-          </IconButton>
-        )}
+        <IconButton
+          size="lg"
+          className="mtopbar-menu-btn"
+          ariaLabel={open ? "סגירת התפריט" : "פתיחת התפריט"}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? <IconClose size={22} /> : <IconMenu size={22} />}
+        </IconButton>
       </div>
 
       {open && (
@@ -86,9 +55,6 @@ export default function MobileTopBar({ links }) {
           {/* Absolutely placed against the bar itself, so it stays attached
               without measuring anything when the bar has been scrolled. */}
           <nav className="mtopbar-menu" aria-label="ניווט ראשי">
-            {isAuthenticated && (
-              <p className="mtopbar-menu-hello">שלום, {user.first_name}</p>
-            )}
             {links.map((item) => (
               <NavLink
                 key={item.to}
@@ -103,6 +69,20 @@ export default function MobileTopBar({ links }) {
                 {item.label}
               </NavLink>
             ))}
+
+            {/* Leaving the account is a section of this menu too — it is the
+                one thing the bar itself has no room to keep. */}
+            <button
+              type="button"
+              className="mtopbar-menu-item mtopbar-menu-item--out"
+              onClick={() => {
+                setOpen(false);
+                logout();
+              }}
+            >
+              <IconLogout size={18} />
+              התנתקות
+            </button>
           </nav>
         </>
       )}

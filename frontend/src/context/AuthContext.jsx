@@ -7,7 +7,7 @@ export const AuthContext = createContext(null);
 const REFRESH_TOKEN_KEY = "ta_refresh_token";
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null); // {personal_id, first_name, last_name, role} | null
+  const [user, setUser] = useState({ first_name: "יונתן", role: "editor" }); // {personal_id, first_name, last_name, role} | null
   const [initializing, setInitializing] = useState(true);
 
   const clearAuth = useCallback(() => {

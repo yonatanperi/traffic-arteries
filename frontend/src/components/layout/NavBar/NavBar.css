@@ -72,9 +72,24 @@
     display: none;
   }
 
-  /* Phones get MobileTopBar instead — the segmented link row doesn't fit, and
-     its sections move into that bar's menu. */
+  /* A signed-in user gets MobileTopBar instead — the segmented link row plus a
+     greeting and a logout don't fit, so they move into that bar's menu. */
   .navbar {
     display: none;
+  }
+
+  /* A guest's bar is one link and two auth buttons: it fits a phone as-is, so
+     it stays exactly the desktop bar. */
+  .navbar--phone {
+    display: block;
+    /* …with one exception: on a phone the home page's trip bar is what pins to
+       the top of the results, and a second sticky bar above it would cover it.
+       In flow the two look identical at the top of the page anyway. */
+    position: static;
+  }
+
+  .navbar--phone .navbar-inner {
+    padding: var(--s-3) var(--s-4);
+    gap: var(--s-3);
   }
 }

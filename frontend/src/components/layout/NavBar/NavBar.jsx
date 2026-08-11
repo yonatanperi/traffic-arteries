@@ -19,7 +19,13 @@ export default function NavBar() {
 
   return (
     <>
-      <header className="navbar">
+      {/* On a phone the two bars are mutually exclusive, and which one shows
+          depends on the user, not only on the width: a guest has just the home
+          link and two auth buttons, which is exactly what the desktop bar
+          already is and it fits — so they get it verbatim. A signed-in user has
+          sections, a greeting and a logout, which don't, so they get the
+          compact bar and its menu (see NavBar.css / MobileTopBar). */}
+      <header className={"navbar" + (isAuthenticated ? "" : " navbar--phone")}>
         <div className="navbar-inner">
           {isAuthenticated && (
             <span className="navbar-hello">שלום, {user.first_name}</span>
@@ -66,7 +72,7 @@ export default function NavBar() {
         </div>
       </header>
 
-      <MobileTopBar links={links} />
+      {isAuthenticated && <MobileTopBar links={links} />}
     </>
   );
 }
