@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconClose } from "../icons";
 import IconButton from "../IconButton";
+import { fuzzyFilter } from "../../../utils/fuzzyMatch";
 import "./Autocomplete.css";
 
 /**
@@ -28,12 +29,7 @@ export default function Autocomplete({
   const wrapRef = useRef(null);
   const listId = useId();
 
-  const matches = useMemo(() => {
-    const query = value.trim();
-    if (!query) return options.slice(0, 8);
-    const q = query.toLowerCase();
-    return options.filter((o) => o.toLowerCase().includes(q)).slice(0, 8);
-  }, [value, options]);
+  const matches = useMemo(() => fuzzyFilter(options, value, 8), [value, options]);
 
   // Close when clicking outside.
   useEffect(() => {
