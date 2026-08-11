@@ -420,3 +420,18 @@
   border-color: var(--accent);
   background: var(--accent-soft);
 }
+
+/* Phones: a stop is nowrap and uncapped, so one long place name is wider than
+   the card holding it and scrolls the whole document sideways. Let such a name
+   wrap inside its own pill instead. Not the wrapped (branched-map) mode, which
+   pre-splits its lines and scrolls inside its own viewport by design. */
+@media (max-width: 640px) {
+  .chain:not(.chain--wrapped) .chain-item {
+    min-width: 0;
+  }
+  .chain:not(.chain--wrapped) .stop {
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+  }
+}

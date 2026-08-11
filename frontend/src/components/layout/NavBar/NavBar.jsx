@@ -1,7 +1,8 @@
 import { NavLink } from "react-router-dom";
 import { SegmentedNav } from "../../ui/SegmentedControl";
 import Button from "../../ui/Button";
-import { IconRoute, IconBranch, IconHub, IconUser, IconLock, IconLogout } from "../../ui/icons/icons.jsx";
+import MobileTopBar from "../MobileTopBar";
+import { IconRoute, IconBranch, IconHub, IconUser } from "../../ui/icons/icons.jsx";
 import { useAuth } from "../../../hooks/useAuth.js";
 import "./NavBar.css";
 
@@ -65,42 +66,7 @@ export default function NavBar() {
         </div>
       </header>
 
-      <nav className="tabbar" aria-label="ניווט ראשי">
-        {links.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            aria-label={item.label}
-            className={({ isActive }) =>
-              "tabbar-item" + (isActive ? " tabbar-item--on" : "")
-            }
-          >
-            <item.icon size={24} />
-          </NavLink>
-        ))}
-
-        {isAuthenticated ? (
-          <button
-            type="button"
-            className="tabbar-item"
-            aria-label="התנתקות"
-            onClick={logout}
-          >
-            <IconLogout size={24} />
-          </button>
-        ) : (
-          <NavLink
-            to="/login"
-            aria-label="כניסה"
-            className={({ isActive }) =>
-              "tabbar-item" + (isActive ? " tabbar-item--on" : "")
-            }
-          >
-            <IconLock size={24} />
-          </NavLink>
-        )}
-      </nav>
+      <MobileTopBar links={links} />
     </>
   );
 }

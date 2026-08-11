@@ -39,10 +39,10 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* Clear the fixed bottom tab bar (see NavBar.css `.tabbar`) so the floating
-   add button sits above it instead of covering it. */
+/* Nothing is pinned to the bottom of a phone screen any more (navigation moved
+   to MobileTopBar), so the button only has to clear the home indicator. */
 @media (max-width: 640px) {
   .add-route-float {
-    bottom: calc(64px + env(safe-area-inset-bottom) + var(--s-3));
+    bottom: calc(env(safe-area-inset-bottom) + var(--s-4));
   }
 }

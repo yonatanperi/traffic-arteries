@@ -8,6 +8,6 @@
   flex: 1;
 }
 
-/* No bottom padding for the mobile tab bar here: every page wraps in <Page>,
-   which already adds --tabbar-h to its own bottom padding. Doing it in both
-   places left ~120px of dead space under the content on phones. */
+/* No safe-area padding here: every page wraps in <Page>, which already adds
+   env(safe-area-inset-bottom) to its own bottom padding. Doing it in both
+   places left dead space under the content on phones. */

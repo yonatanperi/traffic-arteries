@@ -112,6 +112,9 @@ export default function Autocomplete({
           className="ac-input"
           type="text"
           role="combobox"
+          /* The <label> above is not associated with this input (no htmlFor),
+             so name the field here rather than leaving it to the placeholder. */
+          aria-label={label || placeholder}
           aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"

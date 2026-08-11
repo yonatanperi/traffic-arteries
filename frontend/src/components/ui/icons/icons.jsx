@@ -324,6 +324,26 @@ export function IconRedo(props) {
   );
 }
 
+// Menu — the hamburger, for the mobile top bar's section list.
+export function IconMenu(props) {
+  return (
+    <Svg {...props}>
+      <path d="M4 7h16M4 12h16M4 17h16" />
+    </Svg>
+  );
+}
+
+// Back. The app is RTL, so "back" points to the right — the direction the
+// reading order came from.
+export function IconArrowBack(props) {
+  return (
+    <Svg {...props}>
+      <path d="M5 12h14" />
+      <path d="m13 5 7 7-7 7" />
+    </Svg>
+  );
+}
+
 // Hub — a busy node, drawn as a star burst.
 export function IconHub(props) {
   return (

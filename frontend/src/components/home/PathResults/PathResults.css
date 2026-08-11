@@ -225,6 +225,9 @@
   .result-title {
     font-size: 1.05rem;
     gap: var(--s-2);
+    /* Let the title give way rather than pushing the copy pill (nowrap, and
+       placed by margin-inline-start:auto) out of the card. */
+    min-width: 0;
   }
   .result-meta {
     margin-bottom: var(--s-4);

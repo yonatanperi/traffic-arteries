@@ -1,0 +1,513 @@
+/* The phone home story (HomeStory.jsx). Phone-only by construction — the
+   component is never rendered above 640px — so these rules need no media query
+   of their own, and the desktop home page is untouched by this file.
+
+   Design language is the app's: existing tokens only, lime as the single vivid
+   color, no new surfaces. What's new here is the *rhythm* — one idea per
+   screenful, each with an eyebrow, one headline, one line of copy and one
+   diagram, revealed as it arrives. */
+
+.home-story {
+  /* Full-bleed: cancel .page's phone gutter so the alternating bands run edge
+     to edge, the way a product page does. */
+  margin-inline: calc(-1 * var(--s-4));
+}
+
+.story-section,
+.story-cta {
+  padding: var(--s-7) var(--s-5);
+  text-align: center;
+}
+
+/* Alternating bands give the scroll its beat without introducing a new color:
+   the elevated surface is the same one the top bar uses. */
+.story-section--alt {
+  background: var(--bg-elevated);
+  border-block: 1px solid var(--border);
+}
+
+/* ---- copy ---------------------------------------------------------------- */
+
+.story-eyebrow {
+  margin: 0 0 var(--s-2);
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.story-title {
+  font-size: clamp(1.6rem, 7.5vw, 2.1rem);
+  font-weight: 900;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+}
+
+.story-body {
+  max-width: 32ch;
+  margin: var(--s-3) auto 0;
+  color: var(--text-muted);
+  font-size: 0.96rem;
+}
+
+.story-visual {
+  margin-top: var(--s-6);
+}
+
+/* ---- the reveal ---------------------------------------------------------- */
+
+/* Each block of a section arrives on its own beat. The section itself never
+   moves, so nothing reflows — only its children fade up. */
+.story-section > * {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s var(--ease),
+    transform 0.6s var(--ease);
+}
+.story-section.is-in > * {
+  opacity: 1;
+  transform: none;
+}
+.story-section > *:nth-child(2) {
+  transition-delay: 0.08s;
+}
+.story-section > *:nth-child(3) {
+  transition-delay: 0.16s;
+}
+.story-section > *:nth-child(4) {
+  transition-delay: 0.24s;
+}
+
+/* ---- hero: the candidate scan -------------------------------------------- */
+
+.scan {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.scan-mesh {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.55;
+}
+.scan-mesh-node {
+  fill: var(--border-strong);
+}
+
+/* Probes and winner share one 6.4s period, so their phase relationship holds
+   for as long as the page is open; the probes are simply offset into it. */
+.scan-probe,
+.scan-win {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 620;
+  stroke-dashoffset: 620;
+  opacity: 0;
+}
+.scan-probe {
+  stroke: var(--text-faint);
+  stroke-width: 2;
+}
+.scan-win {
+  stroke: var(--accent);
+  stroke-width: 3.2;
+  filter: drop-shadow(0 0 7px rgba(var(--accent-rgb), 0.5));
+}
+.is-in .scan-probe {
+  animation: scan-probe 6.4s linear infinite;
+}
+.is-in .scan-win {
+  animation: scan-win 6.4s linear infinite;
+}
+
+@keyframes scan-probe {
+  0% {
+    stroke-dashoffset: 620;
+    opacity: 0;
+  }
+  3% {
+    opacity: 0.85;
+  }
+  14% {
+    stroke-dashoffset: 0;
+    opacity: 0.85;
+  }
+  24%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes scan-win {
+  0%,
+  36% {
+    stroke-dashoffset: 620;
+    opacity: 0;
+  }
+  38% {
+    opacity: 1;
+  }
+  55%,
+  88% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  97%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+.scan-end {
+  fill: var(--accent);
+}
+.scan-halo {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0;
+}
+.is-in .scan-halo {
+  animation: scan-halo 2.4s var(--ease) infinite;
+}
+@keyframes scan-halo {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  70%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+/* SVG circles scale from their own centre only with an explicit origin. */
+.scan-halo {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* ---- network stats ------------------------------------------------------- */
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-num {
+  color: var(--accent);
+  font-size: 2.1rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.stat--lead .stat-num {
+  font-size: clamp(3.2rem, 17vw, 4.4rem);
+}
+
+.stat-label {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: center;
+  gap: var(--s-3);
+}
+.stat-row .stat {
+  flex: 1;
+  padding: var(--s-3) var(--s-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+/* ---- two-lane comparisons ------------------------------------------------ */
+
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.lane {
+  padding: var(--s-3) var(--s-4) var(--s-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  transition:
+    opacity 0.5s var(--ease),
+    border-color 0.5s var(--ease),
+    background 0.5s var(--ease);
+}
+/* The loser doesn't vanish — it stays legible and simply stops being the point,
+   which is what the ranking actually does to it. */
+.is-in .lane--lose {
+  opacity: 0.45;
+  transition-delay: 1.1s;
+}
+.is-in .lane--win {
+  border-color: rgba(var(--accent-rgb), 0.4);
+  background:
+    radial-gradient(
+      120% 120% at 50% 0%,
+      rgba(var(--accent-rgb), 0.09),
+      transparent 70%
+    ),
+    var(--surface);
+  transition-delay: 1.1s;
+}
+
+.lane-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.lane-caption {
+  margin: var(--s-1) 0 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+.lane--win .lane-caption {
+  color: var(--text);
+}
+
+.lane-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 300;
+  stroke-dashoffset: 300;
+}
+.lane-line--muted {
+  stroke: var(--text-faint);
+}
+/* Three neutral tones, one per authored route the corridor stitches — one flat
+   gray line with two dots on it doesn't read as "three routes". */
+.lane-line--a {
+  stroke: var(--text-muted);
+}
+.lane-line--b {
+  stroke: var(--text-faint);
+}
+.lane-line--c {
+  stroke: var(--border-strong);
+}
+.lane-line--accent {
+  stroke: var(--accent);
+  filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.35));
+}
+.is-in .lane-line {
+  animation: lane-draw 0.9s var(--ease) 0.15s forwards;
+}
+/* Stitched in order, so the eye counts three routes rather than seeing one
+   line arrive in three pieces at once. */
+.is-in .lane-line--b {
+  animation-delay: 0.35s;
+}
+.is-in .lane-line--c {
+  animation-delay: 0.55s;
+}
+@keyframes lane-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.lane-dot {
+  fill: var(--accent);
+}
+.lane-dot--muted {
+  fill: var(--text-faint);
+}
+/* A transfer between two authored routes — the thing concentration charges for.
+   Lands after the segments it joins. */
+.lane-transfer {
+  fill: var(--bg-elevated);
+  stroke: var(--warning);
+  stroke-width: 2;
+  opacity: 0;
+}
+.is-in .lane-transfer {
+  animation: lane-mark 0.4s var(--ease) 0.85s forwards;
+}
+@keyframes lane-mark {
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---- match score --------------------------------------------------------- */
+
+.match {
+  position: relative;
+  width: 160px;
+  margin: 0 auto;
+}
+
+.match-ring {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Start the arc at the top and run it clockwise; in RTL the default 3-o'clock
+     start reads as an arbitrary tilt. */
+  transform: rotate(-90deg);
+}
+
+.match-track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 9;
+}
+
+.match-value {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 9;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.4));
+}
+.is-in .match-value {
+  animation: match-fill 1.3s var(--ease) 0.15s forwards;
+}
+@keyframes match-fill {
+  to {
+    stroke-dashoffset: var(--match-offset);
+  }
+}
+
+.match-num {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  font-size: 2.2rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.match-pct {
+  color: var(--text-faint);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+/* ---- the three results --------------------------------------------------- */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.stack-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  opacity: 0;
+}
+.stack-card--best {
+  border-color: rgba(var(--accent-rgb), 0.35);
+  background:
+    radial-gradient(
+      120% 120% at 50% 0%,
+      rgba(var(--accent-rgb), 0.1),
+      transparent 70%
+    ),
+    var(--surface);
+  color: var(--text);
+}
+.is-in .stack-card {
+  /* `rise` is the app-wide arrival animation (global.css). */
+  animation: rise 0.5s var(--ease) both;
+}
+
+.stack-match {
+  color: var(--accent);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- closing ------------------------------------------------------------- */
+
+.story-cta {
+  padding-bottom: var(--s-8);
+}
+.story-cta-btn {
+  margin-top: var(--s-5);
+  padding: var(--s-4) var(--s-6);
+  font-size: 1.05rem;
+}
+
+/* ---- reduced motion ------------------------------------------------------ */
+
+/* Nothing here is decoration for its own sake, so the fallback shows every
+   diagram in its finished state rather than hiding it. */
+@media (prefers-reduced-motion: reduce) {
+  .story-section > * {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .is-in .scan-probe,
+  .is-in .scan-halo {
+    animation: none;
+  }
+  .is-in .scan-win {
+    animation: none;
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  .is-in .lane-line {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .is-in .lane-transfer {
+    animation: none;
+    opacity: 1;
+  }
+  .is-in .lane--lose,
+  .is-in .lane--win {
+    transition-delay: 0s;
+  }
+  .is-in .match-value {
+    animation: none;
+    stroke-dashoffset: var(--match-offset);
+  }
+  .is-in .stack-card {
+    animation: none;
+    opacity: 1;
+  }
+}

@@ -1,0 +1,21 @@
+.logo {
+  display: block;
+  flex: none;
+}
+
+/* The ring recedes so the route reads first. */
+.logo-ring {
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 0.4;
+}
+
+.logo-trace {
+  stroke: var(--accent);
+  stroke-width: 2.6;
+  fill: none;
+}
+
+.logo-node {
+  fill: var(--accent);
+}

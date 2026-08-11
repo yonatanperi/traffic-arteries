@@ -98,7 +98,14 @@
   text-decoration: line-through;
 }
 
-/* Phone layout. Breakpoint tracks NavBar.css/global.css (the bottom tab bar). */
+/* The folded search — phones only, rendered by HomePage in place of the header
+   and form once a search has run (see TripBar.jsx). Nothing below 640px
+   renders it, so it needs no desktop styles. */
+.trip-bar {
+  display: none;
+}
+
+/* Phone layout. Breakpoint tracks NavBar.css/global.css (MobileTopBar). */
 @media (max-width: 640px) {
   .search-panel {
     padding: var(--s-4);
@@ -141,7 +148,7 @@
   }
 
   .results-area {
-    margin-top: var(--s-5);
+    margin-top: var(--s-4);
   }
 
   .results-area .empty-state {
@@ -150,7 +157,8 @@
   }
 
   /* Filters are a horizontal strip that scrolls rather than wrapping into
-     several rows and pushing the results down. */
+     several rows and pushing the results down. The negative margin cancels
+     .page's own phone gutter (Page.css), so the strip runs edge to edge. */
   .type-filters {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -163,5 +171,89 @@
   }
   .type-filter-chip {
     flex: none;
+  }
+
+  /* ---- the folded search ------------------------------------------------ */
+
+  .trip-bar {
+    /* The only pinned element on the page: MobileTopBar scrolls away, so this
+       ends up flush with the top of the viewport. */
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    /* Full-bleed, and pulled up flush against the top bar. */
+    margin: calc(-1 * var(--s-4)) calc(-1 * var(--s-4)) 0;
+    padding: var(--s-2) var(--s-4);
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .trip-bar-back {
+    flex: none;
+    color: var(--text-muted);
+  }
+
+  .trip-bar-summary {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--text);
+    text-align: start;
+    transition:
+      background 0.2s var(--ease),
+      border-color 0.2s var(--ease);
+  }
+  .trip-bar-summary:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-strong);
+  }
+
+  .trip-bar-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+  }
+
+  .trip-bar-route {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    font-weight: 700;
+    font-size: 0.98rem;
+  }
+
+  .trip-bar-place {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .trip-bar-arrow {
+    color: var(--text-faint);
+  }
+
+  .trip-bar-detail {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-faint);
+    font-size: 0.8rem;
+  }
+
+  .trip-bar-caret {
+    flex: none;
+    color: var(--text-faint);
+    transform: rotate(-90deg);
   }
 }

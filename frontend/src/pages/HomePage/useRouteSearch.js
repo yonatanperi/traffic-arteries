@@ -19,6 +19,7 @@ export function useRouteSearch() {
   const [error, setError] = useState("");
   const [invalidPlaces, setInvalidPlaces] = useState(() => new Set()); // unknown place names from the last submit attempt
   const [hiddenTypes, setHiddenTypes] = useState(() => new Set(["base"])); // stop types filtered out of the results
+  const [didSearch, setDidSearch] = useState(false); // a search is dispatched/showing (drives the phone fold)
   const placeSet = useMemo(() => new Set(places), [places]);
 
   // Only interior stops are ever filtered (start/end are always kept), so a
@@ -62,14 +63,30 @@ export function useRouteSearch() {
     }
     setLoading(true);
     setResult(null);
+    // Fold the form as the request goes out, not when it lands, so the loader
+    // appears where the results will. Validation failures above never get here,
+    // so a rejected query keeps the fields on screen to be fixed.
+    setDidSearch(true);
     try {
       const data = await findPaths(start.trim(), end.trim(), via);
       setResult(data);
     } catch (e2) {
       setError(e2.message);
+      setDidSearch(false); // nothing to show — hand the form back
     } finally {
       setLoading(false);
     }
+  }
+
+  // Leaving the results (the phone trip bar's back arrow): the page goes back to
+  // how it looked before the search — the form, still filled in, over the idle
+  // home content — rather than the form stacked on top of the results it came
+  // from. The query itself (start/end/vias) is deliberately kept so "back" means
+  // "edit this search", not "start over".
+  function reopenSearch() {
+    setResult(null);
+    setError("");
+    setDidSearch(false);
   }
 
   function toggleType(key) {
@@ -98,6 +115,8 @@ export function useRouteSearch() {
     invalidPlaces,
     hiddenTypes,
     presentTypes,
+    didSearch,
+    reopenSearch,
     submit,
     toggleType,
   };

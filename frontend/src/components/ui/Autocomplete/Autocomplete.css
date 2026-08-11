@@ -122,6 +122,16 @@
   cursor: pointer;
   transition: background 0.12s;
 }
+/* Phones: eight suggestions plus the on-screen keyboard don't fit, so the list
+   scrolls inside a capped box instead of running off the bottom. */
+@media (max-width: 640px) {
+  .ac-list {
+    max-height: 46vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 .ac-option-dot {
   width: 7px;
   height: 7px;

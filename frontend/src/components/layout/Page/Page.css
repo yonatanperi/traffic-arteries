@@ -10,15 +10,21 @@
      it, it just means the box's own extent stops mattering once content
      exceeds it. */
   height: 100%;
-  padding: var(--s-7) var(--s-5) calc(var(--s-7) + var(--tabbar-h));
+  padding: var(--s-7) var(--s-5);
   animation: rise 0.5s var(--ease) both;
 }
 
-/* Phones: the top navbar is gone (NavBar.css), so the page starts right under
-   the status bar — drop the big top inset and give the content the side gutters
-   back, the way a mobile search app fills the screen. */
+/* Phones: MobileTopBar sits above in normal flow, so the page starts right
+   under it — drop the big top inset and give the content the side gutters back,
+   the way a mobile search app fills the screen. */
 @media (max-width: 640px) {
   .page {
-    padding: var(--s-5) var(--s-4) calc(var(--s-5) + var(--tabbar-h));
+    /* auto height (not the 100% above) so a sticky child — the home page's trip
+       bar — has the whole document to stick through rather than one screen's
+       worth. min-height keeps a short page filling the viewport, which is what
+       the idle column measures itself against. */
+    height: auto;
+    min-height: calc(100dvh - var(--topbar-h));
+    padding: var(--s-4) var(--s-4) calc(var(--s-5) + env(safe-area-inset-bottom));
   }
 }

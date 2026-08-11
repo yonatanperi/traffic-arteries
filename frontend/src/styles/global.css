@@ -64,11 +64,11 @@
   --s-7: 48px;
   --s-8: 64px;
 
-  /* Space the fixed mobile tab bar (components/layout/NavBar) occupies at the
-     bottom of the viewport. 0 on desktop, where that bar isn't rendered.
-     Pages add it to their bottom padding so trailing content can always be
-     scrolled clear of the bar. */
-  --tabbar-h: 0px;
+  /* Height of the phone top bar (components/layout/MobileTopBar), including
+     the status-bar inset it pads for. 0 on desktop, where that bar isn't
+     rendered and the sticky navbar is laid out normally instead. Pages
+     subtract it when they need to fill exactly one screen. */
+  --topbar-h: 0px;
 
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -85,11 +85,11 @@
     "Helvetica Neue", Arial, sans-serif;
 }
 
-/* Must track the `max-width: 640px` breakpoint in NavBar.css, where the top bar
-   is swapped for the fixed bottom tab bar. */
+/* Must track the `max-width: 640px` breakpoint in NavBar.css, where the desktop
+   navbar is swapped for MobileTopBar. */
 @media (max-width: 640px) {
   :root {
-    --tabbar-h: calc(56px + env(safe-area-inset-bottom));
+    --topbar-h: calc(56px + env(safe-area-inset-top));
   }
 }
 

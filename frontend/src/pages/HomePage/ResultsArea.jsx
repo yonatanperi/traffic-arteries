@@ -3,8 +3,10 @@ import EmptyState from "../../components/ui/EmptyState";
 import PathResults from "../../components/home/PathResults";
 import Pill from "../../components/ui/Pill";
 import IdleBanner from "./IdleBanner.jsx";
+import HomeStory from "./HomeStory";
 import { IconAlert } from "../../components/ui/icons";
 import { PLACE_TYPES } from "../../utils/placeTypes.js";
+import { useIsPhone } from "../../hooks/useMediaQuery.js";
 
 function detourMessage(destinations) {
   const list =
@@ -20,10 +22,16 @@ export default function ResultsArea({
   loading,
   error,
   result,
+  places,
   presentTypes,
   hiddenTypes,
   onToggleType,
 }) {
+  // Idle state only: a desktop screen fits the form and a panel that invites you
+  // to use it; a phone screen doesn't, so the space below the form becomes the
+  // scrollable story of what the app does (HomeStory).
+  const isPhone = useIsPhone();
+
   return (
     <section className="results-area">
       {loading && <LoaderLayout label="מחשב צירים…" />}
@@ -68,7 +76,8 @@ export default function ResultsArea({
         </>
       )}
 
-      {!loading && !result && !error && <IdleBanner />}
+      {!loading && !result && !error &&
+        (isPhone ? <HomeStory places={places} /> : <IdleBanner />)}
     </section>
   );
 }
