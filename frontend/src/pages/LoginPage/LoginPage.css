@@ -41,6 +41,16 @@
   min-width: 0;
 }
 
+/* The desktop card padding (var(--s-7) horizontal) eats a third of a phone's
+   width in dead space around inputs already narrowed by the page's own mobile
+   gutter — shrink it to match the same breakpoint other cards use
+   (EditableGroupRow, Page). */
+@media (max-width: 640px) {
+  .auth-form {
+    padding: var(--s-5) var(--s-4);
+  }
+}
+
 @media (max-width: 480px) {
   .auth-field-row {
     flex-direction: column;
