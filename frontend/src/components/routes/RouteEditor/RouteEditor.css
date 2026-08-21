@@ -13,6 +13,71 @@
   white-space: nowrap;
 }
 
+/* Priority filter dropdown, beside the destination search — built on the
+   generic .sel/.sel-field/.sel-list classes (see ui/Select) for visual
+   consistency, but multi-select: picking an option toggles it and leaves the
+   list open instead of closing on the first choice. Sized and bordered to
+   match .ac-field (the search input right next to it) rather than the
+   smaller default .sel, so the two fields read as one row. */
+.priority-filter-sel {
+  flex: none;
+}
+.priority-filter-sel .sel-field {
+  padding: var(--s-3);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: 1.02rem;
+  transition:
+    border-color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease),
+    background 0.2s var(--ease);
+}
+.priority-filter-sel .sel-field:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.priority-filter-sel .sel-field--open {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+  background: var(--surface);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.priority-filter-sel .sel-value {
+  white-space: nowrap;
+}
+
+.priority-filter-sel .sel-list {
+  top: 100%;
+  margin: 0;
+  border: 1.5px solid var(--accent);
+  border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-bottom-left-radius: var(--r-md);
+  border-bottom-right-radius: var(--r-md);
+}
+.priority-filter-sel .sel-option {
+  font-size: 1.02rem;
+}
+/* Real :hover feedback — this dropdown doesn't track a keyboard-highlight
+   index the way the base Select does, so without this an option gave no
+   sign it was about to be picked. */
+.priority-filter-sel .sel-option:hover {
+  background: var(--surface-hover);
+}
+.priority-filter-sel .sel-option--selected {
+  background: var(--accent-soft);
+}
+.priority-filter-sel .sel-option--selected:hover {
+  background: rgba(var(--accent-rgb), 0.22);
+}
+.priority-filter-check {
+  margin-inline-start: auto;
+  color: var(--accent);
+  flex: none;
+}
+
 @media (max-width: 640px) {
   .editor-search {
     flex-wrap: wrap;
@@ -92,18 +157,19 @@
   font-weight: 500;
 }
 
-/* A route rated below the best is used only when nothing better connects, so the
-   card carries a standing warning tint — the same "this costs you something"
-   language as the compromised state, a step down in severity. On a branched route
-   this follows the *worst* corridor in the tree: one downgraded head is enough for
-   the card to say so. (The dot ramp and the control's own tint live in
-   PrioritySelect.css, which owns the priority vocabulary.) */
+/* A route with a stretch rated below the best is used only when nothing better
+   connects, so the card carries a standing warning tint — the same "this costs you
+   something" language as the compromised state, a step down in severity. This
+   follows the *worst* rating anywhere in the route: one downgraded stretch is
+   enough for the card to say so. (The dot ramp lives in PriorityDot.css and the
+   marks' tint in RouteChain.css; both ride the same `--priority-step` expression.) */
 .route-row--downgraded {
   border-color: rgba(var(--warning-rgb), 0.45);
 }
 
-/* The spread of priorities across a tree's heads, beside the endpoint badge — the
-   one thing the header's single (default) picker can't say on its own. */
+/* The spread of priorities a route's marks state, beside the endpoint badge. With
+   no picker in the header, this is the only thing that says at a glance that the
+   route is rated at all — the marks themselves are down on the stops. */
 .route-priority-spread {
   display: inline-flex;
   align-items: center;
@@ -123,4 +189,21 @@
   box-shadow:
     var(--shadow-sm),
     0 0 0 1px rgba(var(--danger-rgb), 0.18);
+}
+
+/* --- priority mode ------------------------------------------------------
+   The card's chains become selectable: stops are swept into ranges instead of
+   dragged, edited or inserted. The toggle keeps the accent while it's on, so the
+   card announces which mode it's in without a banner. */
+.route-priority-mode--on {
+  color: var(--on-accent);
+  background: var(--accent-fill);
+}
+.route-priority-mode--on:hover {
+  background: var(--accent-fill-hover);
+}
+/* A soft accent frame while sweeping — enough to say "this card is in a different
+   mode", not enough to compete with the warning tint of a downgraded route. */
+.route-row--priority-mode {
+  border-color: rgba(var(--accent-rgb), 0.45);
 }

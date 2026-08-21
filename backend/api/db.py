@@ -3,17 +3,31 @@
 A :class:`Database` owns two JSON objects in an R2 bucket:
 
   * ``routes.json``      — the source of truth: the routes exactly as authored,
-    each ``{"places": [place names], "priority": 0..3}`` (``0`` = best). A route may
-    also be *branched* — a shared tail (``places``) plus ``"branches"``, a converging
-    tree of alternate heads whose leaves each share the downstream tail (see
+    each ``{"places": [place names], "marks": [...]}``. A route may also be
+    *branched* — a shared tail (``places``) plus ``"branches"``, a converging tree of
+    alternate heads whose leaves each share the downstream tail (see
     :func:`expand_route`). The tree is flattened to one flat subroute per leaf before
     the graph is built, so a branched route and the equivalent set of flat routes
-    derive identical edges. **Any head may state a ``priority`` of its own**, which
-    rates the whole corridor it generates (that head, down the shared tail, to the
-    destination) without touching its sibling heads; a head that states none inherits
-    its parent's, so the root's priority is the tree-wide default. The priority is
-    *not* copied into the derived graph object — it is re-attached from here on every
-    load, so this stays the one place it lives.
+    derive identical edges.
+
+    **A ``mark`` rates a stretch, not a route**: ``{"from": i, "to": j, "priority":
+    1..3}``, inclusive indices into the node's :func:`node_frame` — its own ``places``
+    followed by everything downstream of it. Marks within a node are disjoint. An
+    unmarked stretch rides at :data:`~.graph.BEST_PRIORITY`, and a rating only applies
+    to a result that rides the marked stretch **whole** — see
+    :meth:`~.graph.Graph.run_priority`.
+
+    The frame runs past the node on purpose: a road doesn't care where the author
+    split the tree, so a mark must be able to start in a head and end in the shared
+    tail. It can only run *downstream*, which costs no ambiguity — heads branch
+    upstream but every node has exactly one way down to the destination. Which node
+    stores a mark is therefore what scopes it: one on the shared tail rates every
+    corridor that rides it, one on a head rates only the corridors below that head
+    (tail stops included, if it reaches them). That is what the old per-head
+    ``priority`` field meant, and the field is still *read* — a rated corridor becomes
+    one mark over that corridor's whole frame (:func:`upgrade_node`) — but never
+    written again. Marks are *not* copied into the derived graph object; they are
+    re-attached from here on every load, so this stays the one place they live.
   * ``edge_routes.json`` — the derived graph, rebuilt on every save so it can be
     loaded straight from the store without recomputation. It is accompanied by
     ``edge_routes.fingerprint.json``, recording which routes it was derived from and
@@ -75,26 +89,27 @@ class ValidationError(ValueError):
     """Raised when incoming routes are malformed."""
 
 
-# A route is stored as ``{"places": [...], "priority": int}``. These two readers
-# also accept the bare ``[...]`` list the file used before priorities existed, so
-# an un-upgraded routes.json still loads (as all-best-priority).
+# A route is stored as ``{"places": [...], "marks": [...]}``. These readers also
+# accept the bare ``[...]`` list the file used before priorities existed, and the
+# ``"priority": int`` field marks replaced, so an un-upgraded routes.json still
+# loads (see :func:`upgrade_node`).
 def route_places(route):
     """The place-name chain of a stored route (its *trunk*), whichever shape it is in."""
     return list(route["places"] if isinstance(route, dict) else route)
 
 
-def route_priority(route):
-    """The priority of a stored route (``BEST_PRIORITY`` if it doesn't state one)."""
-    return node_priority(route, BEST_PRIORITY)
+def route_marks(node):
+    """The priority marks a tree node states (``[]`` if it states none)."""
+    return node.get("marks", []) if isinstance(node, dict) else []
 
 
 def node_priority(node, inherited):
-    """The priority a tree node rides at: its own if it states one, else ``inherited``.
+    """*Legacy.* The priority a tree node rode at before marks existed.
 
-    Only the root is required to state a priority; a head that states one *overrides*
-    it for the corridors it generates, and one that doesn't simply inherits. That is
-    what keeps a head's rating local — a sibling head resolves its own priority down
-    its own ancestor chain and never sees this one's.
+    Its own if it stated one, else ``inherited`` — a head that stated one overrode
+    it for the corridors it generated, and one that didn't simply inherited. Read
+    only by :func:`upgrade_node`, which turns that whole-chain rating into an
+    equivalent whole-chain mark; nothing writes the field any more.
     """
     if not isinstance(node, dict):
         return inherited
@@ -105,6 +120,73 @@ def node_priority(node, inherited):
 def route_branches(route):
     """The branches (converging heads) of a stored route (``[]`` if flat)."""
     return route.get("branches", []) if isinstance(route, dict) else []
+
+
+def frame_length(places, downstream):
+    """How many stops a node's marks may address: its own, plus everything downstream.
+
+    ``downstream`` is the number of stops between this node and the destination (0
+    for a flat route or a tree's root). See :func:`node_frame`.
+    """
+    return len(places) + downstream
+
+
+def corridor_mark(places, downstream, priority):
+    """One mark over a node's whole frame — the corridor it generates, end to end.
+
+    ``[]`` when there is nothing to rate: the best priority (which is what an
+    unmarked stretch already rides at), or a frame too short to hold an edge.
+    """
+    if priority <= BEST_PRIORITY or frame_length(places, downstream) < 2:
+        return []
+    return [{"from": 0, "to": frame_length(places, downstream) - 1, "priority": priority}]
+
+
+def upgrade_node(node, inherited=BEST_PRIORITY, downstream=0):
+    """A stored node in the current ``{"places", "marks"[, "branches"]}`` shape.
+
+    Read-path migration, so a store written before marks existed loads as if it had
+    always had them. The legacy ``priority`` field rated *the whole corridor a node
+    generates* — that node, down the shared tail, to the destination — so that is
+    exactly what it becomes: one mark over the node's whole frame, placed on the
+    **leaves**, where a corridor is finally a single chain. Rating the leaves (rather
+    than every node on the way down) is what makes the upgrade faithful: a head that
+    overrode its parent keeps its own rating, a head that inherited keeps the
+    inherited one, and neither is imposed on a sibling. It also lets a *one-stop*
+    head carry its rating, which marks over a node's own places alone could not
+    express — the head has no edge of its own, but the corridor it generates does.
+
+    Idempotent: once upgraded there is no ``priority`` field left to resolve, and a
+    node that already states marks is left exactly as it is.
+    """
+    places = route_places(node)
+    marks = [dict(mark) for mark in route_marks(node)]
+    priority = node_priority(node, inherited)
+    branches = route_branches(node)
+    if not marks and not branches:
+        marks = corridor_mark(places, downstream, priority)
+    entry = {"places": places}
+    if marks:
+        entry["marks"] = marks
+    upgraded = [
+        upgrade_node(branch, priority, frame_length(places, downstream))
+        for branch in branches
+    ]
+    if upgraded:
+        entry["branches"] = upgraded
+    return entry
+
+
+def node_frame(places, downstream_places):
+    """The chain a node's mark indices address: its own stops, then everything
+    downstream of it (its parent's, its grandparent's … to the destination).
+
+    A node's downstream is unique — heads branch *upstream*, and they converge — so
+    extending the frame past the node stays unambiguous, which is what lets one mark
+    run from a head into the shared tail. A mark's ``from`` always sits in the node's
+    own ``places``; it is only ``to`` that may reach past them.
+    """
+    return list(places) + list(downstream_places)
 
 
 def expand_route(route):
@@ -120,39 +202,54 @@ def expand_route(route):
 
         subroute(leaf) = leaf.places + parent.places + … + root.places
 
-    Returns one ``{"places", "priority"}`` entry per leaf: the chain, and the
-    priority it rides at — the leaf's own if it states one, otherwise the nearest
-    ancestor's (see :func:`node_priority`). Priority is resolved *here*, on the way
-    down, because that is the only place a leaf's ancestor chain exists: two leaves
-    of the same tree can legitimately come out at different priorities, and each
-    one's is decided purely by its own spine.
+    Returns one ``{"places", "marks"}`` entry per leaf: the chain, and every mark
+    that applies to it — its own spine's, gathered on the way down, so a tail mark
+    lands on every leaf while a head's reaches only the leaves below it. That spine
+    is the only place a leaf's ancestry exists, which is why the gathering happens
+    here rather than in the caller.
+
+    A leaf's marks come out as ``(start place, end place, priority)`` triples rather
+    than the index ranges they are stored as. Indices address a node's own frame
+    (:func:`node_frame`), and a leaf chain concatenates several of those — but the
+    graph is built from *filled* chains (:meth:`Database.fill_missing_destinations`),
+    which shift every index anyway. Names survive both, and are what
+    :class:`~.graph.Graph` matches on.
 
     A flat route (no branches) is itself the sole leaf and yields exactly one entry
     for ``route.places`` — identical to authoring it the old way. Emitted in the
     branches' pre-order; that ordering *is* the route-index space the derived
-    graph, its priorities and the path labels all share.
+    graph, its marks and the path labels all share.
     """
     leaves = []
 
-    def walk(node, downstream, inherited):
+    def walk(node, downstream, downstream_marks):
         # `downstream` is the chain from this node's parent junction to the
-        # destination; this node's own stops flow into its front.
-        full = route_places(node) + downstream
-        priority = node_priority(node, inherited)
+        # destination; this node's own stops flow into its front. `downstream_marks`
+        # are the marks already gathered from there on — this node's are prepended,
+        # so a leaf carries its whole spine's.
+        places = route_places(node)
+        # This node's frame *is* `full` — its own stops followed by its downstream —
+        # so the walk already holds exactly what a mark's indices address.
+        full = node_frame(places, downstream)
+        marks = [
+            (full[mark["from"]], full[mark["to"]], mark["priority"])
+            for mark in route_marks(node)
+            if 0 <= mark["from"] < len(full) and 0 <= mark["to"] < len(full)
+        ] + downstream_marks
         branches = route_branches(node)
         if branches:
             for branch in branches:
-                walk(branch, full, priority)
+                walk(branch, full, marks)
         else:
             # A leaf head — exactly one subroute, rated by its own spine.
-            leaves.append({"places": full, "priority": priority})
+            leaves.append({"places": full, "marks": marks})
 
-    walk(route, [], BEST_PRIORITY)
+    walk(route, [], [])
     return leaves
 
 
 def expand_routes(routes):
-    """Every authored route flattened to its subroutes, as ``{"places", "priority"}``.
+    """Every authored route flattened to its subroutes, as ``{"places", "marks"}``.
 
     Concatenation of :func:`expand_route` over ``routes`` in order — the flat view
     the derived graph's route indices line up with.
@@ -230,82 +327,136 @@ class Database:
         return raw
 
     @classmethod
-    def _clean_branches(cls, raw_branches, label):
-        """Recursively validate/normalise a node's branches (converging heads).
+    def _clean_marks(cls, raw_marks, places, downstream, label):
+        """Validate/normalise one node's priority marks against its frame.
 
-        Each branch is ``{"places": [≥1 stop], "priority": 0..3?, "branches": [...]}``
-        — its stops flow into this node's first stop; no join index (convergence is
-        always at the tail's start). Sub-branches converge into the branch's own first
-        stop. ``priority`` is *optional* here, unlike on the root: absent means
-        "inherit", and it is only written back when the head actually states one, so
-        an inherited head stays the exact shape it had before this feature existed
-        (and re-rating the route keeps carrying it along).
+        Each mark is ``{"from": i, "to": j, "priority": 1..3}`` with ``0 <= i < j``,
+        ``i`` inside the node's own ``places`` and ``j`` anywhere in its frame
+        (:func:`node_frame`, i.e. up to ``downstream`` stops past them). A mark spans
+        at least one edge, since a single stop is nothing to ride, and it must
+        *start* in the node that stores it — a mark beginning downstream belongs to
+        the node it begins in, and storing it here would let one stretch be written
+        two ways. Priority :data:`~.graph.BEST_PRIORITY` is rejected rather than
+        stored: it is what an *unmarked* stretch already rides at, so a best-priority
+        mark would be a rating that says nothing while still occupying a stretch the
+        author can't then rate.
+
+        Returned sorted by ``from`` and required not to share an *edge*. Two marks
+        may still meet at a stop (``[0,2]`` beside ``[2,4]``): they rate different
+        stretches of road, and that is exactly what re-marking the middle of a
+        longer stretch leaves behind. A genuine overlap is refused rather than
+        resolved, because there is no honest resolution — two ratings of one stretch
+        is a contradiction, and the editor never produces it.
         """
+        if raw_marks is None:
+            return []
+        if not isinstance(raw_marks, list):
+            raise ValidationError(f"טווחי העדיפות של {label} אינם רשימה.")
+        cleaned = []
+        for i, mark in enumerate(raw_marks):
+            mlabel = f"טווח מספר {i + 1} של {label}"
+            if not isinstance(mark, dict):
+                raise ValidationError(f"{mlabel} אינו תקין.")
+            start, end = mark.get("from"), mark.get("to")
+            for value in (start, end):
+                # bool is an int subclass, and True would silently become index 1.
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValidationError(f"{mlabel} מכיל מיקום לא תקין.")
+            if not 0 <= start < end <= frame_length(places, downstream) - 1:
+                raise ValidationError(f"{mlabel} חורג מגבולות הציר.")
+            if start >= len(places):
+                raise ValidationError(f"{mlabel} חייב להתחיל בקטע שבו הוא נשמר.")
+            priority = cls._clean_priority(mark.get("priority"), mlabel)
+            if priority == BEST_PRIORITY:
+                raise ValidationError(
+                    f"{mlabel} חייב לציין עדיפות נמוכה מברירת המחדל."
+                )
+            cleaned.append({"from": start, "to": end, "priority": priority})
+        cleaned.sort(key=lambda mark: mark["from"])
+        for earlier, later in zip(cleaned, cleaned[1:]):
+            if later["from"] < earlier["to"]:
+                raise ValidationError(f"טווחי העדיפות של {label} חופפים זה בזה.")
+        return cleaned
+
+    @classmethod
+    def _clean_node(cls, node, label, inherited=BEST_PRIORITY, downstream=0, root=False):
+        """Validate/normalise one tree node and, recursively, its converging heads.
+
+        A node is ``{"places": [...], "marks": [...], "branches": [...]}``; its
+        heads' stops flow into its own first stop, and there is no join index
+        (convergence is always at the tail's start). A branchless *root* is a plain
+        corridor and needs both endpoints; every other node needs one stop (a
+        branched root's ``places`` is only the shared tail, and the heads supply the
+        origin side).
+
+        ``downstream`` is how many stops lie between this node and the destination;
+        it widens the frame its marks may address (see :meth:`_clean_marks`) and is
+        accumulated on the way down, which is the only place a node's downstream is
+        known.
+
+        A bare ``[...]`` list is accepted as a node with no marks, and so is the
+        legacy ``"priority"`` field, which is resolved down the spine exactly as it
+        used to be and upgraded to a corridor mark on each leaf (see
+        :func:`upgrade_node`) — but only where no marks are stated, since stating
+        them is the newer, more specific intent. The output never carries
+        ``priority``, so the file upgrades on save.
+        """
+        if isinstance(node, list):
+            node = {"places": node}
+        if not isinstance(node, dict):
+            raise ValidationError(
+                f"{label} אינו רשימה." if root else f"{label} אינה תקינה."
+            )
+        raw_branches = node.get("branches", [])
         if not isinstance(raw_branches, list):
             raise ValidationError(f"ההסתעפויות של {label} אינן רשימה.")
-        cleaned = []
-        for i, branch in enumerate(raw_branches):
-            blabel = f"הסתעפות מספר {i + 1} של {label}"
-            if not isinstance(branch, dict):
-                raise ValidationError(f"{blabel} אינה תקינה.")
-            places = cls._clean_places(branch.get("places"), blabel, minimum=1)
-            entry = {"places": places}
-            priority = branch.get("priority")
-            if priority is not None:
-                entry["priority"] = cls._clean_priority(priority, blabel)
-            sub = cls._clean_branches(branch.get("branches", []), blabel)
-            if sub:
-                entry["branches"] = sub
-            cleaned.append(entry)
-        return cleaned
+
+        places = cls._clean_places(
+            node.get("places"), label, minimum=2 if root and not raw_branches else 1
+        )
+        raw_priority = node.get("priority")
+        priority = (
+            inherited
+            if raw_priority is None
+            else cls._clean_priority(raw_priority, label)
+        )
+        marks = cls._clean_marks(node.get("marks"), places, downstream, label)
+        if not marks and not raw_branches:
+            marks = corridor_mark(places, downstream, priority)
+
+        entry = {"places": places}
+        # Only carry `marks` / `branches` when there are any, so an unrated flat
+        # route stays the bare `{"places"}` shape.
+        if marks:
+            entry["marks"] = marks
+        branches = [
+            cls._clean_node(
+                branch,
+                f"הסתעפות מספר {i + 1} של {label}",
+                priority,
+                frame_length(places, downstream),
+            )
+            for i, branch in enumerate(raw_branches)
+        ]
+        if branches:
+            entry["branches"] = branches
+        return entry
 
     @classmethod
     def validate_routes(cls, routes):
         """Validate and normalise routes. Returns cleaned routes or raises.
 
-        Rules: ``routes`` is a list; each route is either a bare list of place
-        names or ``{"places": [...], "priority": int, "branches": [...]}``. A route
-        with no branches (a plain corridor) needs at least two non-empty places; a
-        route that has branches is a *shared tail* whose own ``places`` needs at
-        least one (the heads supply the origin side). ``priority`` is an int in
-        ``[BEST_PRIORITY, WORST_PRIORITY]`` — required on the route (it is the
-        tree-wide default), optional on each head; ``branches`` is optional (see
-        :meth:`_clean_branches`). Place names are trimmed of surrounding whitespace.
-
-        Both the bare-list and object shapes are accepted so a routes file written
-        before priorities existed still loads — a bare list simply means
-        :data:`~.graph.BEST_PRIORITY` and no branches. The output is always the
-        object form, so the file is upgraded on the next save.
+        ``routes`` is a list; each entry is one authored route, validated by
+        :meth:`_clean_node` (which also handles the legacy shapes — a bare place
+        list, and the pre-marks ``"priority"`` field). Place names are trimmed of
+        surrounding whitespace.
         """
         if not isinstance(routes, list):
             raise ValidationError("הנתונים חייבים להיות רשימה של צירים.")
-
-        cleaned = []
-        for index, route in enumerate(routes):
-            label = f"ציר מספר {index + 1}"
-            if isinstance(route, list):
-                raw_places, raw_priority, raw_branches = route, BEST_PRIORITY, []
-            elif isinstance(route, dict):
-                raw_places = route.get("places")
-                raw_priority = route.get("priority", BEST_PRIORITY)
-                raw_branches = route.get("branches", [])
-            else:
-                raise ValidationError(f"{label} אינו רשימה.")
-
-            places = cls._clean_places(raw_places, label, minimum=1)
-            branches = cls._clean_branches(raw_branches, label)
-            # A branchless route is a plain corridor and needs both endpoints; a
-            # branched route's `places` is only the shared tail (heads add the rest).
-            if not branches and len(places) < 2:
-                raise ValidationError(f"{label} חייב לכלול לפחות שתי נקודות.")
-
-            entry = {"places": places, "priority": cls._clean_priority(raw_priority, label)}
-            # Only carry `branches` when there are any, so a flat route stays the
-            # exact `{"places", "priority"}` shape it had before this feature.
-            if branches:
-                entry["branches"] = branches
-            cleaned.append(entry)
-        return cleaned
+        return [
+            cls._clean_node(route, f"ציר מספר {index + 1}", root=True)
+            for index, route in enumerate(routes)
+        ]
 
     @staticmethod
     def validate_compromised(groups, known_places):
@@ -413,8 +564,8 @@ class Database:
         filled route indices match ``routes.json`` (filling preserves route order
         and endpoints).
 
-        Only the edges are persisted — priorities are *not* derived data, so they
-        stay in ``routes.json`` and are re-attached at load time.
+        Only the edges are persisted — marks are *not* derived data, so they stay in
+        ``routes.json`` and are re-attached at load time.
 
         ``routes`` must be what ``routes.json`` holds (or is about to hold), because
         it is also what gets fingerprinted: :meth:`save_routes` writes the cleaned
@@ -432,16 +583,15 @@ class Database:
         # chain per leaf that all share the same tail, so the group id is what lets
         # the fill count a shared hop once per authored route rather than once per
         # leaf (see :meth:`fill_missing_destinations`).
-        chains, priorities, groups = [], [], []
+        chains, groups = [], []
         for index, route in enumerate(routes):
             for subroute in expand_route(route):
                 chains.append(subroute["places"])
-                priorities.append(subroute["priority"])
                 groups.append(index)
         filled = self.fill_missing_destinations(
             chains, lazy_gap, confirmed_gap, route_groups=groups
         )
-        graph = Graph.from_routes(filled, priorities)
+        graph = Graph.from_routes(filled)
         self._atomic_write_json(self.edge_routes_key, graph.edge_routes_records)
         # Stamped last, on purpose: if this write is the one that fails, the store is
         # left with edges and no fingerprint, which reads as stale and rebuilds. The
@@ -566,42 +716,35 @@ class Database:
 
     @staticmethod
     def _normalised(routes):
-        """Stored routes in the uniform ``{"places", "priority"[, "branches"]}`` shape."""
-        return [
-            {
-                "places": route_places(route),
-                "priority": route_priority(route),
-                **({"branches": route_branches(route)} if route_branches(route) else {}),
-            }
-            for route in routes
-        ]
+        """Stored routes in the uniform ``{"places"[, "marks"][, "branches"]}`` shape."""
+        return [upgrade_node(route) for route in routes]
 
     def load_routes(self):
-        """The authored routes, always in the ``{"places", "priority"}`` shape.
+        """The authored routes, always in the ``{"places", "marks"}`` shape.
 
-        A routes file written before priorities existed holds bare lists; it is
-        normalised here (as all-best-priority) so every caller sees one shape, and
-        rewritten in the new shape on the next save.
+        A routes file written before marks existed holds bare lists, or a
+        whole-route ``priority``; it is upgraded here (see :func:`upgrade_node`) so
+        every caller sees one shape, and rewritten in the new shape on the next save.
         """
         return self._normalised(self._ensure_routes())
 
     def load_expanded_routes(self):
-        """The authored routes flattened to one ``{"places", "priority"}`` per subroute.
+        """The authored routes flattened to one ``{"places", "marks"}`` per subroute.
 
         This is the flat view that lines up with the derived graph's route indices
         (each tree node is one graph route). Consumers that index a graph run back
-        to a route — priorities in :meth:`load_graph`, endpoint labels in the path
-        view — read *this*, not :meth:`load_routes` (which keeps the authored tree).
+        to a route — marks in :meth:`load_graph`, endpoint labels in the path view —
+        read *this*, not :meth:`load_routes` (which keeps the authored tree).
         """
         return expand_routes(self.load_routes())
 
     def load_graph(self):
         """Load the pre-built graph (edges + route membership) from disk.
 
-        The edges come from the derived file; the priorities come from the expanded
-        routes (``routes.json`` stays their single source of truth), aligned to the
-        graph's route indices — one per tree node. Both therefore describe the same
-        routes: :meth:`_ensure_routes` has rebuilt the edges first if they didn't.
+        The edges come from the derived file; the marks come from the expanded routes
+        (``routes.json`` stays their single source of truth), aligned to the graph's
+        route indices — one per tree node. Both therefore describe the same routes:
+        :meth:`_ensure_routes` has rebuilt the edges first if they didn't.
 
         The routes read for the freshness check are expanded here directly instead
         of calling :meth:`load_expanded_routes`, which would fetch ``routes.json`` a
@@ -610,7 +753,7 @@ class Database:
         routes = self._normalised(self._ensure_routes())
         return Graph.from_edge_routes(
             self._read_json(self.edge_routes_key),
-            [route["priority"] for route in expand_routes(routes)],
+            [route["marks"] for route in expand_routes(routes)],
         )
 
     def save_routes(self, routes):

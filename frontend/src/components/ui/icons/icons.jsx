@@ -190,6 +190,16 @@ export function IconPin(props) {
   );
 }
 
+/* Priority mode: a flag planted on a stretch of the chain. */
+export function IconFlag(props) {
+  return (
+    <Svg {...props}>
+      <path d="M5 21V4" />
+      <path d="M5 4h11l-2 3.5L16 11H5" />
+    </Svg>
+  );
+}
+
 export function IconSearch(props) {
   return (
     <Svg {...props}>

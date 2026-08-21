@@ -9,14 +9,24 @@ import {
   IconMinus,
   IconFit,
 } from "../../ui/icons";
-import PrioritySelect from "./PrioritySelect";
+import { PriorityDot } from "./PriorityDot";
+import PriorityMarkPopover from "./PriorityMarkPopover";
 import {
   branchAt,
   removeBranch,
   patchNodePlaces,
-  effectivePriority,
-  setNodePriority,
+  nodeAt,
+  nodeMarks,
+  setMark,
+  removeMark,
+  framePieces,
+  markPieces,
+  nodeFrame,
+  resolveRange,
+  pathKey,
+  keyPath,
 } from "../../../utils/branches.js";
+import { priorityLetter, BEST_PRIORITY } from "../../../utils/priorities.js";
 import { ScaleRefContext } from "./scaleContext.js";
 import "./BranchedChain.css";
 
@@ -70,16 +80,29 @@ function measureFitScale(ref) {
  *
  * Every segment is an <EditableRouteChain>; its "+" offers "add stop" or "branch"
  * (split at that gap into converging heads). Emits the whole next route object, so
- * the route's priority rides along untouched.
+ * the route's marks ride along untouched.
  *
- * Each head also carries its own <PrioritySelect> at its tip: a branched route has
- * no single priority — each head rates the corridor it generates (itself → down the
- * shared tail → the destination), and rating one leaves its siblings alone.
+ * **Priority lives on the chains, not beside them.** A rating applies to a *range*
+ * of stops — a result pays for it only by riding that whole stretch — so it is
+ * stated by picking the two ends of that stretch and choosing a priority for it.
+ * `priorityMode` turns every segment into a selectable chain; the marks themselves
+ * are painted whether or not the mode is on.
+ *
+ * A range may run **from a head into the shared tail**, because a bad stretch of
+ * road doesn't care where the author split the tree. It may only run *downstream*
+ * (a head toward the destination, never across to a sibling): nothing rides two
+ * sibling heads, so a pair of stops on both names no road. The tree renders the
+ * whole gesture — a drag can start in one segment and end in another, and the two
+ * ends can equally be tapped one after the other — while each chain only reports
+ * which of its stops was picked. Where the resulting mark is *stored* is what scopes
+ * it: on the shared tail it rates every corridor through it, on a head only the
+ * corridors below that head.
  *
  * props:
- *   route     { places, priority, branches? } — the whole tree
+ *   route     { places, marks?, branches? } — the whole tree
  *   onChange  (nextRoute) => void
  *   suggestions / highlight / onRenameStop / compromisedPlaces — passed to every chain.
+ *   priorityMode  whether the segments are in range-selection mode (see above)
  *   previewReversed  hover-preview only (non-branched routes): show the root chain's
  *                 stops in reverse order via its own drag-reorder animation, without
  *                 touching `route` — the reverse button is the only thing that sets it.
@@ -91,6 +114,7 @@ export default function BranchedChain({
   highlight,
   onRenameStop,
   compromisedPlaces,
+  priorityMode = false,
   previewReversed = false,
 }) {
   // A branched route lives on the pan/zoom map; a plain (branchless) route is the
@@ -100,6 +124,99 @@ export default function BranchedChain({
   // inside the map a pill drag reorders (it's excluded from the canvas pan) and
   // stays 1:1 with the cursor at any zoom via the shared scale ref below.
   const branched = route.branches?.length > 0;
+
+  // A stretch that has been picked but not yet rated: { path, from, to, at }. The
+  // popover is what turns it into a mark, so it lives here rather than inside the
+  // chains — they report picked stops, they don't know what a priority is.
+  const [pending, setPending] = useState(null);
+  // The live gesture, spanning every segment: the stop it started on, the one the
+  // pointer is over now, and (separately) a tapped stop still waiting for its
+  // partner. `drag` is a ref because it changes on every pointermove; `live` is the
+  // resolved range, which is what actually gets painted.
+  const dragRef = useRef(null);
+  const [live, setLive] = useState(null);
+  const [tapped, setTapped] = useState(null);
+
+  // Leaving the mode abandons a half-made range rather than letting it ambush the
+  // next time the mode is opened.
+  useEffect(() => {
+    if (!priorityMode) {
+      dragRef.current = null;
+      setLive(null);
+      setTapped(null);
+      setPending(null);
+    }
+  }, [priorityMode]);
+
+  // A picked pair becomes a range only if one stop is downstream of the other;
+  // sibling heads resolve to null and simply paint nothing.
+  const samePoint = (a, b) =>
+    Boolean(a) && Boolean(b) && pathKey(a.path) === pathKey(b.path) && a.index === b.index;
+
+  function handleSelectStop(phase, raw, at) {
+    // Chains report an opaque key; here it becomes the node path it stands for.
+    const point = raw && { path: keyPath(raw.key), index: raw.index };
+    if (phase === "start") {
+      dragRef.current = point;
+      setLive(null);
+      return;
+    }
+    const anchor = dragRef.current;
+    if (!anchor) return;
+    const range = point && resolveRange(route, anchor, point);
+    if (phase === "move") {
+      setLive(range);
+      return;
+    }
+
+    dragRef.current = null;
+    setLive(null);
+    if (range) {
+      // A drag across two stops: that's the range.
+      setTapped(null);
+      setPending({ ...range, at });
+      return;
+    }
+    // Released over nothing, or on a stop no stretch can reach from the one it
+    // started on (a sibling head): the gesture simply ends.
+    if (!samePoint(point, anchor)) return;
+
+    // Released on the stop it started on — a tap. The first waits for its partner;
+    // the second closes the range, or cancels when it lands on the same stop again.
+    if (!tapped) setTapped(point);
+    else if (samePoint(tapped, point)) setTapped(null);
+    else {
+      const tappedRange = resolveRange(route, tapped, point);
+      if (tappedRange) {
+        setTapped(null);
+        setPending({ ...tappedRange, at });
+      } else {
+        // Nothing rides both — far likelier a change of mind about where the
+        // stretch starts than a mistake, so this stop becomes the new start.
+        setTapped(point);
+      }
+    }
+  }
+
+  // What each segment paints as "being picked right now": the live drag, or the
+  // single stop a tap is holding.
+  const picked = new Map();
+  if (live) {
+    const pieces = framePieces(route, live.path, live.from, live.to);
+    pieces.forEach((piece, i) =>
+      picked.set(pathKey(piece.path), {
+        from: piece.from,
+        to: piece.to,
+        // Everything but the last piece runs on into the next segment, so its
+        // trailing connector — the junction hop — stays painted.
+        continues: i < pieces.length - 1,
+      }),
+    );
+  } else if (tapped) {
+    picked.set(pathKey(tapped.path), { from: tapped.index, to: tapped.index });
+  }
+
+  const pieces = markPieces(route);
 
   const ctx = {
     route,
@@ -112,7 +229,45 @@ export default function BranchedChain({
     wrapEvery: branched ? 6 : null,
     // Only ever true for the root chain of a non-branched route (see prop doc).
     previewReversed,
+    priorityMode,
+    picked,
+    pieces,
+    onSelectStop: handleSelectStop,
+    onRemoveMark: (path, index) => onChange(removeMark(route, path, index)),
   };
+
+  // The rating already on exactly this stretch, so re-sweeping a mark opens the
+  // list with its own value checked rather than blank.
+  const pendingNode = pending && nodeAt(route, pending.path);
+  const pendingPriority =
+    nodeMarks(pendingNode).find(
+      (mark) => mark.from === pending?.from && mark.to === pending?.to,
+    )?.priority ?? BEST_PRIORITY;
+
+  const markPopover = pending && (
+    <PriorityMarkPopover
+      at={pending.at}
+      current={pendingPriority}
+      // Widening goes to the end of the *corridor*, not the segment: from a head
+      // that means down the shared tail to the destination, which is the stretch a
+      // whole-route rating used to mean before marks existed.
+      wholeLabel={pending.path.length ? "בחר עד היעד" : "בחר את כל הציר"}
+      onPick={(priority) => {
+        onChange(setMark(route, pending.path, pending.from, pending.to, priority));
+        setPending(null);
+      }}
+      // Widening keeps the list open: the author still has a rating to pick, and
+      // this is only the range they want to pick it for.
+      onWhole={() =>
+        setPending({
+          ...pending,
+          from: 0,
+          to: Math.max(nodeFrame(route, pending.path).length - 1, 0),
+        })
+      }
+      onClose={() => setPending(null)}
+    />
+  );
 
   // The most zoomed-OUT state is the whole tree fitting the viewport: minScale is
   // the measured fit scale, so you can't zoom out past the tree's boundary into
@@ -157,7 +312,13 @@ export default function BranchedChain({
   }, [fitToView]);
 
   // A plain (branchless) route needs no map — render the inline chain as before.
-  if (!branched) return tree;
+  if (!branched)
+    return (
+      <>
+        {tree}
+        {markPopover}
+      </>
+    );
 
   return (
     <TransformWrapper
@@ -217,6 +378,7 @@ export default function BranchedChain({
           >
             {tree}
           </TransformComponent>
+          {markPopover}
         </div>
       )}
     </TransformWrapper>
@@ -231,9 +393,36 @@ function TreeNode({ ctx, node, path, bracket = false }) {
   const heads = node.branches ?? [];
   const junction = heads.length > 0;
 
+  // Every mark painting on this segment — its own, and any reaching in from a head
+  // upstream — in the chain's anonymous vocabulary: a stop range, a ramp step for
+  // its tint, and a tag. The chain knows nothing about priority. Only the piece
+  // holding a mark's start is labelled: a stretch running in from another segment
+  // was already named where it began, and naming it twice would read as two marks.
+  const key = pathKey(path);
+  const ranges = (ctx.pieces.get(key) ?? []).map((piece) => ({
+    from: piece.from,
+    to: piece.to,
+    tone: piece.priority,
+    continues: piece.continues,
+    label: piece.head ? (
+      <>
+        <PriorityDot priority={piece.priority} />
+        {priorityLetter(piece.priority)}
+      </>
+    ) : null,
+    onRemove: piece.head
+      ? () => ctx.onRemoveMark(piece.owner, piece.markIndex)
+      : undefined,
+  }));
+
   const chain = (
     <EditableRouteChain
       stops={node.places}
+      ranges={ranges}
+      selectionMode={ctx.priorityMode}
+      selectionKey={key}
+      selected={ctx.picked.get(key) ?? null}
+      onSelectStop={ctx.onSelectStop}
       onChange={(places) =>
         ctx.onChange(patchNodePlaces(ctx.route, path, places))
       }
@@ -291,20 +480,9 @@ function TreeNode({ ctx, node, path, bracket = false }) {
                 >
                   <IconClose size={13} />
                 </IconButton>
-                {/* The head's priority — it rates every corridor that runs from
-                    here down the shared tail, and nothing else in the tree. Shown
-                    as the priority the head *rides at*, which for a head that has
-                    never been rated is the one it takes from the segment it
-                    converges into; picking a value here always states it outright. */}
-                <PrioritySelect
-                  compact
-                  value={effectivePriority(ctx.route, headPath)}
-                  onChange={(priority) =>
-                    ctx.onChange(setNodePriority(ctx.route, headPath, priority))
-                  }
-                  aria-label="עדיפות הראש"
-                  title="עדיפות המסלול מראש זה ועד היעד. אינה משפיעה על ראשים אחרים."
-                />
+                {/* No priority control here any more: a head is rated by marking a
+                    stretch of its own stops, which is what makes the rating local to
+                    the corridors that descend from it. */}
               </div>
               <span className="tnode-bracket" aria-hidden="true" />
               <div className="tnode-head-body">

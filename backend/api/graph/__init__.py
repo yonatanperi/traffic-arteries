@@ -4,8 +4,9 @@ The public objects:
 
   * :class:`Graph`        — an undirected graph of place names, built from routes
     (:meth:`Graph.from_routes`) or wrapped around a persisted adjacency dict.
-    Every edge remembers which authored routes traverse it, and every authored
-    route carries a priority (``0`` = best … ``3`` = worst).
+    Every edge remembers which authored routes traverse it, and an authored route
+    may carry *priority marks* — rated stretches of it (``0`` = best … ``3`` =
+    worst) that bite only when a result rides the stretch whole.
   * :class:`RouteFinder`  — diverse route search over a ``Graph`` whose "best" route
     rides one *good* authored route as far as possible: best priority tier first,
     then highest concentration.
@@ -15,8 +16,8 @@ The public objects:
   * :class:`PriorityMode` — static flag toggling whether priority is a hard tier or
     only a weight on the score.
   * :func:`evaluate` scores a chain; :func:`tier` gives the worst priority among
-    the sub-routes it rides, reading each run's :func:`tier_priority` — 0 for a
-    run of length ``<= TIER_EXEMPT_LENGTH``, its real priority otherwise.
+    the sub-routes it rides — each run's being the worst mark that run completes,
+    and ``0`` for a run that only clips one.
 
 Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.search`
 (single-route generator strategies over ``(node, active-route)`` state),
@@ -24,7 +25,7 @@ Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.search`
 generation, scoring and diverse selection).
 """
 
-from .concentration import TIER_EXEMPT_LENGTH, LengthMode, PriorityMode, evaluate, tier, tier_priority
+from .concentration import LengthMode, PriorityMode, evaluate, tier
 from .core import BEST_PRIORITY, WORST_PRIORITY, Graph
 from .routing import Route, RouteFinder
 
@@ -36,8 +37,6 @@ __all__ = [
     "PriorityMode",
     "BEST_PRIORITY",
     "WORST_PRIORITY",
-    "TIER_EXEMPT_LENGTH",
     "evaluate",
     "tier",
-    "tier_priority",
 ]

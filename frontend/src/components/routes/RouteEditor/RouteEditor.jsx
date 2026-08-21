@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -20,7 +20,11 @@ import IconButton from "../../ui/IconButton";
 import EditableList from "../../ui/EditableList";
 import EditableGroupRow from "../../ui/EditableGroupRow";
 import BranchedChain from "./BranchedChain";
-import PrioritySelect, { PriorityDot } from "./PrioritySelect";
+import { PriorityDot } from "./PriorityDot";
+// The priority filter below is a multi-select, so it borrows ui/Select's look
+// (`.sel*`) without being built on the component — which means nothing else pulls
+// that stylesheet into the bundle. Import it here, where the classes are used.
+import "../../ui/Select/Select.css";
 import {
   IconSearch,
   IconAlert,
@@ -28,6 +32,9 @@ import {
   IconPin,
   IconBranch,
   IconSwap,
+  IconChevron,
+  IconCheck,
+  IconFlag,
 } from "../../ui/icons";
 import {
   expandRoute,
@@ -43,7 +50,7 @@ import {
   useSetUrlParams,
 } from "../../../hooks/useUrlParams.js";
 import {
-  BEST_PRIORITY,
+  PRIORITY_OPTIONS,
   isDowngraded,
   priorityLabel,
   priorityLetter,
@@ -163,8 +170,20 @@ export default function RouteEditor({
   const { setParams } = useSetUrlParams();
   const query = getParam("q");
   const selected = getParam("dest", { list: true }); // filter destinations (pills)
+  // Priority filter (dropdown, multi-select) — a route matches if any of its
+  // ridden priorities (routePriorities: one per head on a tree) is among
+  // these, so filtering by a bad priority still surfaces a branched route
+  // whose *other* heads are rated fine.
+  const selectedPriorities = getParam("priority", { list: true }).map(Number);
   function setQuery(value) {
     setParams({ q: value });
+  }
+  function togglePriorityFilter(p) {
+    setParams({
+      priority: selectedPriorities.includes(p)
+        ? selectedPriorities.filter((x) => x !== p)
+        : [...selectedPriorities, p],
+    });
   }
   const [pendingRename, setPendingRename] = useState(null); // { oldValue, newValue }
 
@@ -179,12 +198,6 @@ export default function RouteEditor({
     );
   }, [routes.length]);
 
-  // A partial edit (e.g. the priority alone) patched onto the route object, so
-  // the fields the edit doesn't touch ride along untouched.
-  function patchRoute(index, patch) {
-    replaceRoute(index, { ...routes[index], ...patch });
-  }
-
   // A whole-route edit (the tree editor) *replaces* the route — never merges.
   // A tree edit can legitimately drop a field: collapsing a junction leaves a
   // route with no `branches` key at all, and merging that onto the old object
@@ -198,7 +211,7 @@ export default function RouteEditor({
   }
 
   function addRoute() {
-    onChange([...routes, { places: [], priority: BEST_PRIORITY }]);
+    onChange([...routes, { places: [] }]);
     // A brand-new route is empty, so it matches no filter — pin it while one is
     // active, otherwise it would be added straight into hiding.
     setRows((prev) => [...prev, { ...newRow(), pinned: Boolean(filtering) }]);
@@ -277,7 +290,7 @@ export default function RouteEditor({
   const q = query.trim().toLowerCase();
   const terms = selected.map((s) => s.toLowerCase());
   const highlight = q ? [...terms, q] : terms;
-  const filtering = selected.length > 0 || q;
+  const filtering = selected.length > 0 || q || selectedPriorities.length > 0;
 
   const matchedIndices = routes
     .map((_, i) => i)
@@ -292,7 +305,13 @@ export default function RouteEditor({
         stops.some((p) => p.toLowerCase().includes(s.toLowerCase())),
       );
       const hasQuery = !q || stops.some((p) => p.toLowerCase().includes(q));
-      return hasAll && hasQuery;
+      // A route matches the priority filter if *any* of its ridden priorities
+      // is selected — a branched route with one bad head and one good one
+      // should still surface under either filter chip.
+      const hasPriority =
+        selectedPriorities.length === 0 ||
+        routePriorities(routes[i]).some((p) => selectedPriorities.includes(p));
+      return hasAll && hasQuery && hasPriority;
     });
 
   // Pinned routes ride through the filter — they stay listed (in place) even
@@ -346,6 +365,12 @@ export default function RouteEditor({
               : null
           }
         />
+
+        <PriorityFilterSelect
+          value={selectedPriorities}
+          onToggle={togglePriorityFilter}
+        />
+
         {filtering && (
           <span className="editor-search-count">
             {matchedIndices.length
@@ -384,7 +409,6 @@ export default function RouteEditor({
                   filteredOut={Boolean(filtering) && !matched.has(i)}
                   compromisedPlaces={compromisedPlaces}
                   onChangeRoute={(nextRoute) => replaceRoute(i, nextRoute)}
-                  onChangePriority={(priority) => patchRoute(i, { priority })}
                   onRemoveRoute={() => removeRoute(i)}
                   onDuplicateRoute={() => duplicateRoute(i)}
                   onReverseRoute={() => reverseRouteAt(i)}
@@ -411,6 +435,89 @@ export default function RouteEditor({
   );
 }
 
+/**
+ * The priority filter: a dropdown over PRIORITY_OPTIONS, but multi-select — asking
+ * "show me anything rated any of these", so choosing an option toggles it and
+ * leaves the list open rather than closing on the first pick. (It is the only
+ * priority *list* outside <PriorityMarkPopover>, and a deliberately different
+ * question: that one rates one stretch, this one filters the whole editor.)
+ *
+ * props:
+ *   value     array of selected priorities (0..3), empty = no filter
+ *   onToggle  (priority) => void
+ */
+function PriorityFilterSelect({ value, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target))
+        setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const label =
+    value.length === 0
+      ? "כל העדיפויות"
+      : value
+          .slice()
+          .sort((a, b) => a - b)
+          .map(priorityLetter)
+          .join(", ");
+
+  return (
+    <div
+      className={"sel sel--md priority-filter-sel" + (open ? " sel--open" : "")}
+      ref={wrapRef}
+    >
+      <button
+        type="button"
+        className={"sel-field" + (open ? " sel-field--open" : "")}
+        role="combobox"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="sel-value">{label}</span>
+        <IconChevron size={13} className="sel-chevron" />
+      </button>
+
+      {open && (
+        <ul className="sel-list" role="listbox" aria-multiselectable="true">
+          {PRIORITY_OPTIONS.map((opt) => {
+            const checked = value.includes(opt.value);
+            return (
+              <li
+                key={opt.value}
+                role="option"
+                aria-selected={checked}
+                className={
+                  "sel-option" + (checked ? " sel-option--selected" : "")
+                }
+                // mousedown, not click: keeps focus on the trigger and fires before
+                // the outside-click listener above would otherwise close this first.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onToggle(opt.value);
+                }}
+              >
+                <PriorityDot priority={opt.value} />
+                {opt.label}
+                {checked && (
+                  <IconCheck size={14} className="priority-filter-check" />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function RouteRow({
   id,
   index,
@@ -422,28 +529,31 @@ function RouteRow({
   filteredOut,
   compromisedPlaces,
   onChangeRoute,
-  onChangePriority,
   onRemoveRoute,
   onDuplicateRoute,
   onReverseRoute,
   onTogglePin,
   onRenameStop,
 }) {
-  const { places, priority } = route;
+  const { places } = route;
   const origins = leafCount(route); // number of converging origin heads (1 = plain)
   // Whether this route is a *tree* — asked of the branches themselves, not of the
   // leaf count: a route with a single head still has a head chip to rate, a tail
   // that may be one stop, and no meaningful "reverse", exactly like a bushier one.
   const branched = (route.branches?.length ?? 0) > 0;
-  // The priorities the route's corridors actually ride at — one per head on a tree.
-  // The *worst* is what the card warns about (one bad corridor is enough). A tree
-  // has no priority control in its header, so the badge below is where the header
-  // says anything about rating at all — worth showing as soon as there's something
-  // to say: more than one value, or a downgrade.
+  // The priorities the route's corridors ride at — one per distinct rating its
+  // marks state, plus the best for anything left unmarked. The *worst* is what the
+  // card warns about (one bad corridor is enough). No card carries a priority
+  // control any more — a rating is drawn on the stops — so this badge is where the
+  // header says anything about rating at all: shown as soon as there is something
+  // to say, i.e. more than one value or a downgrade.
   const ridden = routePriorities(route);
   const worstPriority = ridden[ridden.length - 1];
-  const showPrioritySpread =
-    branched && (ridden.length > 1 || isDowngraded(worstPriority));
+  const showPrioritySpread = ridden.length > 1 || isDowngraded(worstPriority);
+  // Turns every chain in the card into a selectable one, so a stretch of stops can
+  // be swept out and rated. Per card: rating one route is a whole task on its own,
+  // and a global mode would take reordering away from every other card at once.
+  const [priorityMode, setPriorityMode] = useState(false);
   // Hovering the reverse button previews the flipped order (via the chain's own
   // drag-reorder animation) without touching the route — nothing persists until
   // the click. Leaving without clicking just lets the preview relax back.
@@ -473,6 +583,7 @@ function RouteRow({
 
   const extraClassName = [
     "route-row--sortable",
+    priorityMode && "route-row--priority-mode",
     disconnected && "route-row--disconnected",
     hasCompromised && "route-row--compromised",
     pinned && "route-row--pinned",
@@ -509,7 +620,7 @@ function RouteRow({
               <Pill
                 size="sm"
                 className="route-priority-spread"
-                title="העדיפויות שנקבעו לראשי הציר. לכל ראש עדיפות משלו — היא חלה על המסלול מאותו ראש ועד היעד."
+                title="העדיפויות שסומנו על הציר. כל סימון חל על קטע מסוים, ורק מסלול שנוסע בו במלואו נחשב כמי שרכב עליו."
               >
                 {ridden.map((p) => (
                   <PriorityDot key={p} priority={p} />
@@ -546,18 +657,29 @@ function RouteRow({
       }
       actions={
         <>
-          {/* Only a plain corridor has *one* priority to state. A tree doesn't: each
-              head generates its own corridor and is rated on its own head chip, so a
-              route-level picker here would be claiming a rating the router never
-              applies. The header reports the spread instead (see the badge). */}
-          {!branched && (
-            <PrioritySelect
-              value={priority}
-              onChange={onChangePriority}
-              aria-label={`עדיפות ציר ${index + 1}`}
-              title="עדיפות הציר — א׳ היא הטובה ביותר. ציר בעדיפות נמוכה ישמש רק אם אין דרך אחרת."
-            />
-          )}
+          {/* There is no priority *picker* on a card: a rating applies to a stretch
+              of stops, so it is stated by sweeping that stretch out. This toggle is
+              what turns the card's chains into selectable ones. */}
+          <IconButton
+            className={
+              "route-priority-mode" +
+              (priorityMode ? " route-priority-mode--on" : "")
+            }
+            ariaLabel={
+              priorityMode
+                ? `סיים סימון עדיפויות בציר ${index + 1}`
+                : `סמן עדיפויות בציר ${index + 1}`
+            }
+            ariaPressed={priorityMode}
+            title={
+              priorityMode
+                ? "סיים סימון — חזרה לעריכת התחנות"
+                : "סמן עדיפות — בחר טווח תחנות וקבע לו עדיפות. העדיפות חלה רק על מסלול שנוסע בטווח כולו."
+            }
+            onClick={() => setPriorityMode((on) => !on)}
+          >
+            <IconFlag size={16} />
+          </IconButton>
           <IconButton
             className={"route-pin" + (pinned ? " route-pin--on" : "")}
             ariaLabel={
@@ -576,7 +698,7 @@ function RouteRow({
           >
             <IconDuplicate size={16} />
           </IconButton>
-          {!branched && (
+          {!branched && !priorityMode && (
             <IconButton
               ariaLabel={`הפוך את כיוון ציר ${index + 1}`}
               title="הפוך כיוון"
@@ -609,6 +731,7 @@ function RouteRow({
         highlight={highlight}
         onRenameStop={onRenameStop}
         compromisedPlaces={compromisedPlaces}
+        priorityMode={priorityMode}
         previewReversed={reversePreview}
       />
     </EditableGroupRow>

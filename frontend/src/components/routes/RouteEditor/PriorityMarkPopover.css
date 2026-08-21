@@ -1,0 +1,52 @@
+/* Pinned to the viewport (like the chain's insert menu) rather than to the card:
+   inside the branched map the chain lives in a scaled, panned canvas, so anything
+   positioned within it would inherit the zoom and drift off its stops. */
+.mark-pop {
+  position: fixed;
+  z-index: 100;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-2);
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  animation: rise 0.14s var(--ease) backwards;
+}
+
+.mark-pop-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: start;
+  cursor: pointer;
+}
+.mark-pop-item:hover,
+.mark-pop-item:focus-visible {
+  background: var(--surface-hover);
+}
+.mark-pop-item--on {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* The widen shortcut is a different kind of action from the four ratings, so it
+   sits below a rule rather than reading as a fifth priority. */
+.mark-pop-whole {
+  margin-top: 2px;
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}

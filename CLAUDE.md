@@ -10,30 +10,44 @@ between two places. Full-stack Django REST Framework + React, with a
 filesystem JSON store (no SQL). The UI is Hebrew/RTL.
 
 **The routing objective is concentration, not shortest-path**, gated by a hard
-priority tier. Each authored route carries a `priority` (int `0..3`, `0` = best) —
-and a *branched* route carries one **per head**: a head's rating covers the corridor
-it generates (that head, down the shared tail, to the destination) and no sibling's,
-so the tree's leaves can ride at different priorities. The root's own `priority` is
-a plain route's single rating, and the fallback for any head never rated.
+priority tier. Priority is stated as **marks**: an authored route (or any node of a
+branched one) carries `marks`, a list of `{from, to, priority}` ranges (inclusive,
+`from < to`, disjoint, `priority` `1..3`) over that node's **frame** — its own
+`places` followed by everything *downstream* of it, so a mark can start in a head
+and end in the shared tail. (`from` must sit in the node's own places; only `to` may
+reach past them. The frame is unambiguous because heads branch upstream but every
+node has exactly one way down to the destination.) An unmarked stretch rides at `0`
+(best). **A mark only bites when a result rides the marked stretch *whole*** —
+clipping it, even by one edge, costs nothing. Where the line falls between "brushed
+past it" and "rode it" is therefore drawn by the author rather than guessed from a
+length constant (there used to be a `TIER_EXEMPT_LENGTH` heuristic; marks replaced
+it). Which node *stores* a mark is what scopes it: one on a tree's shared tail rates
+every corridor that rides it; one on a head rates only the corridors below that head.
 Two levels judge a route's quality (and pick the single best result):
 
 1. **Tier** — the worst priority among the sub-routes a route actually *rides*: the
-   `max` priority over the runs of its max-HHI decomposition (the same chips the UI
-   shows). A route that rides only well-rated arteries beats one whose concentrated
-   corridor rides a badly-rated one **however long the detour**. Note this is
-   assignment-dependent: a road co-served by a good route escapes the downgrade only
-   when riding it *as* the good route is at least as concentrated — otherwise the
-   concentrated way to ride it is the bad one. (`Graph.edge_priority`, the per-edge
-   best, is a separate thing the generators use to hunt for a different corridor.)
+   `max` over the runs of its max-HHI decomposition (the same chips the UI shows),
+   each run's priority being the worst mark that run completes. A route that
+   completes no bad mark beats one whose concentrated corridor completes one
+   **however long the detour**. Note this is assignment-dependent: a road co-served
+   by a good route escapes the downgrade only when riding it *as* the good route is
+   at least as concentrated — otherwise the concentrated way to ride it is the
+   marked one. (`Graph.edge_priority`, the per-edge best, is a separate, deliberately
+   pessimistic thing — an edge merely *inside* a mark reads as rated — that the
+   generators use to hunt for a corridor avoiding the mark entirely.)
 2. **Concentration** — within a tier, a Herfindahl (HHI) score over how the route's
    length splits across the authored routes it stitches. Not fewest hops, not fewest
    merges. `Route.hhi` is deliberately **priority-free**: priority is the tier's job,
    so re-rating an artery must never move a route's score (or the match % built on
    it). The priority weights `w(p) = 1 - 0.2p` still exist inside
-   `concentration.evaluate` and run as a *second* solve whose score is discarded —
-   they decide which artery gets credit for a shared edge, and hence the sub-route
-   chips and the tier. Consequence: with `PriorityMode.HARD_TIER` off, the ranking is
-   fully priority-blind, since the arena is then the only priority mechanism left.
+   `concentration.evaluate` as the *tie-break* over equally concentrated credit
+   assignments — they decide which artery gets credit for a shared edge (and so
+   which reading completes a mark), and hence the sub-route chips and the tier.
+   The credit-assignment DP keys its state on `(route, run start edge)` rather than
+   `(route, accumulated length)` precisely so a run's *node span* — and therefore
+   whether it completes a mark — is known at the moment the run closes.
+   Consequence: with `PriorityMode.HARD_TIER` off, the ranking is fully
+   priority-blind, since the arena is then the only priority mechanism left.
 
 Both are non-additive, so they can't be optimized inside a single shortest-path
 search; `backend/api/graph/routing.py` generates a pool of candidate corridors
@@ -164,8 +178,9 @@ etc. almost certainly already exists.**
 - `FloatingPanel` / `FloatingPanelList[Item]` — the floating card used by the
   brain page's node detail and insights panels.
 - `Select` — the generic dropdown (a native `<select>` in design tokens), for a
-  short *closed* set of values (e.g. the route-priority picker). `Autocomplete` is
-  the one for searching a long open list of places; don't confuse the two.
+  short *closed* set of values. `Autocomplete` is the one for searching a long open
+  list of places; don't confuse the two. (Currently unused — the route-priority
+  picker it was built for became `PriorityMarkPopover`.)
 - `ConfirmModal`, `EmptyState`, `LoaderLayout`, `PageHeader`, `SegmentedControl` /
   `SegmentedNav` (tabs vs. router-linked nav), `SwapButton` (start/end swap,
   pairs with `useOriginDestination`).
@@ -181,7 +196,15 @@ etc. almost certainly already exists.**
 - `RouteChain` — the canonical *read-only* rendering of a stop chain (pills +
   chevron connectors); used for path results.
 - `EditableRouteChain` — the drag-to-reorder (dnd-kit) editable version used
-  in the route editor.
+  in the route editor. It also owns **stop picking**: `selectionMode` swaps the
+  reorder gesture for picking stops (press-and-drag, or tap one end then the other),
+  reporting each as `onSelectStop(phase, {key, index}, at)` — a chain reports *which
+  of its stops* was picked and nothing more, because a gesture may start in one
+  segment and end in another. `ranges` paints stretches onto the pills and `selected`
+  the live pick. All of it is deliberately anonymous — the editor's priority marks
+  are what fill it; the chain only knows "these stops belong together". `BranchedChain`
+  is what resolves a pair of picks into a mark (`resolveRange`) and cuts marks into
+  per-segment pieces to paint (`markPieces`/`framePieces`).
 
 Cross-page hooks (`hooks/`): `useAutoSave` (debounced/validated persistence
 with save-ordering, used by both RoutesPage editors) and
@@ -195,7 +218,13 @@ into junction/base/interchange by naming convention, e.g. `"צ. "` prefix =
 junction) — the classification regexes are the single source of truth for
 place "type" anywhere in the UI — and `priorities.js` (route priority is `0..3`
 on the wire but Hebrew letters `א׳..ד׳` in the UI; this is the only place the two
-vocabularies meet, so never hardcode a letter in a component).
+vocabularies meet, so never hardcode a letter in a component). `branches.js` mirrors
+the backend's `expand_route` **and** owns every mark edit — `setMark` (overlap-trimming,
+so re-marking the middle of a stretch splits it), `removeMark`, the frame arithmetic
+(`nodeFrame`, `framePieces`, `resolveRange`, `markPieces`), and the index remapping
+every structural edit needs (`patchNodePlaces`, `branchAt`, `removeBranch`,
+`reverseRoute`). Its invariant, and what its edits are tested against: a mark keeps
+naming **the same road** across every structural edit.
 
 `styles/global.css` defines the whole design-token vocabulary (`--bg`,
 `--surface*`, `--accent*`, `--text*`, `--r-*` radii, `--s-*` spacing,
@@ -208,15 +237,24 @@ values. The theme is dark-only (no light-mode branch to maintain).
 ### The filesystem store (`backend/api/db.py`)
 
 - **`routes.json`** is the source of truth: routes exactly as authored, each
-  `{"places": [...], "priority": 0..3}`, optionally with `"branches"` (a converging
-  tree of heads — see `expand_route`). A bare `[...]` list (the pre-priority
-  shape) still loads, as priority 0, and is upgraded on the next save. A head may
-  carry its own `"priority"`; absent means it inherits its parent's, so `expand_route`
-  resolves each leaf's on the way down and returns `{"places", "priority"}` per
-  subroute. Priority is deliberately **not** copied into the derived graph file —
-  `load_graph()` re-attaches it from here, so this stays the one place it lives.
-  The editor shows the route-level picker only for a *plain* route: a tree has no
-  single priority to state, so each head is rated on its own chip in the tree.
+  `{"places": [...], "marks": [...]}`, optionally with `"branches"` (a converging
+  tree of heads — see `expand_route`). Every node (root or head) may carry its own
+  `marks`. Two pre-marks shapes still load and are upgraded on the next save
+  (`upgrade_node`): a bare `[...]` list, and a `"priority": 0..3` field, which
+  resolves down the spine exactly as it used to and becomes one mark per *leaf* over
+  that leaf's whole frame — i.e. the corridor the field always rated. Marking the
+  leaves (not every node) is what keeps the upgrade faithful, and what lets a
+  one-stop head keep its rating: it owns no edge, but its corridor does. `expand_route` returns `{"places", "marks"}` per subroute,
+  where each mark has become a `(start place, end place, priority)` triple — a leaf
+  chain concatenates several nodes and the derived graph is built from *filled*
+  chains, so only names line up across both. Marks are deliberately **not** copied
+  into the derived graph file — `load_graph()` re-attaches them from here, so this
+  stays the one place they live. There is no priority picker anywhere in the
+  editor: a rating applies to a range, so it is stated by picking the two ends of a
+  stretch on the chain (the `⚑` toggle on each route card) and choosing a priority in
+  `PriorityMarkPopover`. A range may run from a head *downstream* into the shared
+  tail, never across to a sibling — nothing rides two sibling heads, so a pair of
+  stops on both names no road.
 - **`edge_routes.json`** is derived and rebuilt on every save:
   `[[place_a, place_b, [authored route indices]], ...]`. The adjacency is
   reconstructed from these edges — there's no separate adjacency file. This is

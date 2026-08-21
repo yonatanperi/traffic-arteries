@@ -435,3 +435,81 @@
     text-align: center;
   }
 }
+
+/* --- ranges: a band of stops that belong together ------------------------
+   The route editor paints its priority marks with these; the component itself
+   only knows "these stops are one stretch". The tint rides the same 0..3 ramp
+   the priority dot does (`--priority-step`, set inline per range), so a worse
+   rating reads as more warning-coloured without four hardcoded values.
+
+   Only the *pills* are tinted, never the gaps between them: a band drawn across
+   the connectors would have to bridge two flex gaps whose widths change with the
+   wrap mode and the branched map's zoom, and it buys nothing a run of tinted
+   pills doesn't already say. The connector just borrows the range's colour. */
+.stop--marked,
+.insert-slot--marked,
+.chain-range-tag {
+  --mark-color: color-mix(
+    in srgb,
+    var(--warning) calc(var(--priority-step) * 33%),
+    var(--accent)
+  );
+}
+
+/* After .stop--start/.stop--end on purpose — an endpoint inside a marked stretch
+   is showing its rating, not its endpoint-ness. */
+.stop--marked {
+  background: color-mix(in srgb, var(--mark-color) 14%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--mark-color) 55%, transparent);
+  color: var(--text);
+}
+.insert-slot--marked {
+  color: var(--mark-color);
+}
+
+/* The tag at the range's start: what it is, and the only way to take it off. */
+.chain-range-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px 2px 4px;
+  border-radius: var(--r-pill);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--mark-color);
+  background: color-mix(in srgb, var(--mark-color) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mark-color) 40%, transparent);
+}
+.chain-range-remove {
+  color: inherit;
+  opacity: 0.65;
+}
+.chain-range-remove:hover {
+  opacity: 1;
+}
+
+/* --- selection mode ------------------------------------------------------
+   The chain is being swept, not edited: text selection would fight the drag, and
+   the insert slots must not answer a press meant for the sweep. */
+.chain--selecting {
+  user-select: none;
+  cursor: pointer;
+}
+.chain--selecting .insert-slot {
+  pointer-events: none;
+}
+.chain--selecting .stop {
+  cursor: pointer;
+}
+
+/* The live sweep (and a first tap waiting for its other end) — the accent, not the
+   ramp: nothing has been rated yet, this is just what is about to be. */
+.stop--selected {
+  background: var(--accent-fill);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.insert-slot--selected {
+  color: var(--accent);
+}

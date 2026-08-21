@@ -9,16 +9,26 @@ Every edge also remembers **which authored routes traverse it** (by index), so
 the router can find the route that merges the fewest authored routes rather than
 the shortest one. See :mod:`.search`.
 
-Each authored route also carries a **priority** (``0`` = best … ``3`` = worst),
-which is what makes some arteries worth riding more than others. The graph is
-where that lives, since both the scorer (:mod:`.concentration`) and the candidate
-generators (:mod:`.search`) need it per edge.
+An authored route may also carry **priority marks** (``0`` = best … ``3`` = worst),
+which is what makes some arteries worth riding more than others. A mark rates one
+*stretch* of a route rather than the whole of it, and it only bites when a result
+rides that stretch **entirely** — see :meth:`Graph.run_priority`. The graph is
+where marks live, since both the scorer (:mod:`.concentration`) and the candidate
+generators (:mod:`.search`) need them.
+
+A mark reaches the graph as a ``(start place, end place, priority)`` triple rather
+than the index range the author drew, because the graph holds edges, not chains —
+and the chains it was derived from were *filled* (:meth:`~api.db.Database.
+fill_missing_destinations`), so the authored indices no longer line up anyway.
+Names do, and they are enough: every edge of a run belongs to the route being
+credited, and a route's chain is a simple path, so a contiguous run holding both
+endpoint names necessarily holds the whole stretch between them.
 """
 
-# Authored-route priority: 0 is best, WORST_PRIORITY is worst. A route with no
-# stated priority (and any edge with no authored-route provenance) is best by
-# default, so a graph that knows nothing about priorities behaves exactly as it
-# did before the feature existed.
+# Authored-route priority: 0 is best, WORST_PRIORITY is worst. An unmarked stretch
+# (and any edge with no authored-route provenance) is best by default, so a graph
+# that knows nothing about priorities behaves exactly as it did before the feature
+# existed.
 BEST_PRIORITY = 0
 WORST_PRIORITY = 3
 
@@ -33,19 +43,26 @@ def path_edges(path):
     return {edge_key(a, b) for a, b in zip(path, path[1:])}
 
 
-def _priority_map(priorities):
-    """``{route index: priority}`` from a sequence parallel to the routes.
+def _marks_map(marks):
+    """``{route index: ((start, end, priority), ...)}`` from a sequence parallel
+    to the routes.
 
-    Default-priority routes are left out, so a graph where nothing is rated
-    carries an empty map and every priority lookup short-circuits.
+    Best-priority marks are dropped (they say nothing — an unmarked stretch is
+    already best), and so are routes left with none, so a graph where nothing is
+    rated carries an empty map and every priority lookup short-circuits.
     """
-    if not priorities:
+    if not marks:
         return {}
-    return {
-        index: priority
-        for index, priority in enumerate(priorities)
-        if priority != BEST_PRIORITY
-    }
+    out = {}
+    for index, entries in enumerate(marks):
+        rated = tuple(
+            (start, end, priority)
+            for start, end, priority in (entries or ())
+            if priority != BEST_PRIORITY
+        )
+        if rated:
+            out[index] = rated
+    return out
 
 
 class Graph:
@@ -60,18 +77,20 @@ class Graph:
     built without route provenance) simply has no membership, and the router then
     treats every edge as its own route.
 
-    ``route_priorities`` maps an authored route index to its priority
-    (:data:`BEST_PRIORITY` … :data:`WORST_PRIORITY`). Also optional — an unrated
-    route is :data:`BEST_PRIORITY`.
+    ``route_marks`` maps an authored route index to its priority marks, each a
+    ``(start place, end place, priority)`` triple naming a rated stretch of that
+    route. Also optional — a route with no marks rides at :data:`BEST_PRIORITY`
+    throughout.
     """
 
-    def __init__(self, adjacency, edge_routes=None, route_priorities=None):
+    def __init__(self, adjacency, edge_routes=None, route_marks=None):
         """Wrap a raw ``{place: iterable of neighbours}`` mapping.
 
         Neighbours are de-duplicated and sorted, so passing either a freshly
         built adjacency or one loaded from disk yields the same normalised graph.
         ``edge_routes`` is an optional ``{edge_key: iterable of route indices}``,
-        and ``route_priorities`` an optional ``{route index: priority}``.
+        and ``route_marks`` an optional ``{route index: marks}`` (see the class
+        docstring).
         """
         self._adjacency = {
             place: sorted(set(neighbours)) for place, neighbours in adjacency.items()
@@ -80,10 +99,13 @@ class Graph:
             edge_key(*edge): tuple(sorted(set(routes)))
             for edge, routes in (edge_routes or {}).items()
         }
-        self._route_priorities = dict(route_priorities or {})
+        self._route_marks = dict(route_marks or {})
+        # Per-edge mark priorities, derived lazily and only for rated routes —
+        # see :meth:`_marked_edges`. Not part of the graph's identity.
+        self._marked_edges_cache = {}
 
     @classmethod
-    def from_routes(cls, routes, priorities=None):
+    def from_routes(cls, routes, marks=None):
         """Build a graph from routes (lists of place names).
 
         Each pair of *consecutive* places in a route becomes an undirected edge,
@@ -91,8 +113,9 @@ class Graph:
         appears is guaranteed a node, even if it ends up isolated. Self-loops (a
         place adjacent to itself) are ignored.
 
-        ``priorities`` is an optional sequence parallel to ``routes``; omit it and
-        every route is :data:`BEST_PRIORITY`.
+        ``marks`` is an optional sequence parallel to ``routes``, each entry that
+        route's ``(start, end, priority)`` triples; omit it and every route rides
+        at :data:`BEST_PRIORITY`.
         """
         adjacency = {}
         edge_routes = {}
@@ -111,10 +134,10 @@ class Graph:
                 adjacency[b].add(a)
                 edge_routes.setdefault(edge_key(a, b), set()).add(index)
 
-        return cls(adjacency, edge_routes, _priority_map(priorities))
+        return cls(adjacency, edge_routes, _marks_map(marks))
 
     @classmethod
-    def from_edge_routes(cls, records, priorities=None):
+    def from_edge_routes(cls, records, marks=None):
         """Build a graph from persisted ``[[a, b, [route indices]], ...]`` records.
 
         These records (see :attr:`edge_routes_records`) are the single derived
@@ -122,9 +145,9 @@ class Graph:
         edges. Every connected place appears on at least one edge, so nothing
         routable is lost.
 
-        ``priorities`` is an optional sequence indexed by authored route — it is
-        *not* part of the derived records, it comes straight from the routes file,
-        which stays the single source of truth for it.
+        ``marks`` is an optional sequence indexed by authored route — it is *not*
+        part of the derived records, it comes straight from the routes file, which
+        stays the single source of truth for it.
         """
         adjacency = {}
         edge_routes = {}
@@ -132,7 +155,7 @@ class Graph:
             adjacency.setdefault(a, set()).add(b)
             adjacency.setdefault(b, set()).add(a)
             edge_routes[edge_key(a, b)] = routes
-        return cls(adjacency, edge_routes, _priority_map(priorities))
+        return cls(adjacency, edge_routes, _marks_map(marks))
 
     @property
     def adjacency(self):
@@ -169,42 +192,157 @@ class Graph:
             ids.update(routes)
         return sorted(ids)
 
-    def route_priority(self, route_id):
-        """Priority of authored route ``route_id`` (``0`` = best).
+    def route_marks(self, route_id):
+        """The rated stretches of authored route ``route_id``.
 
-        Anything unrated is :data:`BEST_PRIORITY` — including the synthetic
-        edge-key "routes" a provenance-less graph falls back on, which aren't
-        authored routes at all and so can't be rated.
+        A tuple of ``(start place, end place, priority)``; empty for an unrated
+        route — including the synthetic edge-key "routes" a provenance-less graph
+        falls back on, which aren't authored routes at all and so can't be rated.
         """
-        return self._route_priorities.get(route_id, BEST_PRIORITY)
+        return self._route_marks.get(route_id, ())
+
+    def run_priority(self, route_id, span):
+        """The priority a *run* on ``route_id`` covering ``span`` rides at.
+
+        ``span`` is the run's node sequence (any container of place names). A mark
+        counts only when the run holds **both** of its endpoints: riding part of a
+        rated stretch is deliberately free, and the mark is the author's statement
+        of how much of the artery has to be driven before the rating applies. The
+        worst such mark wins; a run completing none rides at :data:`BEST_PRIORITY`.
+
+        Testing by endpoint names is exact — every edge of a run is on
+        ``route_id`` and that route's chain is a simple path, so a contiguous run
+        holding both endpoints holds the whole stretch between them. (Hot callers
+        don't come through here: :func:`~.concentration.evaluate` indexes the marks
+        against the candidate chain once and tests integer windows instead.)
+        """
+        marks = self._route_marks.get(route_id)
+        if not marks:
+            return BEST_PRIORITY
+        nodes = span if isinstance(span, (set, frozenset)) else set(span)
+        return max(
+            (priority for start, end, priority in marks if start in nodes and end in nodes),
+            default=BEST_PRIORITY,
+        )
+
+    def route_priority(self, route_id):
+        """The worst priority route ``route_id`` can inflict (``0`` when unmarked).
+
+        The rating a route is capable of, not one it necessarily applies: what a
+        given ride actually pays is :meth:`run_priority`. This is the *floor* the
+        candidate generators bias against in :meth:`~.routing.RouteFinder.
+        _generate_chains`.
+        """
+        marks = self._route_marks.get(route_id)
+        if not marks:
+            return BEST_PRIORITY
+        return max(priority for _, _, priority in marks)
+
+    def _route_chain(self, route_id):
+        """Reconstruct route ``route_id``'s stop chain from the edges tagged with it.
+
+        The graph persists edges, not chains, but a mark's *edge set* (which
+        :meth:`edge_priority` needs) can't be known without the order. The edges of
+        one authored route form a path, so walking them recovers it. Returns
+        ``None`` when they don't — a route that revisits a place — which the caller
+        handles conservatively rather than guessing an order.
+        """
+        adjacency = {}
+        for (a, b), routes in self._edge_routes.items():
+            if route_id in routes:
+                adjacency.setdefault(a, []).append(b)
+                adjacency.setdefault(b, []).append(a)
+        if not adjacency:
+            return None
+        ends = [node for node, near in adjacency.items() if len(near) == 1]
+        if len(ends) != 2 or any(len(near) > 2 for near in adjacency.values()):
+            return None
+        chain = [min(ends)]
+        previous = None
+        while True:
+            onward = [n for n in adjacency[chain[-1]] if n != previous]
+            if not onward:
+                break
+            previous = chain[-1]
+            chain.append(onward[0])
+        return chain if len(chain) == len(adjacency) else None
+
+    def _marked_edges(self, route_id):
+        """``{edge_key: worst mark priority}`` for the edges inside ``route_id``'s marks.
+
+        Memoised, and only ever computed for a route that actually carries marks.
+        When the chain can't be recovered (see :meth:`_route_chain`) every edge of
+        the route counts as marked at its worst rating: this feeds *generators*
+        only, where over-banning costs a detour candidate, never a wrong score.
+        """
+        cached = self._marked_edges_cache.get(route_id)
+        if cached is not None:
+            return cached
+        marks = self._route_marks.get(route_id, ())
+        marked = {}
+        if marks:
+            chain = self._route_chain(route_id)
+            if chain is None:
+                worst = max(priority for _, _, priority in marks)
+                marked = {
+                    edge: worst
+                    for edge, routes in self._edge_routes.items()
+                    if route_id in routes
+                }
+            else:
+                position = {}
+                for index, place in enumerate(chain):
+                    position.setdefault(place, index)
+                for start, end, priority in marks:
+                    i, j = position.get(start), position.get(end)
+                    if i is None or j is None:
+                        continue
+                    if i > j:
+                        i, j = j, i
+                    for a, b in zip(chain[i:j], chain[i + 1 : j + 1]):
+                        key = edge_key(a, b)
+                        marked[key] = max(marked.get(key, BEST_PRIORITY), priority)
+        self._marked_edges_cache[route_id] = marked
+        return marked
 
     def edge_priority(self, a, b):
         """The best priority available on edge ``(a, b)``.
 
         An edge may be carried by several authored routes; travelling it commits
         you to *at least* the best-rated of them, so the edge's priority is their
-        minimum. Note this is **not** the route *tier* (that follows the sub-routes
-        actually ridden — see :func:`~.concentration.tier`); it is the per-edge best
-        the generators use to hunt for a physically better-rated corridor, and the
-        skip test in :meth:`~.routing.RouteFinder._crosses_forced_below`.
+        minimum — where a single route rates the edge by the worst of its marks
+        covering it. Note this is **not** the route *tier* (that follows the
+        sub-routes actually ridden, and only when a mark is ridden *whole* — see
+        :func:`~.concentration.tier`); it is the per-edge best the generators use to
+        hunt for a physically better-rated corridor, and the skip test in
+        :meth:`~.routing.RouteFinder._crosses_forced_below`. Deliberately
+        pessimistic next to the tier: an edge merely *inside* a marked stretch reads
+        as rated here even though clipping that stretch would cost nothing, which
+        keeps the generators hunting for a corridor that avoids the mark entirely.
         """
         routes = self.routes_on(a, b)
         if not routes:
             return BEST_PRIORITY
-        return min(self.route_priority(route) for route in routes)
+        key = edge_key(a, b)
+        return min(
+            self._marked_edges(route).get(key, BEST_PRIORITY) for route in routes
+        )
 
     def has_priorities(self):
-        """Whether any authored route is rated worse than :data:`BEST_PRIORITY`.
+        """Whether any authored route carries a mark worse than :data:`BEST_PRIORITY`.
 
         When nothing is rated, priority cannot change any ranking, so the
         priority-aware candidate passes in :mod:`.routing` are skipped entirely
         and the search costs exactly what it did before the feature existed.
         """
-        return bool(self._route_priorities)
+        return bool(self._route_marks)
 
     def worst_priority(self):
-        """The worst priority any authored route carries (``0`` when none are rated)."""
-        return max(self._route_priorities.values(), default=BEST_PRIORITY)
+        """The worst priority any mark carries (``0`` when nothing is rated)."""
+        return max(
+            (priority for marks in self._route_marks.values() for _, _, priority in marks),
+            default=BEST_PRIORITY,
+        )
 
     def __contains__(self, place):
         return place in self._adjacency
@@ -249,7 +387,7 @@ class Graph:
             for edge, routes in self._edge_routes.items()
             if edge[0] not in exclude and edge[1] not in exclude
         }
-        return Graph(adjacency, edge_routes, self._route_priorities)
+        return Graph(adjacency, edge_routes, self._route_marks)
 
     def to_network(self):
         """Shape the graph for react-force-graph-2d: ``{nodes, links}``.

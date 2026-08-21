@@ -99,7 +99,10 @@ def path(request):
     """Top 3 routes between two points, optionally via required stops.
 
     "Best" is the route that rides one *good* authored route as far as possible:
-    the best priority tier first, then the highest concentration score.
+    the best priority tier first, then the highest concentration score. A route's
+    tier is the worst *priority mark* its ridden sub-routes complete — a mark rates
+    a stretch of an authored route, and only a ride covering that stretch whole pays
+    for it.
 
     Body: ``{"start": <place>, "end": <place>, "via": [<place>, ...]}``.
     ``via`` is optional — required intermediate stops the route must pass
@@ -111,8 +114,9 @@ def path(request):
     term, so the number shown always agrees with the order the results are listed in
     and does not move when an artery is re-prioritised), the
     route's ``priority`` *tier* (the worst priority among the sub-routes it rides,
-    i.e. the max over ``routes[].priority`` below — why a longer route may outrank a
-    shorter one, so the UI must surface it), and which authored routes route ``i``
+    each being the worst mark that sub-route completes, i.e. the max over
+    ``routes[].priority`` below — why a longer route may outrank a shorter one, so
+    the UI must surface it), and which authored routes route ``i``
     merges (labelled by their
     endpoints, each with its own ``priority`` and a ``startIndex``/``endIndex``
     pair — inclusive, 0-based indices into ``paths[i]`` — for the stop range it

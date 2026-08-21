@@ -113,6 +113,35 @@ function isMatch(value, highlight) {
  *                 drag-reorder animation) without emitting a change — a caller (the
  *                 route editor's reverse button) toggles this on hover to preview
  *                 the flip, and a click commits it via `onChange` instead.
+ *   ranges        optional `[{ from, to, tone, label, onRemove }]` — inclusive stop
+ *                 index ranges to paint as a band across the pills *and* the
+ *                 connectors between them, each with a tag at its start. Deliberately
+ *                 anonymous: the route editor's priority marks are what fill it, but
+ *                 this component only knows "these stops belong together". `tone` is
+ *                 a 0..3 ramp step for the band's colour and `label` is any node, so
+ *                 the caller owns the vocabulary. Painted whether or not selection is
+ *                 on, since a range is a property of the chain, not of the mode.
+ *   selectionMode when set, the chain stops being editable (no reorder, no inline
+ *                 edit, no insert) and becomes *selectable*: pressing a stop and
+ *                 dragging picks stops out, and so does tapping one and then
+ *                 another. Reuses the drag gesture the reorder normally owns, which
+ *                 is why the two modes are exclusive rather than layered.
+ *   selectionKey  opaque id for this chain, reported back with every picked stop.
+ *                 Several chains rendered together share one gesture — a drag that
+ *                 starts here may end over another — so a stop is only identified by
+ *                 *which* chain plus its index.
+ *   onSelectStop  (phase, { key, index } | null, at) => void — "start" on press,
+ *                 "move" as the pointer crosses stops, "end" on release, with
+ *                 whatever stop is under the pointer (possibly another chain's, or
+ *                 null on an "end" released over nothing). The caller decides
+ *                 what a pair of stops means and what is a legal range: this
+ *                 component reports picks and paints what it's told, nothing more.
+ *                 `at` is `{ top, right }` in viewport coordinates, taken from the
+ *                 stop the gesture ended on, so a caller can pin a menu to it —
+ *                 viewport rather than local because the branched map renders the
+ *                 chain inside a scaled, panned canvas.
+ *   selected      `{ from, to }` | null — this chain's stops currently picked out,
+ *                 as the caller computes them.
  */
 export default function EditableRouteChain({
   stops,
@@ -128,6 +157,11 @@ export default function EditableRouteChain({
   showEnd = true,
   wrapEvery = null,
   previewReversed = false,
+  ranges = null,
+  selectionMode = false,
+  selectionKey = null,
+  selected = null,
+  onSelectStop,
 }) {
   // Internal id-keyed model so dnd-kit and the inline editor stay stable across
   // reorders (stop values can duplicate, so they can't be used as keys).
@@ -153,7 +187,8 @@ export default function EditableRouteChain({
   const pointerSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
-  const sensors = sortable ? pointerSensors : NO_SENSORS;
+  // Selection mode owns the drag gesture, so reorder must give it up entirely.
+  const sensors = sortable && !selectionMode ? pointerSensors : NO_SENSORS;
 
   // A manual FLIP for the reverse-preview flip specifically: dnd-kit only
   // animates a reorder that happens *during* a live drag it's tracking (see
@@ -296,11 +331,96 @@ export default function EditableRouteChain({
     setAddingId(null);
   }
 
+  // --- stop picking ------------------------------------------------------
+  //
+  // The gesture lives here; what a pair of picked stops *means* does not. Several
+  // chains may be rendered as one tree, and a drag that starts in one can end in
+  // another — so every pick is reported as (chain key, stop index) and the caller
+  // resolves it. Whether the pointer is dragging is a ref, not state: it changes on
+  // every pointermove and nothing in the render depends on it.
+  const draggingRef = useRef(false);
+
+  useEffect(() => {
+    if (!selectionMode) draggingRef.current = false;
+  }, [selectionMode]);
+
+  // The whole `.chain-item` carries the index — pill *and* the connector after it —
+  // so sweeping across a chain never falls into a dead gap between pills. Read off
+  // the element under the pointer, which may belong to a *different* chain than the
+  // one that captured the gesture; that's the point.
+  const pointAt = (target) => {
+    const stop = target?.closest?.("[data-stop-index]");
+    const chain = stop?.closest?.("[data-selection-key]");
+    if (!stop || !chain) return null;
+    return { key: chain.dataset.selectionKey, index: Number(stop.dataset.stopIndex) };
+  };
+
+  // Pin whatever the caller opens under the stop the gesture ended on — the one the
+  // hand is already over. RTL, so the menu's start edge is the right one.
+  const anchorRect = (point, event) => {
+    const el = document.querySelector(
+      `[data-selection-key="${point.key}"] [data-stop-index="${point.index}"]`,
+    );
+    const rect = el?.getBoundingClientRect();
+    return rect
+      ? { top: rect.bottom + 6, right: window.innerWidth - rect.right }
+      : { top: event.clientY + 6, right: window.innerWidth - event.clientX };
+  };
+
+  function startPick(e) {
+    if (!selectionMode || e.button !== 0) return;
+    const point = pointAt(e.target);
+    if (!point) return;
+    draggingRef.current = true;
+    // Capture on the list, not the pill: the pointer leaves the pill immediately,
+    // and elementFromPoint keeps reporting what is under it regardless.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    onSelectStop?.("start", point, anchorRect(point, e));
+  }
+
+  function movePick(e) {
+    if (!draggingRef.current) return;
+    const point = pointAt(document.elementFromPoint(e.clientX, e.clientY));
+    if (point) onSelectStop?.("move", point, anchorRect(point, e));
+  }
+
+  function endPick(e) {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    // Always reported, even when released over nothing (the empty canvas between
+    // segments): the caller is holding the gesture's start and has to be told it
+    // ended, or the next press would extend a range from a stop long since let go.
+    const point = pointAt(document.elementFromPoint(e.clientX, e.clientY));
+    onSelectStop?.("end", point, point ? anchorRect(point, e) : null);
+  }
+
+  // Ranges by stop index. Overlap is possible — a mark drawn from a head can reach
+  // the shared tail while the tail carries one of its own — so the pill shows the
+  // *worst* range covering it, the one that costs a route the most.
+  const rangeAt = (index) =>
+    ranges?.reduce(
+      (worst, range) =>
+        index >= range.from &&
+        index <= range.to &&
+        (!worst || range.tone > worst.tone)
+          ? range
+          : worst,
+      null,
+    ) ?? null;
+  // A tag belongs to the range's *start*, which for a range spilling in from another
+  // chain isn't here at all — the caller labels only the piece that owns it.
+  const tagsAt = (index) =>
+    ranges?.filter((range) => range.label && range.from === index) ?? [];
+  const inSelection = (index) =>
+    Boolean(selected) && index >= selected.from && index <= selected.to;
+
   // The leading "+" (add a stop / — on a junction tail — a sibling head at the
   // junction). Lives at the very start of the chain (row 0 when wrapped).
   const lead = (
     <InsertSlot
       variant="lead"
+      disabled={selectionMode}
       onAddStop={() => openInsert(0)}
       onAddBranch={onAddBranch && isJunction ? () => onAddBranch(0) : undefined}
       branchLabel="הוסף ראש"
@@ -308,54 +428,80 @@ export default function EditableRouteChain({
   );
 
   // One stop: its pill (or inline editor) plus the "+"/chevron gap after it.
-  const renderStop = (it, i) => (
-    <li
-      className="chain-item"
-      key={it.id}
-      ref={(el) => {
-        if (el) chainItemRefs.current.set(it.id, el);
-        else chainItemRefs.current.delete(it.id);
-      }}
-    >
-      {editingId === it.id ? (
-        <StopEditor
-          initial={it.value}
-          suggestions={suggestions}
-          onCommit={(v, keepAdding) => commitEdit(it.id, v, keepAdding)}
-          onCancel={() => cancelEdit(it.id)}
+  const renderStop = (it, i) => {
+    const range = rangeAt(i);
+    // The connector after stop i is inside a range only when stop i + 1 is too — it
+    // *is* that hop, so the band has to stop at the range's last pill. A range
+    // reaching past this chain's last stop carries on into the next segment, and its
+    // trailing connector is the junction hop, so that one stays painted too.
+    const linked = range && (i < range.to || range.continues);
+    const picked = inSelection(i);
+    const pickedLink = picked && (inSelection(i + 1) || selected?.continues);
+    const stopProps = {
+      item: it,
+      index: i,
+      count: items.length,
+      highlight,
+      showStart,
+      showEnd,
+      compromised: compromisedPlaces?.has(it.value),
+      tone: range?.tone,
+      marked: Boolean(range),
+      selected: picked,
+    };
+    return (
+      <li
+        className="chain-item"
+        key={it.id}
+        data-stop-index={selectionMode ? i : undefined}
+        ref={(el) => {
+          if (el) chainItemRefs.current.set(it.id, el);
+          else chainItemRefs.current.delete(it.id);
+        }}
+      >
+        {tagsAt(i).map((tagged, k) => (
+          <RangeTag key={k} range={tagged} />
+        ))}
+        {editingId === it.id && !selectionMode ? (
+          <StopEditor
+            initial={it.value}
+            suggestions={suggestions}
+            onCommit={(v, keepAdding) => commitEdit(it.id, v, keepAdding)}
+            onCancel={() => cancelEdit(it.id)}
+          />
+        ) : selectionMode ? (
+          <SelectableStop {...stopProps} />
+        ) : (
+          <SortableStop
+            {...stopProps}
+            dragging={dragging}
+            // A hover preview shows the flipped order but isn't itself draggable —
+            // it's not a real state to reorder from, just a glimpse of the reverse.
+            sortable={sortable && !previewReversed}
+            onEdit={() => setEditingId(it.id)}
+            onRemove={() => removeStop(it.id)}
+          />
+        )}
+        <InsertSlot
+          variant={i < items.length - 1 ? "gap" : "trail"}
+          disabled={selectionMode}
+          tone={linked ? range.tone : undefined}
+          marked={Boolean(linked)}
+          selected={pickedLink}
+          onAddStop={() => openInsert(i + 1)}
+          // Branch = split at this gap: the stops up to and including this one
+          // (index i → splitIndex i+1) become a head, the rest the shared tail.
+          // Every gap between two stops offers it; the trailing "+" (i === last)
+          // has no tail after it, so it doesn't.
+          onAddBranch={
+            onAddBranch && i < items.length - 1
+              ? () => onAddBranch(i + 1)
+              : undefined
+          }
         />
-      ) : (
-        <SortableStop
-          item={it}
-          index={i}
-          count={items.length}
-          highlight={highlight}
-          dragging={dragging}
-          // A hover preview shows the flipped order but isn't itself draggable —
-          // it's not a real state to reorder from, just a glimpse of the reverse.
-          sortable={sortable && !previewReversed}
-          showStart={showStart}
-          showEnd={showEnd}
-          compromised={compromisedPlaces?.has(it.value)}
-          onEdit={() => setEditingId(it.id)}
-          onRemove={() => removeStop(it.id)}
-        />
-      )}
-      <InsertSlot
-        variant={i < items.length - 1 ? "gap" : "trail"}
-        onAddStop={() => openInsert(i + 1)}
-        // Branch = split at this gap: the stops up to and including this one
-        // (index i → splitIndex i+1) become a head, the rest the shared tail.
-        // Every gap between two stops offers it; the trailing "+" (i === last)
-        // has no tail after it, so it doesn't.
-        onAddBranch={
-          onAddBranch && i < items.length - 1
-            ? () => onAddBranch(i + 1)
-            : undefined
-        }
-      />
-    </li>
-  );
+      </li>
+    );
+  };
 
   // Purely a display order: reversed for the hover preview, otherwise identical
   // to `items`. Every mutation (drag/add/remove/edit) still reads and writes
@@ -423,13 +569,96 @@ export default function EditableRouteChain({
           className={
             "chain" +
             (wrapEvery ? " chain--wrapped" : "") +
-            (dragging ? " chain--dragging" : "")
+            (dragging ? " chain--dragging" : "") +
+            (selectionMode ? " chain--selecting" : "")
           }
+          data-selection-key={selectionMode ? selectionKey : undefined}
+          onPointerDown={selectionMode ? startPick : undefined}
+          onPointerMove={selectionMode ? movePick : undefined}
+          onPointerUp={selectionMode ? endPick : undefined}
+          onPointerCancel={selectionMode ? endPick : undefined}
         >
           {body}
         </ol>
       </SortableContext>
     </DndContext>
+  );
+}
+
+/** The classes every pill shares, whichever mode renders it. */
+function stopClassName({ index, count, showStart, showEnd, matched, compromised, marked, selected }) {
+  return (
+    "stop stop--editable" +
+    (showStart && index === 0 ? " stop--start" : "") +
+    (showEnd && index === count - 1 ? " stop--end" : "") +
+    (matched ? " stop--match" : "") +
+    (compromised ? " stop--compromised" : "") +
+    (marked ? " stop--marked" : "") +
+    (selected ? " stop--selected" : "")
+  );
+}
+
+/**
+ * A pill in selection mode: no drag, no inline edit, no remove — the press
+ * belongs to the range sweep on the list, so the pill deliberately handles
+ * nothing itself and only reports how it should look.
+ */
+function SelectableStop({
+  item,
+  index,
+  count,
+  highlight,
+  showStart = true,
+  showEnd = true,
+  compromised,
+  tone,
+  marked,
+  selected,
+}) {
+  return (
+    <span
+      className={
+        stopClassName({
+          index,
+          count,
+          showStart,
+          showEnd,
+          matched: isMatch(item.value, highlight),
+          compromised,
+          marked,
+          selected,
+        }) + " stop--static"
+      }
+      style={marked ? { "--priority-step": tone } : undefined}
+      aria-selected={selected || undefined}
+    >
+      {item.value}
+    </span>
+  );
+}
+
+/** The tag at a range's start: whatever the caller calls it, plus a way out. */
+function RangeTag({ range }) {
+  return (
+    <span className="chain-range-tag" style={{ "--priority-step": range.tone }}>
+      {range.label}
+      {range.onRemove && (
+        <IconButton
+          size="xs"
+          className="chain-range-remove"
+          ariaLabel="הסר טווח"
+          title="הסר טווח"
+          // Never let this start a sweep or a card drag on the way through.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            range.onRemove();
+          }}
+        >
+          <IconClose size={11} />
+        </IconButton>
+      )}
+    </span>
   );
 }
 
@@ -443,6 +672,9 @@ function SortableStop({
   showStart = true,
   showEnd = true,
   compromised,
+  tone,
+  marked,
+  selected,
   onEdit,
   onRemove,
 }) {
@@ -468,6 +700,7 @@ function SortableStop({
     transform: CSS.Translate.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+    ...(marked ? { "--priority-step": tone } : null),
   };
 
   const matched = isMatch(item.value, highlight);
@@ -497,14 +730,19 @@ function SortableStop({
       ref={setNodeRef}
       style={style}
       className={
-        "stop stop--editable" +
+        stopClassName({
+          index,
+          count,
+          showStart,
+          showEnd,
+          matched,
+          compromised,
+          marked,
+          selected,
+        }) +
         (hovered ? " stop--hovered" : "") +
-        (showStart && index === 0 ? " stop--start" : "") +
-        (showEnd && index === count - 1 ? " stop--end" : "") +
-        (matched ? " stop--match" : "") +
         (isDragging ? " stop--dragging" : "") +
-        (sortable ? "" : " stop--static") +
-        (compromised ? " stop--compromised" : "")
+        (sortable ? "" : " stop--static")
       }
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -605,7 +843,16 @@ function StopEditor({ initial, suggestions, onCommit, onCancel }) {
  * branch that merges into the stop this slot precedes. The slot stays visually
  * "active" (plus revealed) while its menu is open, even after the pointer leaves.
  */
-function InsertSlot({ variant, onAddStop, onAddBranch, branchLabel = "הוסף הסתעפות" }) {
+function InsertSlot({
+  variant,
+  onAddStop,
+  onAddBranch,
+  branchLabel = "הוסף הסתעפות",
+  disabled = false,
+  tone,
+  marked = false,
+  selected = false,
+}) {
   const [menu, setMenu] = useState(null); // { top, right } while open, else null
   const btnRef = useRef(null);
 
@@ -646,10 +893,18 @@ function InsertSlot({ variant, onAddStop, onAddBranch, branchLabel = "הוסף �
     <button
       ref={btnRef}
       type="button"
+      // In selection mode the slot keeps its chevron — it is the hop between two
+      // stops, and a range has to paint across it — but stops being a control.
+      disabled={disabled}
       className={
-        "insert-slot insert-slot--" + variant + (menu ? " insert-slot--open" : "")
+        "insert-slot insert-slot--" +
+        variant +
+        (menu ? " insert-slot--open" : "") +
+        (marked ? " insert-slot--marked" : "") +
+        (selected ? " insert-slot--selected" : "")
       }
-      onClick={handleClick}
+      style={marked ? { "--priority-step": tone } : undefined}
+      onClick={disabled ? undefined : handleClick}
       aria-label={onAddBranch ? "הוסף כאן" : "הוסף תחנה כאן"}
       aria-haspopup={onAddBranch ? "menu" : undefined}
       aria-expanded={onAddBranch ? Boolean(menu) : undefined}

@@ -9,8 +9,8 @@ from django.test import SimpleTestCase
 from moto import mock_aws
 
 from . import db as db_module
-from .db import Database, ValidationError, expand_route, expand_routes
-from .graph import TIER_EXEMPT_LENGTH, Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
+from .db import Database, ValidationError, expand_route, expand_routes, upgrade_node
+from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
 from .graph.search import MinMergeStrategy, avoid_priority_penalty, prefer_route_penalty
 from utils.r2_storage import storage
 
@@ -541,13 +541,29 @@ class ConcentrationTests(SimpleTestCase):
             self.assertEqual(fwd[0].stops, rev[0].stops[::-1])
 
 
+def whole_chain_marks(routes, priorities):
+    """The marks equivalent to the per-route ``priority`` field marks replaced.
+
+    One mark spanning each route end to end — exactly what :func:`~api.db.
+    upgrade_node` writes for a flat route authored before marks existed, and the
+    shortest way for a fixture to say "this whole artery is rated p". A chain that
+    rides such an artery end to end completes the mark, so these fixtures downgrade
+    just as the old field always did; a chain that only clips it does not, which is
+    the new behaviour :class:`PriorityMarkContainmentTests` pins down.
+    """
+    return [
+        [(route[0], route[-1], priority)] if priority and len(route) >= 2 else []
+        for route, priority in zip(routes, priorities)
+    ]
+
+
 # Two S->T corridors that put the tier and the score in direct conflict:
 #   * the "patchwork" [S, c1, c2, c3, T] stitches four *well-rated* routes — poorly
 #     concentrated (it transfers at every stop) but never leaves priority 0.
 #   * the "clean ride" [S, q1, q2, q3, T] is a single artery end to end — perfectly
-#     concentrated, and shorter — but that artery is rated below best. Its run is 4
-#     edges long, past TIER_EXEMPT_LENGTH (3), so the downgrade still bites — see
-#     PriorityTierExemptionTests for a run short enough to be exempt.
+#     concentrated, and shorter — but that artery is rated below best. The ride
+#     covers the artery's mark whole, so the downgrade bites — see
+#     PriorityMarkContainmentTests for a ride that only clips one.
 # Stubs (routes 5..10) make the interior nodes crossroads so they carry length.
 PRIORITY_ROUTES = [
     ["S", "c1"],              # 0: patchwork, leg 1
@@ -562,8 +578,11 @@ PRIORITY_ROUTES = [
     ["q2", "z5"],
     ["q3", "z6"],
 ]
-# Only the clean artery is downgraded; every other route stays best-priority.
-DOWNGRADED_ARTERY = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+# Only the clean artery is downgraded, over its whole length; every other route
+# stays best-priority.
+DOWNGRADED_ARTERY = whole_chain_marks(
+    PRIORITY_ROUTES, [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+)
 
 PATCHWORK = ["S", "c1", "c2", "c3", "T"]         # tier 0, score 0.25 — badly concentrated
 CLEAN_RIDE = ["S", "q1", "q2", "q3", "T"]        # tier 1, score 1.0 — but poorly rated
@@ -627,8 +646,8 @@ class ArteryPairTests(SimpleTestCase):
 
 
 class PriorityTests(SimpleTestCase):
-    """Priority is a hard tier over the concentration score: the worst authored-route
-    priority a route is forced to touch outranks how well it rides anything."""
+    """Priority is a hard tier over the concentration score: the worst mark a route
+    is forced to complete outranks how well it rides anything."""
 
     def setUp(self):
         self.graph = Graph.from_routes(PRIORITY_ROUTES, DOWNGRADED_ARTERY)
@@ -649,7 +668,7 @@ class PriorityTests(SimpleTestCase):
         graph = Graph.from_routes(PRIORITY_ROUTES)  # nothing downgraded
         self.assertAlmostEqual(evaluate(graph, CLEAN_RIDE)[0], 1.0)
 
-    def test_tier_is_the_worst_priority_the_chain_must_touch(self):
+    def test_tier_is_the_worst_mark_the_chain_must_complete(self):
         self.assertEqual(tier(self.graph, PATCHWORK), 0)
         self.assertEqual(tier(self.graph, CLEAN_RIDE), 1)
 
@@ -699,33 +718,55 @@ class PriorityTests(SimpleTestCase):
         self.assertEqual(strategy.find({})[0], CLEAN_RIDE)
 
 
-class PriorityTierExemptionTests(SimpleTestCase):
-    """A run of length <= TIER_EXEMPT_LENGTH doesn't count against the tier,
-    whatever its artery is rated: briefly touching a downgraded artery isn't the
-    same as riding it. A longer run on the very same artery still inherits the
-    downgrade normally — this only softens *short* rides."""
+class PriorityMarkContainmentTests(SimpleTestCase):
+    """A mark rates a *stretch*, and only a run that rides it **whole** pays.
 
-    SHORT_RIDE = ["S", "p1", "p2", "T"]         # 3 edges == TIER_EXEMPT_LENGTH
-    LONG_RIDE = ["S", "p1", "p2", "p3", "T"]    # 4 edges: past the threshold
+    This is what replaced the old length exemption: how much of an artery has to be
+    driven before its rating applies is drawn by the author, not guessed from a
+    constant. Clipping a marked stretch — even by a single edge — is free.
+    """
 
-    def test_a_short_ride_on_a_downgraded_artery_is_exempt(self):
-        self.assertEqual(len(self.SHORT_RIDE) - 1, TIER_EXEMPT_LENGTH)
-        graph = Graph.from_routes([self.SHORT_RIDE], [2])
-        self.assertEqual(tier(graph, self.SHORT_RIDE), 0)
+    # One long artery, rated only between C and F.
+    ARTERY = ["A", "B", "C", "D", "E", "F", "G"]
+    MARKS = [[("C", "F", 2)]]
 
-    def test_a_longer_ride_on_the_same_artery_is_not_exempt(self):
-        self.assertGreater(len(self.LONG_RIDE) - 1, TIER_EXEMPT_LENGTH)
-        graph = Graph.from_routes([self.LONG_RIDE], [2])
-        self.assertEqual(tier(graph, self.LONG_RIDE), 2)
+    def setUp(self):
+        self.graph = Graph.from_routes([self.ARTERY], self.MARKS)
 
-    def test_exemption_does_not_touch_the_raw_run_priority(self):
-        # tier() reads tier_priority(run) for the arena; the raw run.priority (what
-        # the UI chip shows, and what the DP's tie-break weights) still reports the
-        # artery's true rating regardless of the exemption.
-        graph = Graph.from_routes([self.SHORT_RIDE], [2])
-        _, runs = evaluate(graph, self.SHORT_RIDE)
+    def test_a_ride_covering_the_mark_pays_for_it(self):
+        chain = ["B", "C", "D", "E", "F", "G"]
+        self.assertEqual(tier(self.graph, chain), 2)
+        _, runs = evaluate(self.graph, chain)
         self.assertEqual([r.priority for r in runs], [2])
-        self.assertEqual(tier(graph, self.SHORT_RIDE), 0)
+
+    def test_a_ride_one_edge_short_of_the_mark_is_free(self):
+        # Stops at E: the whole stretch C..F is not covered, so nothing is owed.
+        for chain in (["A", "B", "C", "D", "E"], ["D", "E", "F", "G"]):
+            self.assertEqual(tier(self.graph, chain), 0)
+
+    def test_riding_the_whole_artery_pays_too(self):
+        # More than the mark still contains the mark.
+        self.assertEqual(tier(self.graph, self.ARTERY), 2)
+
+    def test_containment_is_direction_independent(self):
+        chain = ["B", "C", "D", "E", "F", "G"]
+        self.assertEqual(tier(self.graph, chain), tier(self.graph, chain[::-1]))
+
+    def test_the_worst_completed_mark_wins(self):
+        # Two marks on one artery: a chain covering both is rated by the worse one,
+        # and a chain covering only the milder one is rated by that.
+        graph = Graph.from_routes(
+            [["A", "B", "C", "D", "E", "F", "G", "H", "I"]],
+            [[("B", "C", 1), ("F", "H", 3)]],
+        )
+        self.assertEqual(tier(graph, ["A", "B", "C", "D"]), 1)
+        self.assertEqual(tier(graph, ["E", "F", "G", "H"]), 3)
+        self.assertEqual(tier(graph, ["A", "B", "C", "D", "E", "F", "G", "H"]), 3)
+
+    def test_an_unmarked_artery_is_never_downgraded(self):
+        graph = Graph.from_routes([self.ARTERY])
+        self.assertEqual(tier(graph, self.ARTERY), 0)
+        self.assertFalse(graph.has_priorities())
 
 
 class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
@@ -752,7 +793,9 @@ class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
     CHAIN = ["S", "u1", "u2", "u3", "T"]
 
     def setUp(self):
-        self.graph = Graph.from_routes(self.ROUTES, self.PRIORITIES)
+        self.graph = Graph.from_routes(
+            self.ROUTES, whole_chain_marks(self.ROUTES, self.PRIORITIES)
+        )
 
     def test_score_credits_the_long_run_to_the_downgraded_artery(self):
         # One 6-long run on the priority-2 artery scores 36/36 = 1.0; splitting the
@@ -777,9 +820,14 @@ class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
         # Add a physically separate all-priority-0 detour S->d->T. It's less
         # concentrated (two arteries) but never rides the downgraded one, so hard
         # tiering puts it first and the concentrated priority-2 ride second.
+        routes = self.ROUTES + [
+            ["S", "d1", "d2"],
+            ["d2", "d3", "T"],
+            ["d1", "z8"],
+            ["d2", "z9"],
+        ]
         graph = Graph.from_routes(
-            self.ROUTES + [["S", "d1", "d2"], ["d2", "d3", "T"], ["d1", "z8"], ["d2", "z9"]],
-            self.PRIORITIES + [0, 0, 0, 0],
+            routes, whole_chain_marks(routes, self.PRIORITIES + [0, 0, 0, 0])
         )
         results = RouteFinder(graph).find_routes("S", "T", k=3)
         self.assertEqual(results[0].priority, 0)
@@ -805,7 +853,7 @@ ARENA_ROUTES = [
     ["b1", "zb1"], ["b2", "zb2"], ["b3", "zb3"],
     ["c1", "zc1"], ["c2", "zc2"], ["c3", "zc3"],
 ]
-ARENA_PRIORITIES = [0, 1, 0, 0, 0, 0] + [0] * 12
+ARENA_MARKS = whole_chain_marks(ARENA_ROUTES, [0, 1, 0, 0, 0, 0] + [0] * 12)
 
 
 class PriorityArenaTests(SimpleTestCase):
@@ -814,7 +862,7 @@ class PriorityArenaTests(SimpleTestCase):
     options — instead of the top-3 collapsing to only tier-0 routes."""
 
     def setUp(self):
-        self.graph = Graph.from_routes(ARENA_ROUTES, ARENA_PRIORITIES)
+        self.graph = Graph.from_routes(ARENA_ROUTES, ARENA_MARKS)
         self.finder = RouteFinder(self.graph)
 
     def test_concentrated_higher_tier_surfaces_as_alternative(self):
@@ -877,11 +925,14 @@ class PriorityCostGuardTests(SimpleTestCase):
         # `has_priorities()` what skips the per-artery one.
         self.assertEqual(list(range(graph.worst_priority())), [])
 
-    def test_explicit_all_best_priorities_are_still_no_priorities(self):
+    def test_explicit_best_priority_marks_are_still_no_priorities(self):
         # Passing all-zeroes is the same as passing nothing — the common case once
-        # the editor writes an explicit priority onto every route.
-        graph = Graph.from_routes(SPEC_ROUTES, [0, 0, 0])
+        # a caller hands in marks that all rate at the default.
+        graph = Graph.from_routes(
+            SPEC_ROUTES, [[(route[0], route[-1], 0)] for route in SPEC_ROUTES]
+        )
         self.assertFalse(graph.has_priorities())
+        self.assertEqual(graph.route_marks(0), ())
 
     def test_unrated_graph_scores_exactly_as_before(self):
         graph = Graph.from_routes(SPEC_ROUTES)
@@ -891,34 +942,111 @@ class PriorityCostGuardTests(SimpleTestCase):
 
 
 class RoutePriorityStorageTests(R2BackedTestCase):
-    """routes.json stores {places, priority}; the bare-list shape predating
-    priorities still loads, as all-best-priority."""
+    """routes.json stores {places, marks}; the shapes that predate marks — a bare
+    place list, and a whole-route ``priority`` — still load, upgraded."""
 
-    def test_saves_and_loads_priority(self):
+    MARK = {"from": 1, "to": 3, "priority": 2}
+    CHAIN = ["A", "B", "C", "D", "E"]
+
+    def test_saves_and_loads_marks(self):
         saved = self.db.save_routes(
-            [{"places": ["A", "B", "C"], "priority": 2}, {"places": ["C", "D"], "priority": 0}]
+            [{"places": self.CHAIN, "marks": [self.MARK]}, {"places": ["E", "F"]}]
         )
-        self.assertEqual(saved[0], {"places": ["A", "B", "C"], "priority": 2})
+        self.assertEqual(saved[0], {"places": self.CHAIN, "marks": [self.MARK]})
+        # An unmarked route carries no `marks` key at all.
+        self.assertEqual(saved[1], {"places": ["E", "F"]})
         self.assertEqual(self.db.load_routes(), saved)
-        self.assertEqual(self.db.load_graph().route_priority(0), 2)
+        # Indices become place names on the way into the graph.
+        self.assertEqual(self.db.load_graph().route_marks(0), (("B", "D", 2),))
 
-    def test_legacy_bare_lists_load_as_best_priority(self):
+    def test_marks_are_sorted_and_overlap_is_rejected(self):
+        saved = self.db.save_routes(
+            [
+                {
+                    "places": self.CHAIN,
+                    "marks": [
+                        {"from": 3, "to": 4, "priority": 1},
+                        {"from": 0, "to": 1, "priority": 3},
+                    ],
+                }
+            ]
+        )
+        self.assertEqual([m["from"] for m in saved[0]["marks"]], [0, 3])
+        # Meeting at a stop shares no edge, so it is allowed …
+        self.db.save_routes(
+            [
+                {
+                    "places": self.CHAIN,
+                    "marks": [
+                        {"from": 0, "to": 2, "priority": 1},
+                        {"from": 2, "to": 4, "priority": 3},
+                    ],
+                }
+            ]
+        )
+        # … sharing one is not.
+        with self.assertRaises(ValidationError):
+            self.db.save_routes(
+                [
+                    {
+                        "places": self.CHAIN,
+                        "marks": [
+                            {"from": 0, "to": 2, "priority": 1},
+                            {"from": 1, "to": 4, "priority": 1},
+                        ],
+                    }
+                ]
+            )
+
+    def test_rejects_marks_outside_the_chain_or_spanning_no_edge(self):
+        for bad in (
+            {"from": 0, "to": 5, "priority": 1},   # past the last stop
+            {"from": -1, "to": 2, "priority": 1},  # before the first
+            {"from": 2, "to": 2, "priority": 1},   # a single stop is not a ride
+            {"from": 3, "to": 1, "priority": 1},   # backwards
+            {"from": 0, "to": 1, "priority": 0},   # says nothing an unmarked stretch doesn't
+            {"from": 0, "to": 1, "priority": 4},   # out of range
+            {"from": "0", "to": 1, "priority": 1},
+            {"from": True, "to": 1, "priority": 1},
+        ):
+            with self.assertRaises(ValidationError):
+                self.db.save_routes([{"places": self.CHAIN, "marks": [bad]}])
+
+    def test_legacy_bare_lists_load_unmarked(self):
         # Written before priorities existed; must still load, and be upgraded on save.
         self.db.save_routes([["A", "B", "C"]])
-        self.assertEqual(self.db.load_routes(), [{"places": ["A", "B", "C"], "priority": 0}])
+        self.assertEqual(self.db.load_routes(), [{"places": ["A", "B", "C"]}])
         self.assertFalse(self.db.load_graph().has_priorities())
 
-    def test_priority_survives_the_derived_graph_rebuild(self):
-        # Priorities live only in routes.json — edge_routes.json never carries them,
-        # so this proves they're re-attached on load rather than lost.
+    def test_legacy_priority_upgrades_to_a_corridor_mark(self):
+        saved = self.db.save_routes([{"places": ["A", "B", "C"], "priority": 2}])
+        self.assertEqual(
+            saved, [{"places": ["A", "B", "C"], "marks": [{"from": 0, "to": 2, "priority": 2}]}]
+        )
+        # And it bites exactly where it used to: on a ride of the whole artery.
+        graph = self.db.load_graph()
+        self.assertEqual(tier(graph, ["A", "B", "C"]), 2)
+        self.assertEqual(tier(graph, ["A", "B"]), 0)
+
+    def test_a_route_stating_marks_ignores_a_legacy_priority(self):
+        # Marks are the more specific statement; the deprecated field must not add
+        # a second, whole-chain rating on top of them.
+        saved = self.db.save_routes(
+            [{"places": self.CHAIN, "priority": 3, "marks": [self.MARK]}]
+        )
+        self.assertEqual(saved[0]["marks"], [self.MARK])
+
+    def test_marks_survive_the_derived_graph_rebuild(self):
+        # Marks live only in routes.json — edge_routes.json never carries them, so
+        # this proves they're re-attached on load rather than lost.
         self.db.save_routes([{"places": ["A", "B", "C"], "priority": 3}])
         graph = self.db.load_graph()
         self.assertEqual(graph.edge_priority("A", "B"), 3)
         self.assertEqual(graph.worst_priority(), 3)
 
-    def test_routable_graph_keeps_priorities(self):
+    def test_routable_graph_keeps_marks(self):
         self.db.save_routes(
-            [{"places": ["A", "B", "C"], "priority": 2}, {"places": ["C", "D"], "priority": 0}]
+            [{"places": ["A", "B", "C"], "priority": 2}, {"places": ["C", "D"]}]
         )
         self.db.save_compromised([["D"]])
         self.assertEqual(self.db.load_routable_graph().route_priority(0), 2)
@@ -930,9 +1058,26 @@ class RoutePriorityStorageTests(R2BackedTestCase):
             self.db.save_routes([{"places": ["A", "B"], "priority": -1}])
 
     def test_rejects_non_integer_priority(self):
-        for bad in ("1", 1.5, None, True):
+        # `None` is absent, not invalid — it means "states none", at the root as
+        # much as on a head.
+        for bad in ("1", 1.5, True):
             with self.assertRaises(ValidationError):
                 self.db.save_routes([{"places": ["A", "B"], "priority": bad}])
+
+    def test_a_mark_reaches_routing_and_only_bites_on_a_ride_that_covers_it(self):
+        # The whole pipeline in one assertion pair: saved as stop indices, derived
+        # into edges, re-attached as place names on load, and read by the router.
+        self.db.save_routes(
+            [
+                {
+                    "places": ["S", "q1", "q2", "q3", "T"],
+                    "marks": [{"from": 1, "to": 3, "priority": 2}],
+                }
+            ]
+        )
+        finder = RouteFinder(self.db.load_graph())
+        self.assertEqual(finder.find_routes("q1", "q3", k=1)[0].priority, 2)
+        self.assertEqual(finder.find_routes("S", "q1", k=1)[0].priority, 0)
 
 
 class GraphShapeTests(SimpleTestCase):
@@ -1077,7 +1222,6 @@ class BranchedRouteExpansionTests(SimpleTestCase):
     BRANCHED = [
         {
             "places": ["J", "T1", "T2"],
-            "priority": 0,
             "branches": [
                 {"places": ["H1a", "H1b"]},
                 {"places": ["H2a"]},
@@ -1088,32 +1232,29 @@ class BranchedRouteExpansionTests(SimpleTestCase):
 
     @staticmethod
     def _chains(route):
-        """Just the place chains of an expansion (priority asserted separately)."""
+        """Just the place chains of an expansion (marks asserted separately)."""
         return [subroute["places"] for subroute in expand_route(route)]
 
     def test_flat_route_expands_to_itself(self):
         self.assertEqual(
-            expand_route(["A", "B", "C"]), [{"places": ["A", "B", "C"], "priority": 0}]
+            expand_route(["A", "B", "C"]), [{"places": ["A", "B", "C"], "marks": []}]
         )
         self.assertEqual(
-            expand_route({"places": ["A", "B", "C"], "priority": 1}),
-            [{"places": ["A", "B", "C"], "priority": 1}],
+            expand_route(
+                {"places": ["A", "B", "C"], "marks": [{"from": 0, "to": 1, "priority": 1}]}
+            ),
+            [{"places": ["A", "B", "C"], "marks": [("A", "B", 1)]}],
         )
 
     def test_branched_expands_to_the_flat_subroutes(self):
         chains = [r["places"] for r in expand_routes(self.BRANCHED)]
         self.assertEqual(chains, self.FLAT)  # one per leaf, in branch order
 
-    def test_all_subroutes_inherit_the_single_priority(self):
-        branched = [{**self.BRANCHED[0], "priority": 2}]
-        self.assertEqual([r["priority"] for r in expand_routes(branched)], [2, 2, 2])
-
     def test_nested_heads_ride_through_their_parent(self):
         # Tail D,E. Head C converges into D and itself splits upstream into A,B and
         # X. Only the two leaves are subroutes — the shared C segment is not.
         route = {
             "places": ["D", "E"],
-            "priority": 0,
             "branches": [
                 {
                     "places": ["C"],
@@ -1128,58 +1269,101 @@ class BranchedRouteExpansionTests(SimpleTestCase):
 
     def test_tail_may_be_a_single_stop(self):
         # Heads converging straight into the destination — an alternate final approach.
-        route = {"places": ["B"], "priority": 0, "branches": [{"places": ["A"]}, {"places": ["Q"]}]}
+        route = {"places": ["B"], "branches": [{"places": ["A"]}, {"places": ["Q"]}]}
         self.assertEqual(self._chains(route), [["A", "B"], ["Q", "B"]])
 
 
-class HeadPriorityTests(SimpleTestCase):
-    """A head may rate the corridor it generates without touching its siblings."""
+class HeadMarkTests(SimpleTestCase):
+    """Where a mark sits in the tree decides which corridors it can rate: a head's
+    reaches only the leaves below it, the shared tail's reaches every leaf."""
 
-    def _priorities(self, route):
-        return [subroute["priority"] for subroute in expand_route(route)]
+    @staticmethod
+    def _marks(route):
+        return [subroute["marks"] for subroute in expand_route(route)]
 
-    def test_head_priority_applies_to_its_own_subroute_only(self):
-        # Two heads into a shared tail; only the second is downgraded.
+    def test_a_head_mark_applies_to_its_own_subroute_only(self):
+        # Two heads into a shared tail; only the second is rated.
         route = {
             "places": ["J", "T"],
-            "priority": 0,
-            "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 2}],
+            "branches": [
+                {"places": ["H1"]},
+                {"places": ["H2a", "H2b"], "marks": [{"from": 0, "to": 1, "priority": 2}]},
+            ],
         }
-        self.assertEqual(self._priorities(route), [0, 2])
-        # The tail is ridden by both, at each rider's own priority — the head's
-        # rating covers the whole corridor it generates, tail included.
+        self.assertEqual(self._marks(route), [[], [("H2a", "H2b", 2)]])
         self.assertEqual(
-            [s["places"] for s in expand_route(route)], [["H1", "J", "T"], ["H2", "J", "T"]]
+            [s["places"] for s in expand_route(route)],
+            [["H1", "J", "T"], ["H2a", "H2b", "J", "T"]],
         )
 
-    def test_head_without_a_priority_inherits_the_route_default(self):
+    def test_a_tail_mark_reaches_every_leaf(self):
         route = {
-            "places": ["J", "T"],
-            "priority": 2,
-            "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 0}],
+            "places": ["J", "T1", "T2"],
+            "marks": [{"from": 0, "to": 2, "priority": 2}],
+            "branches": [{"places": ["H1"]}, {"places": ["H2"]}],
         }
-        self.assertEqual(self._priorities(route), [2, 0])
+        self.assertEqual(self._marks(route), [[("J", "T2", 2)]] * 2)
 
-    def test_priority_inherits_down_the_spine_and_the_nearest_wins(self):
-        # Tail D,E; head C (rated 1) splits into A,B (unrated → 1) and X (rated 3).
+    def test_marks_accumulate_down_the_spine(self):
+        # Tail D,E (rated 1); head C splits into A,B (rated 3) and X (unrated).
         route = {
             "places": ["D", "E"],
-            "priority": 0,
+            "marks": [{"from": 0, "to": 1, "priority": 1}],
             "branches": [
                 {
                     "places": ["C"],
-                    "priority": 1,
-                    "branches": [{"places": ["A", "B"]}, {"places": ["X"], "priority": 3}],
+                    "branches": [
+                        {"places": ["A", "B"], "marks": [{"from": 0, "to": 1, "priority": 3}]},
+                        {"places": ["X"]},
+                    ],
                 },
-                {"places": ["Y"]},
             ],
         }
-        self.assertEqual(self._priorities(route), [1, 3, 0])
+        # The leaf under A,B carries both its own mark and the tail's; its sibling
+        # carries only the tail's.
+        self.assertEqual(
+            self._marks(route), [[("A", "B", 3), ("D", "E", 1)], [("D", "E", 1)]]
+        )
 
-    def test_zero_on_a_head_overrides_rather_than_reads_as_absent(self):
-        # 0 is falsy *and* the best priority — it must still beat an inherited 3.
-        route = {"places": ["T"], "priority": 3, "branches": [{"places": ["H"], "priority": 0}]}
-        self.assertEqual(self._priorities(route), [0])
+    def test_legacy_head_priorities_upgrade_to_corridor_marks(self):
+        # The pre-marks `priority` rated the whole corridor a node generated, so it
+        # becomes exactly that: one mark per *leaf*, spanning that leaf's corridor,
+        # at the priority the leaf resolved to. H1 inherits the root's 2 and so its
+        # whole corridor is rated; H2 overrides with 0 and gains no mark at all —
+        # neither head's rating reaches the other, exactly as before.
+        route = {
+            "places": ["J", "T"],
+            "priority": 2,
+            "branches": [
+                {"places": ["H1a", "H1b"]},
+                {"places": ["H2a", "H2b"], "priority": 0},
+            ],
+        }
+        self.assertEqual(
+            self._marks(upgrade_node(route)), [[("H1a", "T", 2)], []]
+        )
+
+    def test_a_one_stop_head_keeps_its_legacy_rating(self):
+        # It has no edge of its own — only the hop into its parent — so a mark over
+        # its own places alone could not carry the rating. Over its *corridor* it can,
+        # which is what the field always meant.
+        route = {
+            "places": ["J", "T"],
+            "branches": [{"places": ["H"], "priority": 3}],
+        }
+        self.assertEqual(self._marks(upgrade_node(route)), [[("H", "T", 3)]])
+
+    def test_a_mark_may_run_from_a_head_into_the_shared_tail(self):
+        # Frame = the head's own stops followed by everything downstream, so index 2
+        # is the tail's first stop. The sibling head is untouched.
+        route = {
+            "places": ["J", "T"],
+            "branches": [
+                {"places": ["H1a", "H1b"], "marks": [{"from": 1, "to": 2, "priority": 2}]},
+                {"places": ["H2"]},
+            ],
+        }
+        self.assertEqual(self._marks(route), [[("H1b", "J", 2)], []])
 
 
 class BranchedRouteStorageTests(R2BackedTestCase):
@@ -1202,106 +1386,191 @@ class BranchedRouteStorageTests(R2BackedTestCase):
         self.assertEqual(len(saved[0]["branches"]), 3)
         self.assertEqual(saved[0]["branches"][1], {"places": ["H2a"]})
 
-    def test_load_graph_priorities_align_across_subroutes(self):
-        self.db.save_routes([{**BranchedRouteExpansionTests.BRANCHED[0], "priority": 2}])
+    def test_load_graph_marks_align_across_subroutes(self):
+        # A mark on the shared tail rates every corridor that rides it, so all
+        # three leaves carry it.
+        tail_mark = {"from": 0, "to": 2, "priority": 2}
+        self.db.save_routes(
+            [{**BranchedRouteExpansionTests.BRANCHED[0], "marks": [tail_mark]}]
+        )
         graph = self.db.load_graph()
-        # Three leaves → route ids 0,1,2, all priority 2.
-        self.assertEqual([graph.route_priority(i) for i in (0, 1, 2)], [2, 2, 2])
+        self.assertEqual(
+            [graph.route_marks(i) for i in (0, 1, 2)], [(("J", "T2", 2),)] * 3
+        )
 
     def test_flat_route_stays_flat_shape(self):
-        saved = self.db.save_routes([{"places": ["A", "B", "C"], "priority": 1}])
-        self.assertEqual(saved, [{"places": ["A", "B", "C"], "priority": 1}])
+        saved = self.db.save_routes(
+            [{"places": ["A", "B", "C"], "marks": [{"from": 0, "to": 1, "priority": 1}]}]
+        )
+        self.assertEqual(
+            saved,
+            [{"places": ["A", "B", "C"], "marks": [{"from": 0, "to": 1, "priority": 1}]}],
+        )
         self.assertNotIn("branches", saved[0])
 
     def test_branched_tail_may_be_one_stop(self):
         saved = self.db.save_routes(
-            [{"places": ["B"], "priority": 0, "branches": [{"places": ["A"]}, {"places": ["Q"]}]}]
+            [{"places": ["B"], "branches": [{"places": ["A"]}, {"places": ["Q"]}]}]
         )
         self.assertEqual(len(saved[0]["branches"]), 2)
 
     def test_rejects_branchless_single_stop_route(self):
         with self.assertRaises(ValidationError):
-            self.db.save_routes([{"places": ["A"], "priority": 0}])
+            self.db.save_routes([{"places": ["A"]}])
 
     def test_rejects_empty_tail(self):
         with self.assertRaises(ValidationError):
             self.db.save_routes(
-                [{"places": [], "priority": 0, "branches": [{"places": ["A"]}, {"places": ["Q"]}]}]
+                [{"places": [], "branches": [{"places": ["A"]}, {"places": ["Q"]}]}]
             )
 
     def test_rejects_empty_branch(self):
         with self.assertRaises(ValidationError):
-            self.db.save_routes(
-                [{"places": ["A", "B"], "priority": 0, "branches": [{"places": []}]}]
-            )
+            self.db.save_routes([{"places": ["A", "B"], "branches": [{"places": []}]}])
 
-    def test_roundtrip_preserves_a_head_priority(self):
+    def test_roundtrip_preserves_a_head_mark(self):
+        head_mark = {"from": 0, "to": 1, "priority": 2}
         saved = self.db.save_routes(
             [
                 {
                     "places": ["J", "T"],
-                    "priority": 0,
-                    "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 2}],
+                    "branches": [
+                        {"places": ["H1a", "H1b"]},
+                        {"places": ["H2a", "H2b"], "marks": [head_mark]},
+                    ],
                 }
             ]
         )
         self.assertEqual(saved, self.db.load_routes())
-        # Stated on the head that has one, absent on the head that inherits.
-        self.assertEqual(saved[0]["branches"], [{"places": ["H1"]}, {"places": ["H2"], "priority": 2}])
+        # Stated on the head that has one, absent on the head that has none.
+        self.assertEqual(
+            saved[0]["branches"],
+            [
+                {"places": ["H1a", "H1b"]},
+                {"places": ["H2a", "H2b"], "marks": [head_mark]},
+            ],
+        )
 
     def test_load_graph_rates_each_head_separately(self):
         self.db.save_routes(
             [
                 {
                     "places": ["J", "T"],
-                    "priority": 0,
-                    "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 3}],
+                    "branches": [
+                        {"places": ["H1a", "H1b"]},
+                        {
+                            "places": ["H2a", "H2b"],
+                            "marks": [{"from": 0, "to": 1, "priority": 3}],
+                        },
+                    ],
                 }
             ]
         )
         graph = self.db.load_graph()
-        # Leaf 0 (H1) inherits the route's 0; leaf 1 (H2) rides at its own 3.
-        self.assertEqual([graph.route_priority(0), graph.route_priority(1)], [0, 3])
-        # The shared tail carries both subroutes, so its *edge* priority is the
-        # better of them — a head's downgrade doesn't spoil the road for its sibling.
+        # Leaf 0 (H1) is unmarked; leaf 1 (H2) carries its head's mark.
+        self.assertEqual(graph.route_marks(0), ())
+        self.assertEqual(graph.route_marks(1), (("H2a", "H2b", 3),))
+        # The shared tail is outside the mark, so it stays free for both — a head's
+        # downgrade doesn't spoil the road for its sibling.
         self.assertEqual(graph.edge_priority("J", "T"), 0)
 
     def test_rejects_out_of_range_head_priority(self):
         with self.assertRaises(ValidationError):
             self.db.save_routes(
-                [{"places": ["T"], "priority": 0, "branches": [{"places": ["A"], "priority": 9}]}]
+                [{"places": ["T"], "branches": [{"places": ["A"], "priority": 9}]}]
             )
 
     def test_rejects_non_int_head_priority(self):
         with self.assertRaises(ValidationError):
             self.db.save_routes(
-                [{"places": ["T"], "priority": 0, "branches": [{"places": ["A"], "priority": True}]}]
+                [{"places": ["T"], "branches": [{"places": ["A"], "priority": True}]}]
             )
 
-    def test_head_priority_matches_authoring_the_subroutes_flat(self):
-        """The whole point: a rated head is exactly the equivalent flat route."""
+    def test_a_head_mark_may_reach_into_the_shared_tail(self):
+        # The head's frame is its own stops followed by everything downstream, so a
+        # mark can span the junction — a road doesn't care where the tree was split.
+        saved = self.db.save_routes(
+            [
+                {
+                    "places": ["J", "T"],
+                    "branches": [
+                        {"places": ["H1"], "marks": [{"from": 0, "to": 2, "priority": 2}]},
+                        {"places": ["H2"]},
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(
+            saved[0]["branches"][0]["marks"], [{"from": 0, "to": 2, "priority": 2}]
+        )
+        graph = self.db.load_graph()
+        # It rates the corridor below that head, from the head to the tail stop it
+        # reaches — and leaves the sibling's corridor alone.
+        self.assertEqual(graph.route_marks(0), (("H1", "T", 2),))
+        self.assertEqual(graph.route_marks(1), ())
+
+    def test_rejects_a_head_mark_past_the_destination(self):
+        # One stop past the tail's last: the frame ends at the destination.
+        with self.assertRaises(ValidationError):
+            self.db.save_routes(
+                [
+                    {
+                        "places": ["J", "T"],
+                        "branches": [
+                            {"places": ["H1"], "marks": [{"from": 0, "to": 3, "priority": 2}]}
+                        ],
+                    }
+                ]
+            )
+
+    def test_rejects_a_mark_starting_downstream_of_the_node_that_stores_it(self):
+        # `from` must sit in the node's own places: a stretch that starts in the tail
+        # is the tail's to state, and storing it on a head would let one stretch be
+        # written two ways (and rated twice).
+        with self.assertRaises(ValidationError):
+            self.db.save_routes(
+                [
+                    {
+                        "places": ["J", "T"],
+                        "branches": [
+                            {"places": ["H1"], "marks": [{"from": 1, "to": 2, "priority": 2}]}
+                        ],
+                    }
+                ]
+            )
+
+    def test_head_mark_matches_authoring_the_subroutes_flat(self):
+        """The whole point: a marked head is exactly the equivalent flat route."""
         flat_db = Database(prefix="flat")
         tree_db = Database(prefix="tree")
         flat_db.save_routes(
             [
-                {"places": ["H1", "J", "T"], "priority": 0},
-                {"places": ["H2", "J", "T"], "priority": 3},
+                {"places": ["H1a", "H1b", "J", "T"]},
+                {
+                    "places": ["H2a", "H2b", "J", "T"],
+                    "marks": [{"from": 0, "to": 1, "priority": 3}],
+                },
             ]
         )
         tree_db.save_routes(
             [
                 {
                     "places": ["J", "T"],
-                    "priority": 0,
-                    "branches": [{"places": ["H1"]}, {"places": ["H2"], "priority": 3}],
+                    "branches": [
+                        {"places": ["H1a", "H1b"]},
+                        {
+                            "places": ["H2a", "H2b"],
+                            "marks": [{"from": 0, "to": 1, "priority": 3}],
+                        },
+                    ],
                 }
             ]
         )
         flat_graph, tree_graph = flat_db.load_graph(), tree_db.load_graph()
         self.assertEqual(flat_graph.edge_routes_records, tree_graph.edge_routes_records)
         self.assertEqual(
-            [flat_graph.route_priority(i) for i in (0, 1)],
-            [tree_graph.route_priority(i) for i in (0, 1)],
+            [flat_graph.route_marks(i) for i in (0, 1)],
+            [tree_graph.route_marks(i) for i in (0, 1)],
         )
 
     def test_pathfinding_matches_flat_authoring(self):
@@ -1334,7 +1603,6 @@ class DerivedGraphFreshnessTests(R2BackedTestCase):
     TREE = [
         {
             "places": ["T1", "T2"],
-            "priority": 0,
             "branches": [{"places": ["H1a", "H1b"]}, {"places": ["H2a", "H2b"]}],
         }
     ]

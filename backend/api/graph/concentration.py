@@ -3,24 +3,26 @@
 "Best" is the route that **rides one good authored route as far as possible**. The
 objective has two levels, and they answer different questions:
 
-**1. The tier** (:func:`tier`) — *may* we ride this corridor at all? Every authored
-route carries a priority (``0`` = best … ``3`` = worst); a route's tier is the worst
-priority among the sub-routes it actually **rides** — the runs of the score's own
-credit assignment below, i.e. the chips the UI shows. Ranking is lexicographic on
-the tier first (:data:`PriorityMode.HARD_TIER`), so a route that rides only
-well-rated arteries beats one whose concentrated corridor rides a badly-rated one
-*however long the detour*. Because the tier reads the ridden sub-routes, a road
-that is *also* served by a good route only escapes the downgrade when riding it as
-that good route is at least as concentrated — otherwise the concentrated way to
-ride it is the bad one, and the tier says so. A run of length ``<=
-TIER_EXEMPT_LENGTH`` is exempt from this regardless (:func:`tier_priority`): a
-brief touch of a few edges isn't a *ride*, so it doesn't downgrade the tier —
-only a run past that length inherits its artery's rating.
+**1. The tier** (:func:`tier`) — *may* we ride this corridor at all? An authored
+route may carry **priority marks**: rated stretches of it (``0`` = best … ``3`` =
+worst), each drawn by the author over a range of that route's stops. A route's
+tier is the worst priority among the marks its ridden sub-routes **complete** —
+the sub-routes being the runs of the score's own credit assignment below, i.e. the
+chips the UI shows. A mark counts only when one run holds the stretch *entire*:
+riding part of a rated stretch is deliberately free, because where the line falls
+between "brushed past it" and "rode it" is the author's knowledge, expressed by how
+the mark is drawn, and not a length heuristic's guess. Ranking is lexicographic on
+the tier first (:data:`PriorityMode.HARD_TIER`), so a route that completes no bad
+mark beats one whose concentrated corridor completes one *however long the detour*.
+Because the tier reads the ridden sub-routes, a road that is *also* served by a
+good route only escapes the downgrade when riding it as that good route is at least
+as concentrated — otherwise the concentrated way to ride it is the marked one, and
+the tier says so.
 
 **2. The score** (:func:`evaluate`) — *how well* does it ride them? For a route split
 into maximal contiguous runs ``r_1 … r_n``, each on a single authored route, we take
 the Herfindahl index of how its length is distributed across those runs, with each
-run's share discounted by its artery's priority::
+run's share discounted by the marks that run completes::
 
     score = Σ_i  w(priority(r_i)) · ( len(r_i) / Σ_j len(r_j) )²
 
@@ -31,8 +33,8 @@ when a single authored route covers the whole trip, falling toward ``1/n`` as th
 trip fragments into equal pieces. So maximising it rewards staying on one artery
 and only briefly touching others. It is deliberately *non-monotonic* in ``n``: a
 route may merge more authored routes if that lets one run dominate. The weights add
-a second pressure on top: within a tier, *briefly touching* a poorly-rated artery
-still beats *riding* one.
+a second pressure on top: within a tier, *clipping* a marked stretch still beats
+completing it.
 
 ``len`` is togglable via :class:`LengthMode` so it can be tuned experimentally.
 
@@ -44,6 +46,7 @@ normaliser), so it cannot be optimised inside a shortest-path search; instead
 small chain-DP.
 """
 
+from bisect import bisect_left
 from collections import namedtuple
 
 from .core import BEST_PRIORITY, edge_key
@@ -52,7 +55,8 @@ from .core import BEST_PRIORITY, edge_key
 #   * ``route_id`` — the authored route ridden (or a synthetic edge key fallback).
 #   * ``length``   — its length in the active :class:`LengthMode` units (score term).
 #   * ``hops``     — its edge count (used for the "share of the whole route" %).
-#   * ``priority`` — the ridden artery's priority, i.e. what discounted its credit.
+#   * ``priority`` — the worst mark this run *completes*, i.e. what discounted its
+#     credit. A run that merely clips a rated stretch is BEST_PRIORITY.
 #   * ``start`` / ``end`` — the boundary nodes as *travelled*, so a label can be
 #     oriented to the direction the route actually goes.
 Run = namedtuple("Run", "route_id length hops priority start end")
@@ -79,30 +83,10 @@ class LengthMode:
 
 # How much of an artery's credit each priority level below the best discounts:
 # w(p) = 1 - PRIORITY_STEP * p, so 0.2 gives weights 1.0 / 0.8 / 0.6 / 0.4. At this
-# step, riding one priority-1 artery end to end (0.8) beats splitting evenly across
-# two priority-0 arteries (0.5), but riding one priority-3 artery (0.4) loses to it.
+# step, completing one priority-1 mark end to end (0.8) beats splitting evenly
+# across two unrated arteries (0.5), but completing a priority-3 one (0.4) loses
+# to it.
 PRIORITY_STEP = 0.2
-
-# A run this short or shorter (in the active LengthMode's units) doesn't count
-# against the tier, whatever the ridden artery is rated: it's a brief touch, not
-# a ride. Only :func:`tier_priority` reads this — the raw `run.priority` (the chip
-# shown in the UI, and the tie-break weights above) is untouched.
-TIER_EXEMPT_LENGTH = 3
-
-
-def tier_priority(run):
-    """The priority a run counts as *for the tier only* — 0 if it's short enough.
-
-    A run of length ``<= TIER_EXEMPT_LENGTH`` is exempt: briefly touching a
-    badly-rated artery for a handful of edges doesn't downgrade the whole route,
-    only genuinely *riding* one does. Longer runs keep their real
-    ``run.priority``. This never touches ``run.priority`` itself — that field
-    still reports the artery's true rating for display and for the DP's
-    priority tie-break.
-    """
-    if run.length <= TIER_EXEMPT_LENGTH:
-        return BEST_PRIORITY
-    return run.priority
 
 
 class PriorityMode:
@@ -138,38 +122,71 @@ def edge_unit(graph, a, b):
     return 1
 
 
-def _route_weight(graph, route_id):
-    """How much credit a run on ``route_id`` earns — its priority discount.
+def _mark_windows(graph, stops, memberships):
+    """The marks reachable on this chain, indexed by position in ``stops``.
 
-    This no longer scales the score itself (which is priority-free); it is the
-    *tie-break* :func:`evaluate` applies among equally concentrated credit
-    assignments, so a shared edge goes to the better-rated artery.
+    ``{route_id: [(start positions, end positions, priority), ...]}``, each
+    position list ascending. A run occupies a contiguous node window ``[lo, hi]``
+    of ``stops``, so "does this run complete that mark" becomes two binary
+    searches rather than a scan over the run's nodes — which matters because the
+    credit-assignment DP asks it once per closed run, not once per result.
+
+    A mark whose endpoints don't both appear on this chain can never be completed,
+    so it is dropped here instead of being retested per state. When nothing is
+    rated at all the whole apparatus is skipped and every weight is 1.0, leaving
+    the unrated path exactly as cheap as it was before marks existed.
     """
-    return 1.0 - PRIORITY_STEP * graph.route_priority(route_id)
+    if not graph.has_priorities():
+        return {}
+    positions = {}
+    for index, place in enumerate(stops):
+        positions.setdefault(place, []).append(index)
+    windows = {}
+    for route_id in {route for routes in memberships for route in routes}:
+        entries = [
+            (positions[start], positions[end], priority)
+            for start, end, priority in graph.route_marks(route_id)
+            if start in positions and end in positions
+        ]
+        if entries:
+            windows[route_id] = entries
+    return windows
+
+
+def _within(positions, lo, hi):
+    """Whether any of the ascending ``positions`` falls in the inclusive window."""
+    index = bisect_left(positions, lo)
+    return index < len(positions) and positions[index] <= hi
+
+
+def _window_priority(entries, lo, hi):
+    """The worst priority among ``entries`` whose *both* endpoints sit in ``[lo, hi]``."""
+    worst = BEST_PRIORITY
+    for starts, ends, priority in entries:
+        if priority > worst and _within(starts, lo, hi) and _within(ends, lo, hi):
+            worst = priority
+    return worst
 
 
 def tier(graph, stops):
-    """The route's priority: the worst tier-priority among the sub-routes it *rides*.
+    """The route's priority: the worst mark the sub-routes it *rides* complete.
 
     The sub-routes are the maximal single-route runs of the max-HHI credit
     assignment (:func:`evaluate`) — exactly the breakdown the UI shows as chips. A
-    route is therefore rated by the arteries it actually rides: if riding one
-    authored route as far as possible means riding a downgraded one, the route
-    inherits that downgrade — unless the ride is short enough to be exempt, see
-    :func:`tier_priority`.
+    route is therefore rated by the stretches it actually rides end to end: clipping
+    a marked stretch costs nothing, completing one inherits its rating.
 
     This is deliberately **assignment-dependent**. An edge may also be served by a
     better-rated route, but that only rescues the tier when riding it *as* that
     better route is at least as concentrated — because then :func:`evaluate` credits
     the run there anyway (a higher weight at equal length scores higher). When the
-    downgraded route is the only one that spans the stretch in a single run, that is
-    genuinely the corridor being ridden, and the tier says so (unless it's a brief
-    touch, per :func:`tier_priority`). Contrast :meth:`~.core.Graph.edge_priority`,
-    the *per-edge* best, which the generators use to hunt for a physically
-    different, better-rated corridor.
+    marked route is the only one that spans the stretch in a single run, that is
+    genuinely the corridor being ridden, and the tier says so. Contrast
+    :meth:`~.core.Graph.edge_priority`, the *per-edge* best, which the generators
+    use to hunt for a physically different, better-rated corridor.
     """
     _, runs = evaluate(graph, stops)
-    return max((tier_priority(run) for run in runs), default=BEST_PRIORITY)
+    return max((run.priority for run in runs), default=BEST_PRIORITY)
 
 
 def evaluate(graph, stops):
@@ -199,8 +216,10 @@ def evaluate(graph, stops):
     reads as a bug. Priority does still choose *between* assignments, but only as a
     tie-break: among the readings of the chain that are equally concentrated, the
     priority-weighted ``Σ w(r_i)·len(r_i)²`` is maximised, so an edge carried by both
-    a priority-0 and a priority-3 route is credited to the priority-0 one for free.
-    Fewest transfers breaks any remaining tie, keeping the reported assignment clean.
+    an unmarked and a marked route is credited to the unmarked one for free — and a
+    reading that stops short of completing a mark wins over one that completes it,
+    whenever the two are equally concentrated. Fewest transfers breaks any remaining
+    tie, keeping the reported assignment clean.
     """
     if len(stops) < 2:
         return 1.0, []
@@ -210,7 +229,24 @@ def evaluate(graph, stops):
     units = [edge_unit(graph, a, b) for a, b in edges]
     total_length = sum(units)
 
-    weights = {r: _route_weight(graph, r) for routes in memberships for r in routes}
+    # Prefix sums of the units, so a run's length is one subtraction. The DP below
+    # carries a run's *start edge* rather than its accumulated length: the two hold
+    # the same information (length = prefix[end] - prefix[start]) and cost the same
+    # number of states, but the start is what makes the run's node span known at the
+    # moment it closes — and a mark is completed or not by that span.
+    prefix = [0] * (len(units) + 1)
+    for index, unit in enumerate(units):
+        prefix[index + 1] = prefix[index] + unit
+
+    windows = _mark_windows(graph, stops, memberships)
+
+    def run_priority(route_id, lo, hi):
+        """The worst mark of ``route_id`` the run spanning nodes ``[lo, hi]`` completes."""
+        entries = windows.get(route_id)
+        return _window_priority(entries, lo, hi) if entries else BEST_PRIORITY
+
+    def weight(route_id, lo, hi):
+        return 1.0 - PRIORITY_STEP * run_priority(route_id, lo, hi)
 
     # DP over edges to choose the credit assignment, on a two-level objective:
     # maximise the plain Σ len(r_i)² first, and only among the assignments that tie
@@ -219,39 +255,46 @@ def evaluate(graph, stops):
     # is equally concentrated either way. That ordering is what keeps the score, the
     # runs and their shares priority-free: re-rating an artery can only change which
     # of two *equally concentrated* readings of the same chain is reported.
-    # State: (route credited to this edge, open run's length k). Stored value:
-    # (closed_plain, closed_weighted, -transfers) — the closed runs' Σ len² and
-    # Σ w·len², maximised in that order, then fewest transfers; the *open* run's
-    # k² / w·k² is added when we finalise. Units can exceed 1, so we close runs
+    # State: (route credited to this edge, index of the open run's first edge).
+    # Stored value: (closed_plain, closed_weighted, -transfers) — the closed runs'
+    # Σ len² and Σ w·len², maximised in that order, then fewest transfers; the *open*
+    # run's k² / w·k² is added when we finalise. Units can exceed 1, so we close runs
     # explicitly rather than adding an incremental square term.
-    layer = {(r, units[0]): ((0.0, 0.0, 0), None) for r in memberships[0]}
-    layers = [layer]
+    layers = [{(r, 0): ((0.0, 0.0, 0), None) for r in memberships[0]}]
 
     for j in range(1, len(edges)):
         routes = memberships[j]
-        u = units[j]
         cur = {}
-        for (r, k), (value, _) in layers[-1].items():
+        for (r, start), (value, _) in layers[-1].items():
             plain, closed, negtr = value
             # Continue the current run (only if this edge also carries route r).
+            # The run keeps its start, so this can only ever land on one state.
             if r in routes:
-                state = (r, k + u)
-                cand = (plain, closed, negtr)
-                if state not in cur or cand > cur[state][0]:
-                    cur[state] = (cand, (r, k))
-            # Or switch to another member route: close this run, open a fresh one.
-            for r2 in routes:
-                if r2 == r:
-                    continue
-                state = (r2, u)
-                cand = (plain + k * k, closed + weights[r] * k * k, negtr - 1)
-                if state not in cur or cand > cur[state][0]:
-                    cur[state] = (cand, (r, k))
+                cur[(r, start)] = (value, (r, start))
+            # Or switch to another member route: close this run — it covered edges
+            # [start, j), i.e. nodes stops[start..j] — and open a fresh one at j.
+            others = [r2 for r2 in routes if r2 != r]
+            if others:
+                k = prefix[j] - prefix[start]
+                cand = (
+                    plain + k * k,
+                    closed + weight(r, start, j) * k * k,
+                    negtr - 1,
+                )
+                for r2 in others:
+                    state = (r2, j)
+                    if state not in cur or cand > cur[state][0]:
+                        cur[state] = (cand, (r, start))
         layers.append(cur)
 
     def final_value(state):
-        (r, k), ((plain, closed, negtr), _) = state, layers[-1][state]
-        return (plain + k * k, closed + weights[r] * k * k, negtr)
+        (r, start), ((plain, closed, negtr), _) = state, layers[-1][state]
+        k = prefix[len(edges)] - prefix[start]
+        return (
+            plain + k * k,
+            closed + weight(r, start, len(edges)) * k * k,
+            negtr,
+        )
 
     best_state = max(layers[-1], key=final_value)
 
@@ -272,9 +315,9 @@ def evaluate(graph, stops):
             runs.append(
                 Run(
                     route_id=assigned[s],
-                    length=sum(units[s:i]),
+                    length=prefix[i] - prefix[s],
                     hops=i - s,
-                    priority=graph.route_priority(assigned[s]),
+                    priority=run_priority(assigned[s], s, i),
                     start=stops[s],
                     end=stops[i],
                 )
