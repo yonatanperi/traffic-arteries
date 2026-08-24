@@ -56,6 +56,7 @@ bucket) with a ``prefix`` to namespace its keys.
 
 import hashlib
 import json
+from collections import deque
 
 from utils.r2_storage import ObjectNotFound, storage
 
@@ -67,7 +68,7 @@ from .graph import BEST_PRIORITY, WORST_PRIORITY, Graph
 # **bump it whenever a change to that pipeline would derive different edges from the
 # same routes**: every store then rebuilds on its next load instead of serving edges
 # computed by logic that no longer exists. Nothing else keys off it.
-DERIVATION_VERSION = 1
+DERIVATION_VERSION = 2
 
 
 # How many stops a single hop may be elaborated with when re-inserting skipped
@@ -615,6 +616,14 @@ class Database:
         longest) avoids grabbing a long unrelated loop that merely happens to
         connect the two junctions.
 
+        When no single route writes such a subpath, a second, narrower source
+        applies: the shortest ``u..v`` chain in the *cross-route* adjacency whose
+        every intermediate is **transparent** (degree 2 in the whole network). A
+        transparent stop has no neighbour but the two it sits between, so it can
+        belong to no road but this one — which is what makes composing across
+        routes safe here and nowhere else. This is what catches a skipped stop that
+        the authored routes only ever describe from two different directions.
+
         How long an elaboration we accept depends on how strongly the direct hop
         is attested (see the ``*_GAP`` constants): a hop taken directly by
         several routes is a real road we barely touch (``confirmed_gap``); a hop
@@ -679,6 +688,76 @@ class Database:
             index(route)
             index(list(reversed(route)))
 
+        # Cross-route elaborations, for a lazy hop that no *single* route spells
+        # out. The index above only sees a stretch one route writes contiguously,
+        # so it misses the ordinary authoring split: one route writes
+        # ``שאן, מחסום בזק, מחולה`` and another ``מחסום בזק, שלוחות, שאן``, nobody
+        # ever writes ``מחולה, מחסום בזק, שלוחות`` in one go, and a third route's
+        # direct ``מחולה → שלוחות`` hop is left asserting a road that bypasses the
+        # checkpoint entirely. The router then rides straight through and the stop
+        # becomes unreachable in practice.
+        #
+        # Composing adjacencies across routes is exactly what could invent a road,
+        # so this is confined to intermediates that are **transparent** — degree 2
+        # in the whole network. Such a stop has no neighbour but the two it sits
+        # between, so it cannot belong to any road other than this one, and
+        # splicing it asserts no edge that isn't already there (both halves are).
+        # A hop several routes take directly is still left alone
+        # (``CONFIRMED_MIN_ROUTES``): a genuine bypass running parallel to the
+        # detailed road is precisely what that attestation looks like.
+        #
+        # Transparency is read off the *filled* routes, never the raw ones, which
+        # is why this runs after a first fill rather than beside the index above: a
+        # second lazy hop elsewhere inflates the very degree being tested. Raw,
+        # ``מחסום בזק`` looks like a 3-way junction only because another route hops
+        # ``שאן → מחסום בזק`` past ``שלוחות``; once that hop is elaborated it is the
+        # 2-degree stop it really is, and the corridor it sits on becomes fillable.
+        def learn_bypasses(filled):
+            """Add cross-route elaborations for lazy hops; ``True`` if any were found."""
+            adjacency = {}
+            for route in filled:
+                for a, b in zip(route, route[1:]):
+                    if a != b:
+                        adjacency.setdefault(a, set()).add(b)
+                        adjacency.setdefault(b, set()).add(a)
+
+            def bypassed(u, v):
+                """Shortest ``u..v`` chain of transparent stops, within the gap budget.
+
+                Breadth-first, so the first hit is the shortest; ``None`` when the
+                two are joined by nothing but the direct hop, or only via a stop
+                some other road also touches (which would make it a guess).
+                """
+                budget = gap_budget(u, v)
+                frontier = deque([(u, [u])])
+                while frontier:
+                    node, path = frontier.popleft()
+                    if len(path) - 1 > budget:
+                        return None
+                    for nxt in sorted(adjacency.get(node, ())):
+                        if nxt == v:
+                            if len(path) > 1:
+                                return path + [v]
+                            continue  # the direct hop itself, not an elaboration
+                        if nxt == u or nxt in path or len(adjacency[nxt]) != 2:
+                            continue
+                        frontier.append((nxt, path + [nxt]))
+                return None
+
+            learned = False
+            for pair, groups in takers.items():
+                if len(groups) >= CONFIRMED_MIN_ROUTES:
+                    continue
+                u, v = sorted(pair)
+                if (u, v) in detail or (v, u) in detail:
+                    continue
+                chain = bypassed(u, v)
+                if chain:
+                    detail[(u, v)] = chain
+                    detail[(v, u)] = chain[::-1]
+                    learned = True
+            return learned
+
         def fill_pass(route):
             """One collision-safe pass: insert each hop's skipped stops when they
             are all fresh, otherwise leave the hop untouched."""
@@ -702,14 +781,23 @@ class Database:
         # elsewhere). Re-run to a fixed point so those get detailed too. Each pass
         # only *adds* fresh stops, so the invariants hold and length is bounded —
         # the loop always terminates.
-        filled = []
-        for route in routes:
-            while True:
-                nxt = fill_pass(route)
-                if nxt == route:
-                    break
-                route = nxt
-            filled.append(route)
+        def run_fill(pending):
+            filled = []
+            for route in pending:
+                while True:
+                    nxt = fill_pass(route)
+                    if nxt == route:
+                        break
+                    route = nxt
+                filled.append(route)
+            return filled
+
+        # Fill, then read the network back to learn the cross-route elaborations
+        # only a filled adjacency reveals, and fill again with what was learned.
+        # ``detail`` only ever grows and the pairs are finite, so this settles.
+        filled = run_fill(routes)
+        while learn_bypasses(filled):
+            filled = run_fill(filled)
         return filled
 
     # --- public API --------------------------------------------------------

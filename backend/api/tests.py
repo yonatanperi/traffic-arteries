@@ -84,7 +84,11 @@ class KShortestPathsTests(SimpleTestCase):
 
     def test_results_are_best_first(self):
         # Best-first now means highest concentration first (non-increasing HHI).
-        routes = self.finder.find_routes("A", "R", k=3)
+        # Pinned to hop-count length: this fixture crosses almost no crossroads, so
+        # crossroads-only collapses its lengths to 0 and evaluate() falls back to the
+        # equal-share 1/n — which says nothing about the ordering under test.
+        with length_mode(False):
+            routes = self.finder.find_routes("A", "R", k=3)
         hhis = [r.hhi for r in routes]
         self.assertEqual(hhis, sorted(hhis, reverse=True))
 
@@ -295,7 +299,8 @@ class TransparencyTests(SimpleTestCase):
         )
         finder = RouteFinder(graph)
 
-        default_paths = finder.k_shortest_paths("A", "B", k=3)
+        with length_mode(False):
+            default_paths = finder.k_shortest_paths("A", "B", k=3)
         self.assertEqual(default_paths[0], ["A", "M", "B"])
         self.assertIn(["A", "l1", "l2", "l3", "l4", "l5", "B"], default_paths)
 
@@ -400,7 +405,8 @@ class MergeTests(SimpleTestCase):
         # (Crossroads-only it was the balanced 50/50 one and the other corridor
         # won — the expected winner follows the length mode, the property under
         # test does not.)
-        routes = self.finder.find_routes("A", "R", k=3)
+        with length_mode(False):
+            routes = self.finder.find_routes("A", "R", k=3)
         best = routes[0]
         self.assertEqual(best.stops, ["A", "L", "K", "J", "E", "R"])
         self.assertEqual(best.route_count, 2)
