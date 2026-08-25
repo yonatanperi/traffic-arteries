@@ -191,19 +191,21 @@
     0 0 0 1px rgba(var(--danger-rgb), 0.18);
 }
 
-/* --- priority mode ------------------------------------------------------
+/* --- selection mode ------------------------------------------------------
    The card's chains become selectable: stops are swept into ranges instead of
-   dragged, edited or inserted. The toggle keeps the accent while it's on, so the
-   card announces which mode it's in without a banner. */
-.route-priority-mode--on {
+   dragged, edited or inserted, and a sweep opens a menu of what to do with the
+   range (rate it, copy it into a new route, delete it). The toggle keeps the
+   accent while it's on, so the card announces which mode it's in without a
+   banner. */
+.route-selection-mode--on {
   color: var(--on-accent);
   background: var(--accent-fill);
 }
-.route-priority-mode--on:hover {
+.route-selection-mode--on:hover {
   background: var(--accent-fill-hover);
 }
 /* A soft accent frame while sweeping — enough to say "this card is in a different
    mode", not enough to compete with the warning tint of a downgraded route. */
-.route-row--priority-mode {
+.route-row--selection-mode {
   border-color: rgba(var(--accent-rgb), 0.45);
 }

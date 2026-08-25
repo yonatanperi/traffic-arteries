@@ -7,8 +7,8 @@ import "./PriorityDot.css";
  * card header's spread badge, and the toolbar's filter list.
  *
  * There is no priority *picker* component any more: a priority is stated by marking
- * a range of stops, so the only place to choose one is <PriorityMarkPopover>, which
- * opens over the range that was just swept.
+ * a range of stops, so the only place to choose one is <SelectionMenuPopover>, which
+ * opens over the range that was just swept (alongside its other, non-priority actions).
  */
 export function PriorityDot({ priority }) {
   return (

@@ -34,7 +34,7 @@ import {
   IconSwap,
   IconChevron,
   IconCheck,
-  IconFlag,
+  IconSelect,
 } from "../../ui/icons";
 import {
   expandRoute,
@@ -231,6 +231,20 @@ export default function RouteEditor({
     });
   }
 
+  // "Create a new route from the selection": a copy, not a cut — the source route
+  // (and its marks) is left exactly as it was. New, so it may match no filter —
+  // pin it while one is active, same as a brand-new blank route.
+  function extractRoute(index, places) {
+    const next = routes.slice();
+    next.splice(index + 1, 0, { places });
+    onChange(next);
+    setRows((prev) => {
+      const nextRows = prev.slice();
+      nextRows.splice(index + 1, 0, { ...newRow(), pinned: Boolean(filtering) });
+      return nextRows;
+    });
+  }
+
   function reverseRouteAt(index) {
     replaceRoute(index, reverseRoute(routes[index]));
   }
@@ -409,6 +423,7 @@ export default function RouteEditor({
                   filteredOut={Boolean(filtering) && !matched.has(i)}
                   compromisedPlaces={compromisedPlaces}
                   onChangeRoute={(nextRoute) => replaceRoute(i, nextRoute)}
+                  onExtractRoute={(places) => extractRoute(i, places)}
                   onRemoveRoute={() => removeRoute(i)}
                   onDuplicateRoute={() => duplicateRoute(i)}
                   onReverseRoute={() => reverseRouteAt(i)}
@@ -439,7 +454,7 @@ export default function RouteEditor({
  * The priority filter: a dropdown over PRIORITY_OPTIONS, but multi-select — asking
  * "show me anything rated any of these", so choosing an option toggles it and
  * leaves the list open rather than closing on the first pick. (It is the only
- * priority *list* outside <PriorityMarkPopover>, and a deliberately different
+ * priority *list* outside <SelectionMenuPopover>, and a deliberately different
  * question: that one rates one stretch, this one filters the whole editor.)
  *
  * props:
@@ -529,6 +544,7 @@ function RouteRow({
   filteredOut,
   compromisedPlaces,
   onChangeRoute,
+  onExtractRoute,
   onRemoveRoute,
   onDuplicateRoute,
   onReverseRoute,
@@ -551,9 +567,10 @@ function RouteRow({
   const worstPriority = ridden[ridden.length - 1];
   const showPrioritySpread = ridden.length > 1 || isDowngraded(worstPriority);
   // Turns every chain in the card into a selectable one, so a stretch of stops can
-  // be swept out and rated. Per card: rating one route is a whole task on its own,
-  // and a global mode would take reordering away from every other card at once.
-  const [priorityMode, setPriorityMode] = useState(false);
+  // be swept out and acted on — rated, copied into a new route, or deleted. Per
+  // card: working a selection on one route is a whole task on its own, and a
+  // global mode would take reordering away from every other card at once.
+  const [selectionMode, setSelectionMode] = useState(false);
   // Hovering the reverse button previews the flipped order (via the chain's own
   // drag-reorder animation) without touching the route — nothing persists until
   // the click. Leaving without clicking just lets the preview relax back.
@@ -583,7 +600,7 @@ function RouteRow({
 
   const extraClassName = [
     "route-row--sortable",
-    priorityMode && "route-row--priority-mode",
+    selectionMode && "route-row--selection-mode",
     disconnected && "route-row--disconnected",
     hasCompromised && "route-row--compromised",
     pinned && "route-row--pinned",
@@ -657,28 +674,30 @@ function RouteRow({
       }
       actions={
         <>
-          {/* There is no priority *picker* on a card: a rating applies to a stretch
-              of stops, so it is stated by sweeping that stretch out. This toggle is
-              what turns the card's chains into selectable ones. */}
+          {/* There is no priority picker, extract button, or bulk-delete on a card
+              directly: they all act on a stretch of stops, so they're stated by
+              sweeping that stretch out first. This toggle is what turns the card's
+              chains into selectable ones — a sweep then opens a menu of what to do
+              with the range (rate it, copy it into a new route, or delete it). */}
           <IconButton
             className={
-              "route-priority-mode" +
-              (priorityMode ? " route-priority-mode--on" : "")
+              "route-selection-mode" +
+              (selectionMode ? " route-selection-mode--on" : "")
             }
             ariaLabel={
-              priorityMode
-                ? `סיים סימון עדיפויות בציר ${index + 1}`
-                : `סמן עדיפויות בציר ${index + 1}`
+              selectionMode
+                ? `סיים בחירה בציר ${index + 1}`
+                : `בחר טווח תחנות בציר ${index + 1}`
             }
-            ariaPressed={priorityMode}
+            ariaPressed={selectionMode}
             title={
-              priorityMode
-                ? "סיים סימון — חזרה לעריכת התחנות"
-                : "סמן עדיפות — בחר טווח תחנות וקבע לו עדיפות. העדיפות חלה רק על מסלול שנוסע בטווח כולו."
+              selectionMode
+                ? "סיים בחירה — חזרה לעריכת התחנות"
+                : "בחר טווח תחנות — שנה עדיפות, צור ציר חדש מהבחירה, או מחק תחנות. עדיפות חלה רק על מסלול שנוסע בטווח כולו."
             }
-            onClick={() => setPriorityMode((on) => !on)}
+            onClick={() => setSelectionMode((on) => !on)}
           >
-            <IconFlag size={16} />
+            <IconSelect size={16} />
           </IconButton>
           <IconButton
             className={"route-pin" + (pinned ? " route-pin--on" : "")}
@@ -698,7 +717,7 @@ function RouteRow({
           >
             <IconDuplicate size={16} />
           </IconButton>
-          {!branched && !priorityMode && (
+          {!branched && !selectionMode && (
             <IconButton
               ariaLabel={`הפוך את כיוון ציר ${index + 1}`}
               title="הפוך כיוון"
@@ -727,11 +746,12 @@ function RouteRow({
       <BranchedChain
         route={route}
         onChange={onChangeRoute}
+        onExtractRoute={onExtractRoute}
         suggestions={suggestions}
         highlight={highlight}
         onRenameStop={onRenameStop}
         compromisedPlaces={compromisedPlaces}
-        priorityMode={priorityMode}
+        selectionMode={selectionMode}
         previewReversed={reversePreview}
       />
     </EditableGroupRow>

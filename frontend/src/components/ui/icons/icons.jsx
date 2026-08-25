@@ -190,12 +190,11 @@ export function IconPin(props) {
   );
 }
 
-/* Priority mode: a flag planted on a stretch of the chain. */
-export function IconFlag(props) {
+/* Selection mode: a marquee dashed around a stretch of the chain. */
+export function IconSelect(props) {
   return (
     <Svg {...props}>
-      <path d="M5 21V4" />
-      <path d="M5 4h11l-2 3.5L16 11H5" />
+      <rect x="4" y="4" width="16" height="16" rx="2" strokeDasharray="4 3.2" />
     </Svg>
   );
 }

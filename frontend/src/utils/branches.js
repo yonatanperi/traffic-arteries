@@ -433,6 +433,36 @@ export function removeMark(route, path, markIndex) {
 }
 
 /**
+ * The stop names covered by a `[from, to]` range of the node at `path`'s frame —
+ * what "create a new route from the selection" copies out. Just a slice of the
+ * frame, since a frame's indices are already in stop order across node boundaries.
+ */
+export function frameRangeStops(route, path, from, to) {
+  return nodeFrame(route, path).slice(from, to + 1);
+}
+
+/**
+ * Delete the stops covering a `[from, to]` range of the node at `path`'s frame —
+ * the bulk version of a pill's own "×". The range may reach past this node into
+ * the shared tail (same as a mark), so it's cut into per-node pieces first
+ * (`framePieces`) and each node loses its own slice via `patchNodePlaces`, which
+ * already carries every mark across the edit exactly as a single-stop removal
+ * would. The pieces address disjoint nodes, so applying them one after another
+ * (each against the route the previous one produced) is order-independent.
+ */
+export function removeStopsInRange(route, path, from, to) {
+  let next = route;
+  for (const piece of framePieces(route, path, from, to)) {
+    const places = nodeAt(next, piece.path).places;
+    next = patchNodePlaces(next, piece.path, [
+      ...places.slice(0, piece.from),
+      ...places.slice(piece.to + 1),
+    ]);
+  }
+  return next;
+}
+
+/**
  * Branch the segment at `path` at `splitIndex` (an index into its `places`): the
  * stops from `splitIndex` on become the shared tail, the stops before it become
  * one head, and a fresh empty head is added beside it — two equal siblings

@@ -10,7 +10,7 @@ import {
   IconFit,
 } from "../../ui/icons";
 import { PriorityDot } from "./PriorityDot";
-import PriorityMarkPopover from "./PriorityMarkPopover";
+import SelectionMenuPopover from "./SelectionMenuPopover";
 import {
   branchAt,
   removeBranch,
@@ -21,7 +21,8 @@ import {
   removeMark,
   framePieces,
   markPieces,
-  nodeFrame,
+  frameRangeStops,
+  removeStopsInRange,
   resolveRange,
   pathKey,
   keyPath,
@@ -82,27 +83,34 @@ function measureFitScale(ref) {
  * (split at that gap into converging heads). Emits the whole next route object, so
  * the route's marks ride along untouched.
  *
- * **Priority lives on the chains, not beside them.** A rating applies to a *range*
- * of stops — a result pays for it only by riding that whole stretch — so it is
- * stated by picking the two ends of that stretch and choosing a priority for it.
- * `priorityMode` turns every segment into a selectable chain; the marks themselves
- * are painted whether or not the mode is on.
+ * **A range of stops is a general handle, not just a priority target.** Picking the
+ * two ends of a stretch is stated the same way whichever of the three things you
+ * then do with it — rate it (a mark, the original mechanism), copy it out into a
+ * new route, or delete it — because "which stops" has to be answered before "do
+ * what to them" means anything. `selectionMode` turns every segment into a
+ * selectable chain; marks themselves are painted whether or not the mode is on.
  *
- * A range may run **from a head into the shared tail**, because a bad stretch of
- * road doesn't care where the author split the tree. It may only run *downstream*
- * (a head toward the destination, never across to a sibling): nothing rides two
+ * A range may run **from a head into the shared tail**, because a stretch of road
+ * doesn't care where the author split the tree. It may only run *downstream* (a
+ * head toward the destination, never across to a sibling): nothing rides two
  * sibling heads, so a pair of stops on both names no road. The tree renders the
  * whole gesture — a drag can start in one segment and end in another, and the two
  * ends can equally be tapped one after the other — while each chain only reports
- * which of its stops was picked. Where the resulting mark is *stored* is what scopes
- * it: on the shared tail it rates every corridor through it, on a head only the
- * corridors below that head.
+ * which of its stops was picked. For a rating, where the resulting mark is *stored*
+ * is what scopes it: on the shared tail it rates every corridor through it, on a
+ * head only the corridors below that head. Delete and copy-out act on exactly the
+ * stops the range names, cut into per-node pieces the same way a mark is
+ * (`framePieces`/`frameRangeStops`) — a range spilling from a head into the tail
+ * touches both nodes' `places`, not just one.
  *
  * props:
  *   route     { places, marks?, branches? } — the whole tree
  *   onChange  (nextRoute) => void
+ *   onExtractRoute  (places) => void — "create a new route from the selection":
+ *             the picked range's stop names, for the caller to append as a fresh
+ *             route. The original route is left untouched (a copy, not a cut).
  *   suggestions / highlight / onRenameStop / compromisedPlaces — passed to every chain.
- *   priorityMode  whether the segments are in range-selection mode (see above)
+ *   selectionMode  whether the segments are in range-selection mode (see above)
  *   previewReversed  hover-preview only (non-branched routes): show the root chain's
  *                 stops in reverse order via its own drag-reorder animation, without
  *                 touching `route` — the reverse button is the only thing that sets it.
@@ -110,11 +118,12 @@ function measureFitScale(ref) {
 export default function BranchedChain({
   route,
   onChange,
+  onExtractRoute,
   suggestions,
   highlight,
   onRenameStop,
   compromisedPlaces,
-  priorityMode = false,
+  selectionMode = false,
   previewReversed = false,
 }) {
   // A branched route lives on the pan/zoom map; a plain (branchless) route is the
@@ -140,13 +149,13 @@ export default function BranchedChain({
   // Leaving the mode abandons a half-made range rather than letting it ambush the
   // next time the mode is opened.
   useEffect(() => {
-    if (!priorityMode) {
+    if (!selectionMode) {
       dragRef.current = null;
       setLive(null);
       setTapped(null);
       setPending(null);
     }
-  }, [priorityMode]);
+  }, [selectionMode]);
 
   // A picked pair becomes a range only if one stop is downstream of the other;
   // sibling heads resolve to null and simply paint nothing.
@@ -229,7 +238,7 @@ export default function BranchedChain({
     wrapEvery: branched ? 6 : null,
     // Only ever true for the root chain of a non-branched route (see prop doc).
     previewReversed,
-    priorityMode,
+    selectionMode,
     picked,
     pieces,
     onSelectStop: handleSelectStop,
@@ -244,27 +253,22 @@ export default function BranchedChain({
       (mark) => mark.from === pending?.from && mark.to === pending?.to,
     )?.priority ?? BEST_PRIORITY;
 
-  const markPopover = pending && (
-    <PriorityMarkPopover
+  const selectionMenu = pending && (
+    <SelectionMenuPopover
       at={pending.at}
-      current={pendingPriority}
-      // Widening goes to the end of the *corridor*, not the segment: from a head
-      // that means down the shared tail to the destination, which is the stretch a
-      // whole-route rating used to mean before marks existed.
-      wholeLabel={pending.path.length ? "בחר עד היעד" : "בחר את כל הציר"}
-      onPick={(priority) => {
+      currentPriority={pendingPriority}
+      onPickPriority={(priority) => {
         onChange(setMark(route, pending.path, pending.from, pending.to, priority));
         setPending(null);
       }}
-      // Widening keeps the list open: the author still has a rating to pick, and
-      // this is only the range they want to pick it for.
-      onWhole={() =>
-        setPending({
-          ...pending,
-          from: 0,
-          to: Math.max(nodeFrame(route, pending.path).length - 1, 0),
-        })
-      }
+      onCreateRoute={() => {
+        onExtractRoute(frameRangeStops(route, pending.path, pending.from, pending.to));
+        setPending(null);
+      }}
+      onDeleteStops={() => {
+        onChange(removeStopsInRange(route, pending.path, pending.from, pending.to));
+        setPending(null);
+      }}
       onClose={() => setPending(null)}
     />
   );
@@ -316,7 +320,7 @@ export default function BranchedChain({
     return (
       <>
         {tree}
-        {markPopover}
+        {selectionMenu}
       </>
     );
 
@@ -378,7 +382,7 @@ export default function BranchedChain({
           >
             {tree}
           </TransformComponent>
-          {markPopover}
+          {selectionMenu}
         </div>
       )}
     </TransformWrapper>
@@ -419,7 +423,7 @@ function TreeNode({ ctx, node, path, bracket = false }) {
     <EditableRouteChain
       stops={node.places}
       ranges={ranges}
-      selectionMode={ctx.priorityMode}
+      selectionMode={ctx.selectionMode}
       selectionKey={key}
       selected={ctx.picked.get(key) ?? null}
       onSelectStop={ctx.onSelectStop}

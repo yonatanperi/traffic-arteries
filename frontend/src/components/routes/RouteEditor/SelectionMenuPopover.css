@@ -40,13 +40,31 @@
   font-weight: 700;
 }
 
-/* The widen shortcut is a different kind of action from the four ratings, so it
-   sits below a rule rather than reading as a fifth priority. */
-.mark-pop-whole {
-  margin-top: 2px;
-  padding-top: var(--s-3);
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 var(--r-sm) var(--r-sm);
+/* The root's "שנה עדיפות" row: the label takes the row so the "opens a submenu"
+   chevron sits pinned at the far (left) end, same as any other disclosure control. */
+.mark-pop-item-label {
+  flex: 1;
+}
+.mark-pop-item-arrow {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+/* The priority screen's way out, back to the three top-level actions — sits above
+   a rule, so it reads apart from the ratings themselves. */
+.mark-pop-back {
+  margin-bottom: 2px;
+  padding-bottom: var(--s-3);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
   color: var(--text-muted);
   font-size: 0.8rem;
+}
+
+.mark-pop-item--danger {
+  color: var(--danger-text);
+}
+.mark-pop-item--danger:hover,
+.mark-pop-item--danger:focus-visible {
+  background: var(--danger-soft);
 }
