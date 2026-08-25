@@ -101,7 +101,7 @@ LENGTH_EXPONENT = 0.5
 # vanish), while a mediocre headline keeps its genuinely-comparable ones. The
 # ranked pool is monotone, so with at most a few slots this single floor is also
 # what trims a junk tail ("#1, #2 solid, #3 junk" is exactly q_3 < FLOOR * q_1).
-ALTERNATIVE_FLOOR = 0.3
+ALTERNATIVE_FLOOR = 0.65
 
 
 def _rank_key(route):
