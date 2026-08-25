@@ -18,7 +18,9 @@ import {
   IconDestination,
   IconClose,
   IconFocus,
+  IconPalette,
 } from "../../ui/icons";
+import { PLACE_GROUPS, GROUP_COLORS } from "../../../utils/placeGroups.js";
 import "./BrainToolbar.css";
 
 const ORDINALS = ["המיטבי", "חלופי", "חלופי נוסף"];
@@ -56,6 +58,10 @@ export default function BrainToolbar({
   onZoomOut,
   showInsights,
   onToggleInsights,
+  colorByGroup,
+  onToggleColorByGroup,
+  hiddenGroups,
+  onToggleGroup,
   // path
   onSubmitPath,
   onClearPath,
@@ -73,7 +79,7 @@ export default function BrainToolbar({
   const [query, setQuery] = useState("");
   const { start, setStart, end, setEnd, swap } = useOriginDestination();
 
-  const placeSet = useMemo(() => new Set(placeOptions), [placeOptions]);
+  const placeSet = useMemo(() => new Set(placeOptions.map((o) => o.value)), [placeOptions]);
 
   function onSearchChange(value) {
     setQuery(value);
@@ -167,7 +173,43 @@ export default function BrainToolbar({
             >
               <IconBulb size={18} />
             </Button>
+            <Button
+              variant="ghost"
+              className={"bt-icon" + (colorByGroup ? " bt-icon--on" : "")}
+              onClick={onToggleColorByGroup}
+              title="צביעה לפי קבוצת מקום"
+              aria-label="צביעה לפי קבוצת מקום"
+              aria-pressed={colorByGroup}
+            >
+              <IconPalette size={18} />
+            </Button>
           </div>
+          {colorByGroup && (
+            <div className="bt-group-legend" role="group" aria-label="מקרא קבוצות וסינון">
+              {PLACE_GROUPS.map((g) => {
+                const active = !hiddenGroups?.has(g.key);
+                return (
+                  <button
+                    type="button"
+                    key={g.key}
+                    className={
+                      "bt-group-legend-item" + (active ? "" : " bt-group-legend-item--off")
+                    }
+                    aria-pressed={active}
+                    title={active ? `הסתר ${g.label}` : `הצג ${g.label}`}
+                    onClick={() => onToggleGroup(g.key)}
+                  >
+                    <span
+                      className="bt-group-legend-dot"
+                      style={{ background: GROUP_COLORS[g.key] }}
+                      aria-hidden="true"
+                    />
+                    {g.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

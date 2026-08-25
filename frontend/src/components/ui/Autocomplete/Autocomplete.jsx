@@ -9,7 +9,14 @@ import "./Autocomplete.css";
  *
  * props:
  *   value, onChange   controlled text value
- *   options           list of all place names
+ *   options           list of all place names, either plain strings or
+ *                     `{value, label, keywords?}` objects — `keywords` are
+ *                     extra terms (e.g. a place's group label, "צומת") that
+ *                     widen what a query matches without appearing in the
+ *                     rendered label itself. onSelect/onChange/onSubmit always
+ *                     receive/set the bare `value` (or the string itself, for
+ *                     plain-string options) — this component never assumes
+ *                     what that value "means".
  *   label, placeholder, icon
  */
 export default function Autocomplete({
@@ -29,7 +36,21 @@ export default function Autocomplete({
   const wrapRef = useRef(null);
   const listId = useId();
 
-  const matches = useMemo(() => fuzzyFilter(options, value, 8), [value, options]);
+  const normOptions = useMemo(
+    () => options.map((o) => (typeof o === "string" ? { value: o, label: o } : o)),
+    [options],
+  );
+  const matchTextOf = (o) => [o.label, ...(o.keywords || [])].join(" ");
+  const byMatchText = useMemo(
+    () => new Map(normOptions.map((o) => [matchTextOf(o), o])),
+    [normOptions],
+  );
+  const matches = useMemo(
+    () =>
+      fuzzyFilter(normOptions.map(matchTextOf), value, 8)
+        .map((text) => byMatchText.get(text)),
+    [normOptions, byMatchText, value],
+  );
 
   // Close when clicking outside.
   useEffect(() => {
@@ -44,16 +65,16 @@ export default function Autocomplete({
 
   useEffect(() => setHighlight(0), [value]);
 
-  function choose(place) {
+  function choose(option) {
     // When a consumer wants "pick = commit" (e.g. adding a stop), it passes
     // onSelect and we don't write the value back into the field. In that mode we
     // keep the list open so several stops can be added in a row.
     if (onSelect) {
-      onSelect(place);
+      onSelect(option.value);
       setHighlight(0);
       setOpen(true);
     } else {
-      onChange(place);
+      onChange(option.value);
       setOpen(false);
     }
   }
@@ -141,20 +162,20 @@ export default function Autocomplete({
 
       {showList && (
         <ul className="ac-list" id={listId} role="listbox">
-          {matches.map((place, i) => (
+          {matches.map((option, i) => (
             <li
-              key={place}
+              key={option.value}
               role="option"
               aria-selected={i === highlight}
               className={"ac-option" + (i === highlight ? " ac-option--active" : "")}
               onMouseEnter={() => setHighlight(i)}
               onMouseDown={(e) => {
                 e.preventDefault();
-                choose(place);
+                choose(option);
               }}
             >
               <span className="ac-option-dot" aria-hidden="true" />
-              {place}
+              {option.label}
             </li>
           ))}
         </ul>

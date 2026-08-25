@@ -55,6 +55,7 @@ import {
   priorityLabel,
   priorityLetter,
 } from "../../../utils/priorities.js";
+import { classifyPlace, groupLabel } from "../../../utils/placeGroups.js";
 import "./RouteEditor.css";
 
 // Anything inside a route card that owns the pointer: the stop pills (they have
@@ -186,6 +187,18 @@ export default function RouteEditor({
     });
   }
   const [pendingRename, setPendingRename] = useState(null); // { oldValue, newValue }
+
+  // Each suggestion's group is derived from its own prefix, purely for a
+  // searchable `keywords` term (e.g. typing "צומת" surfaces every junction).
+  const filterOptions = useMemo(
+    () =>
+      suggestions.map((name) => ({
+        value: name,
+        label: name,
+        keywords: [groupLabel(classifyPlace(name))],
+      })),
+    [suggestions],
+  );
 
   const [rows, setRows] = useState(() => routes.map(newRow));
   // Only ever re-synced if `routes` changes length behind our back (it doesn't
@@ -354,7 +367,7 @@ export default function RouteEditor({
     <div className="editor">
       <div className="editor-search">
         <Autocomplete
-          options={suggestions}
+          options={filterOptions}
           value={query}
           onChange={setQuery}
           onSelect={addFilter}

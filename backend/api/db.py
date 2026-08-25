@@ -1,6 +1,6 @@
 """"Database" backed by Cloudflare R2 (S3-compatible object storage).
 
-A :class:`Database` owns two JSON objects in an R2 bucket:
+A :class:`Database` owns these JSON objects in an R2 bucket:
 
   * ``routes.json``      — the source of truth: the routes exactly as authored,
     each ``{"places": [place names], "marks": [...]}``. A route may also be
@@ -43,6 +43,19 @@ A :class:`Database` owns two JSON objects in an R2 bucket:
     is built the routes are run through :meth:`Database.fill_missing_destinations`,
     so a route that skips stops another spells out doesn't fabricate a direct
     edge — ``routes.json`` keeps the originals, the graph sees the filled version.
+  * ``places.json`` — the place registry: ``{id: {"name": base_name, "group":
+    group_key}}`` (see :mod:`api.place_groups`). A place's real identity is
+    this numeric id, not its name — ``routes.json``/``edge_routes.json``/
+    ``compromised.json`` all reference places by id internally (compact, and
+    collision-proof: two distinct display strings, e.g. "מ. גולני" and "מחלף
+    גולני", always get distinct ids, since the resolve key is the *parsed*
+    ``(group, base)`` pair, never the base name alone). This is entirely an
+    internal storage detail — the API (``GET``/``PUT /api/routes/``,
+    ``/api/places/``, ``/api/path/``, ``/api/compromised/``, ``/api/graph/``)
+    keeps sending/receiving the exact display-name strings it always has;
+    :meth:`Database.load_routes_display`/:meth:`Database.save_routes`/
+    :meth:`Database.place_id`/:meth:`Database.translate_stops` are the
+    translation boundary. No endpoint or frontend code ever sees a raw id.
 
 All object I/O goes through the :data:`~utils.r2_storage.storage` facade; writes
 are atomic per key, so no half-written object can be observed. On first access an empty store is
@@ -61,6 +74,7 @@ from collections import deque
 from utils.r2_storage import ObjectNotFound, storage
 
 from .graph import BEST_PRIORITY, WORST_PRIORITY, Graph
+from .place_groups import DEFAULT_GROUP, format_place, parse_prefixed_name
 
 # Version of the *derivation* — the pipeline that turns ``routes.json`` into
 # ``edge_routes.json`` (:func:`expand_route`, :meth:`Database.fill_missing_destinations`,
@@ -282,6 +296,15 @@ class Database:
         # time for routing/place-picking — routes.json/edge_routes.json never
         # change because of this.
         self.compromised_key = _join_key(prefix, "compromised.json")
+        # {id: {"name": base_name, "group": group_key}} — the place registry. A
+        # place's real identity is this numeric id, not its name: routes.json/
+        # edge_routes.json/compromised.json all reference places by id internally
+        # (compact, and collision-proof — two distinct display strings always get
+        # distinct ids). The API boundary (views.py) is the only place ids are
+        # translated to/from the full display string a place is shown/typed as
+        # (base name + its group's prefix, see :mod:`api.place_groups`) — nothing
+        # outside this module ever sees a raw id.
+        self.places_key = _join_key(prefix, "places.json")
         # What the derived object was built from — see :meth:`_derivation_fingerprint`.
         # Kept beside the edges rather than inside them so the derived object stays
         # exactly the record list :meth:`Graph.from_edge_routes` reads.
@@ -555,6 +578,122 @@ class Database:
         if not storage.object_exists(self.compromised_key):
             self._atomic_write_json(self.compromised_key, [])
 
+    def _ensure_places(self):
+        """Guarantee ``places.json`` exists (it has nothing derived from it)."""
+        if not storage.object_exists(self.places_key):
+            self._atomic_write_json(self.places_key, {})
+
+    # --- place registry: name (as typed/displayed) <-> internal id ---------
+    #
+    # A place's real identity is its numeric id; its stored ``name`` is always
+    # the bare base name (no prefix), and the full display string a user types
+    # or sees is reconstructed via ``format_place(name, group)``. This is what
+    # lets ``routes.json``/``edge_routes.json``/``compromised.json`` store a
+    # compact int instead of a repeated Hebrew string, and what makes two
+    # distinct display strings (e.g. "מ. גולני" and "מחלף גולני") always get
+    # distinct ids -- there is nothing to collide, since the resolve key is the
+    # *parsed* ``(group, base)`` pair, never the base name alone.
+
+    def load_place_registry(self):
+        """``{id: {"name": base_name, "group": group_key}}``, ``{}`` if absent."""
+        self._ensure_places()
+        raw = self._read_json(self.places_key)
+        return {int(place_id): entry for place_id, entry in raw.items()}
+
+    @staticmethod
+    def _by_group_base(registry):
+        """``{(group, base_name): id}`` — the reverse index a resolve looks up."""
+        return {(entry["group"], entry["name"]): place_id for place_id, entry in registry.items()}
+
+    @staticmethod
+    def _next_id(registry):
+        return max(registry, default=0) + 1
+
+    @staticmethod
+    def display_name(entry):
+        """The full display string for one registry entry (prefix + base, or
+        the bare base for a prefix-less group)."""
+        return format_place(entry["name"], entry["group"])
+
+    def _resolve_or_create(self, text, registry, by_group_base, next_id_ref):
+        """Resolve a typed/stored display string to its id, minting one if this
+        exact ``(group, base)`` pair has never been seen before.
+
+        Resolving by the *parsed* pair rather than the raw string means minor
+        typed-formatting variance (e.g. "מ.אלפורן" vs "מ. אלפורן") still lands
+        on the same id instead of minting a needless duplicate.
+        """
+        parsed = parse_prefixed_name(text)
+        group, base = parsed if parsed else (DEFAULT_GROUP, text.strip())
+        key = (group, base)
+        existing = by_group_base.get(key)
+        if existing is not None:
+            return existing
+        new_id = next_id_ref[0]
+        next_id_ref[0] += 1
+        registry[new_id] = {"name": base, "group": group}
+        by_group_base[key] = new_id
+        return new_id
+
+    def place_id(self, text, registry=None, by_group_base=None):
+        """Resolve a display string to its *existing* id, or ``None``.
+
+        Read-only lookup — never mints. Used to translate user-supplied place
+        names (path search, a compromised-destination entry) to the internal
+        id the graph actually uses; an unresolvable name means "no such place"
+        rather than "create one."
+        """
+        if by_group_base is None:
+            registry = registry if registry is not None else self.load_place_registry()
+            by_group_base = self._by_group_base(registry)
+        parsed = parse_prefixed_name(text)
+        group, base = parsed if parsed else (DEFAULT_GROUP, text.strip())
+        return by_group_base.get((group, base))
+
+    def translate_stops(self, place_ids, registry=None):
+        """``[display_name(id), ...]`` for a list of ids, loading the registry once."""
+        registry = registry if registry is not None else self.load_place_registry()
+        return [self.display_name(registry[place_id]) for place_id in place_ids]
+
+    def resolve_places(self, names):
+        """``[place_id(name), ...]`` for several names, loading the registry once.
+
+        Each entry is ``None`` if that name doesn't resolve to any known place —
+        the caller (path search) treats that as "no such place," not an error.
+        """
+        registry = self.load_place_registry()
+        by_group_base = self._by_group_base(registry)
+        return [self.place_id(name, by_group_base=by_group_base) for name in names]
+
+    def _tree_to_ids(self, node, registry, by_group_base, next_id_ref):
+        """Recursively resolve/mint every place string in a validated route tree
+        to its id, leaving ``marks`` and every other field untouched (marks are
+        index-based, so the token swap never invalidates them)."""
+        converted = {
+            **node,
+            "places": [
+                self._resolve_or_create(p, registry, by_group_base, next_id_ref)
+                for p in node["places"]
+            ],
+        }
+        if "branches" in node:
+            converted["branches"] = [
+                self._tree_to_ids(b, registry, by_group_base, next_id_ref)
+                for b in node["branches"]
+            ]
+        return converted
+
+    def _tree_to_display(self, node, registry):
+        """The inverse of :meth:`_tree_to_ids` — resolve every stored id back to
+        its full display string."""
+        converted = {
+            **node,
+            "places": [self.display_name(registry[p]) for p in node["places"]],
+        }
+        if "branches" in node:
+            converted["branches"] = [self._tree_to_display(b, registry) for b in node["branches"]]
+        return converted
+
     def _rebuild_graph(self, routes, lazy_gap=LAZY_GAP, confirmed_gap=CONFIRMED_GAP):
         """Derive and persist the graph from ``routes``.
 
@@ -807,14 +946,28 @@ class Database:
         """Stored routes in the uniform ``{"places"[, "marks"][, "branches"]}`` shape."""
         return [upgrade_node(route) for route in routes]
 
-    def load_routes(self):
-        """The authored routes, always in the ``{"places", "marks"}`` shape.
-
-        A routes file written before marks existed holds bare lists, or a
-        whole-route ``priority``; it is upgraded here (see :func:`upgrade_node`) so
-        every caller sees one shape, and rewritten in the new shape on the next save.
+    def _normalised_routes(self):
+        """The stored route tree exactly as persisted, upgraded to the uniform
+        shape (see :func:`upgrade_node`) but with places left as *whatever
+        token is actually stored* — internal ids once any route has been saved
+        under the id-registry scheme, plain strings for data that predates it
+        (a not-yet-migrated store, or mid-migration). Internal-only: every
+        caller either doesn't care about the token type (graph-building, which
+        is token-agnostic) or is the migration itself (which needs the raw,
+        untranslated content precisely because the registry may still be
+        empty). Everything else should call :meth:`load_routes`.
         """
         return self._normalised(self._ensure_routes())
+
+    def load_routes(self):
+        """The authored routes, always in the ``{"places", "marks"}`` shape,
+        with every place resolved to its full display string — this is the
+        wire shape ``GET``/``PUT /api/routes/`` has always used, and what
+        :meth:`save_routes` returns; id resolution is purely an internal
+        storage detail (see :meth:`_normalised_routes`).
+        """
+        registry = self.load_place_registry()
+        return [self._tree_to_display(route, registry) for route in self._normalised_routes()]
 
     def load_expanded_routes(self):
         """The authored routes flattened to one ``{"places", "marks"}`` per subroute.
@@ -822,9 +975,10 @@ class Database:
         This is the flat view that lines up with the derived graph's route indices
         (each tree node is one graph route). Consumers that index a graph run back
         to a route — marks in :meth:`load_graph`, endpoint labels in the path view —
-        read *this*, not :meth:`load_routes` (which keeps the authored tree).
+        read *this*, not :meth:`load_routes` (which resolves to display strings and
+        loses the tree). Places here are internal ids, matching the id-keyed graph.
         """
-        return expand_routes(self.load_routes())
+        return expand_routes(self._normalised_routes())
 
     def load_graph(self):
         """Load the pre-built graph (edges + route membership) from disk.
@@ -845,32 +999,70 @@ class Database:
         )
 
     def save_routes(self, routes):
-        """Validate, persist routes, and regenerate the derived graph.
+        """Validate, persist routes (internally as ids), and regenerate the
+        derived graph.
 
-        Returns the cleaned routes that were saved.
+        ``routes`` (the incoming payload) and the return value are both the
+        display-string shape the API contract has always used — the id
+        conversion is entirely an internal storage detail. A place string not
+        already in the registry mints a fresh id here (see
+        :meth:`_resolve_or_create`); an existing one (by its parsed ``(group,
+        base)`` pair) is reused.
         """
         cleaned = self.validate_routes(routes)
-        self._atomic_write_json(self.routes_key, cleaned)
-        self._rebuild_graph(cleaned)
-        return cleaned
+
+        registry = self.load_place_registry()
+        by_group_base = self._by_group_base(registry)
+        next_id_ref = [self._next_id(registry)]
+        id_tree = [
+            self._tree_to_ids(route, registry, by_group_base, next_id_ref)
+            for route in cleaned
+        ]
+
+        self._atomic_write_json(self.routes_key, id_tree)
+        self._atomic_write_json(self.places_key, {str(k): v for k, v in registry.items()})
+        self._rebuild_graph(id_tree)
+
+        return [self._tree_to_display(route, registry) for route in id_tree]
 
     def load_compromised(self):
+        """The compromised-destination groups, as display strings (the API shape)."""
         self._ensure_compromised()
-        return self._read_json(self.compromised_key)
+        id_groups = self._read_json(self.compromised_key)
+        registry = self.load_place_registry()
+        return [self.translate_stops(group, registry) for group in id_groups]
 
     def compromised_places(self):
-        """Flattened set of every destination marked unavailable, across all groups."""
-        return {place for group in self.load_compromised() for place in group}
+        """Flattened set of every destination *id* marked unavailable, across all
+        groups. Ids, not display strings — this is what feeds
+        ``graph.without_places(...)``, and the graph's nodes are ids."""
+        self._ensure_compromised()
+        id_groups = self._read_json(self.compromised_key)
+        return {place_id for group in id_groups for place_id in group}
 
     def save_compromised(self, groups):
         """Validate against the closed list of known destinations and persist.
 
-        Returns the cleaned groups that were saved.
+        ``groups``/the return value are display strings (API shape); only an
+        *already-known* place may be marked compromised — this never mints a
+        new place id.
         """
-        known = set(self.load_graph().places())
+        registry = self.load_place_registry()
+        by_group_base = self._by_group_base(registry)
+        known = {self.display_name(entry) for entry in registry.values()}
         cleaned = self.validate_compromised(groups, known)
-        self._atomic_write_json(self.compromised_key, cleaned)
+        id_groups = [
+            [self._resolve_existing(place, by_group_base) for place in group]
+            for group in cleaned
+        ]
+        self._atomic_write_json(self.compromised_key, id_groups)
         return cleaned
+
+    def _resolve_existing(self, text, by_group_base):
+        place_id = self.place_id(text, by_group_base=by_group_base)
+        if place_id is None:
+            raise ValidationError(f'המקום "{text}" אינו קיים.')
+        return place_id
 
     def load_routable_graph(self):
         """The graph with compromised destinations (and their edges) removed.

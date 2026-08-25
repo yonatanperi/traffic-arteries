@@ -19,7 +19,7 @@ export function usePathSearch(placeOptions = []) {
   const [invalidPlaces, setInvalidPlaces] = useState(() => new Set()); // unknown place names from the last submit attempt
   const { vias, addVia, setVia, removeVia } = useWaypoints();
 
-  const placeSet = useMemo(() => new Set(placeOptions), [placeOptions]);
+  const placeSet = useMemo(() => new Set(placeOptions.map((o) => o.value)), [placeOptions]);
 
   async function submitPath(start, end) {
     setPathError("");

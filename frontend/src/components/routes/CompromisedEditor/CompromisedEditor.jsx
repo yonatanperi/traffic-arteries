@@ -5,6 +5,7 @@ import Pill from "../../ui/Pill";
 import EditableList from "../../ui/EditableList";
 import EditableGroupRow from "../../ui/EditableGroupRow";
 import { IconPlus, IconAlert } from "../../ui/icons";
+import { classifyPlace, groupLabel } from "../../../utils/placeGroups.js";
 import "../../shared/RouteChain/RouteChain.css";
 import "./CompromisedEditor.css";
 
@@ -65,9 +66,14 @@ function CompromisedGroupRow({
   const empty = group.length === 0;
 
   // Offer every known destination not already claimed by *some* group (this
-  // one included, since it's already shown as a pill below).
+  // one included, since it's already shown as a pill below). Each option's
+  // group is derived from its own prefix, purely for a searchable `keywords`
+  // term (e.g. typing "צומת" surfaces every junction).
   const options = useMemo(
-    () => suggestions.filter((p) => !usedElsewhere.has(p)),
+    () =>
+      suggestions
+        .filter((p) => !usedElsewhere.has(p))
+        .map((p) => ({ value: p, label: p, keywords: [groupLabel(classifyPlace(p))] })),
     [suggestions, usedElsewhere],
   );
 

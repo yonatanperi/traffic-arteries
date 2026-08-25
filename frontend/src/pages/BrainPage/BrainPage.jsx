@@ -24,6 +24,17 @@ export default function BrainPage() {
   const [pinnedId, setPinnedId] = useState(null);
   const [showInsights, setShowInsights] = useState(false);
   const [highlightDeadEnds, setHighlightDeadEnds] = useState(false);
+  const [colorByGroup, setColorByGroup] = useState(false);
+  const [hiddenGroups, setHiddenGroups] = useState(() => new Set());
+
+  function toggleGroup(key) {
+    setHiddenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   function focusNode(id) {
     setPinnedId(id);
@@ -55,6 +66,10 @@ export default function BrainPage() {
           onZoomOut={() => graphRef.current?.zoomOut()}
           showInsights={showInsights}
           onToggleInsights={() => setShowInsights((v) => !v)}
+          colorByGroup={colorByGroup}
+          onToggleColorByGroup={() => setColorByGroup((v) => !v)}
+          hiddenGroups={hiddenGroups}
+          onToggleGroup={toggleGroup}
           onSubmitPath={path.submitPath}
           onClearPath={path.clearPath}
           onSelectPathIndex={path.setActivePathIndex}
@@ -101,6 +116,8 @@ export default function BrainPage() {
               deadEndIds={metrics.deadEndIds}
               highlightDeadEnds={highlightDeadEnds}
               compromisedIds={compromisedIds}
+              colorByGroup={colorByGroup}
+              hiddenGroups={hiddenGroups}
             />
 
             {pinnedId && mode === "explore" && (

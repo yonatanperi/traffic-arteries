@@ -8,7 +8,7 @@ import {
   MatchVisual,
   ResultsVisual,
 } from "./visuals.jsx";
-import { PLACE_TYPES, classifyPlace } from "../../../utils/placeTypes.js";
+import { PLACE_GROUPS, classifyPlace } from "../../../utils/placeGroups.js";
 import Button from "../../../components/ui/Button";
 import { IconSearch } from "../../../components/ui/icons";
 import "./HomeStory.css";
@@ -63,12 +63,12 @@ export default function HomeStory({ places }) {
   // The one live number on this page: every other figure below states how the
   // router behaves, this one states what it is currently searching.
   const counts = useMemo(() => {
-    const byType = new Map(PLACE_TYPES.map((t) => [t.key, 0]));
+    const byType = new Map(PLACE_GROUPS.map((t) => [t.key, 0]));
     places.forEach((place) => {
       const type = classifyPlace(place);
-      if (type) byType.set(type, byType.get(type) + 1);
+      byType.set(type, byType.get(type) + 1);
     });
-    return PLACE_TYPES.filter((t) => byType.get(t.key) > 0).map((t) => ({
+    return PLACE_GROUPS.filter((t) => byType.get(t.key) > 0).map((t) => ({
       key: t.key,
       label: t.label,
       value: byType.get(t.key),

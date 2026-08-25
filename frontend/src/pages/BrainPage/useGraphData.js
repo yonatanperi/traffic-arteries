@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getGraph } from "../../api/client.js";
 import { computeMetrics } from "../../utils/graphMetrics.js";
+import { groupLabel } from "../../utils/placeGroups.js";
 
 /**
  * Loads the network graph once on mount and derives the metrics + lookups
@@ -23,7 +24,10 @@ export function useGraphData() {
   const metrics = useMemo(() => (data ? computeMetrics(data) : null), [data]);
 
   const placeOptions = useMemo(
-    () => (data ? data.nodes.map((n) => n.id) : []),
+    () =>
+      data
+        ? data.nodes.map((n) => ({ value: n.id, label: n.id, keywords: [groupLabel(n.group)] }))
+        : [],
     [data],
   );
 

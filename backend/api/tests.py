@@ -2,16 +2,19 @@
 
 import contextlib
 import os
+import tempfile
 from unittest import mock
 
 import boto3
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from moto import mock_aws
 
 from . import db as db_module
 from .db import Database, ValidationError, expand_route, expand_routes, upgrade_node
 from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
 from .graph.search import MinMergeStrategy, avoid_priority_penalty, prefer_route_penalty
+from .management.commands.migrate_place_groups import Command as MigratePlaceGroupsCommand
+from .place_groups import DEFAULT_GROUP
 from utils.r2_storage import storage
 
 @contextlib.contextmanager
@@ -70,6 +73,31 @@ class R2BackedTestCase(SimpleTestCase):
         ).create_bucket(Bucket=_R2_TEST_ENV["R2_BUCKET_NAME"])
 
         self.db = Database()
+
+    def id(self, name):
+        """The internal place id for a display-name string already saved via
+        ``self.db.save_routes``/``save_compromised`` — places are now stored by
+        id, not name, so most graph/routing assertions need this to translate a
+        human-readable test name into what the graph actually holds."""
+        return self.db.place_id(name)
+
+    def ids(self, names):
+        return [self.id(n) for n in names]
+
+    def names(self, place_ids):
+        return self.db.translate_stops(place_ids)
+
+    def register(self, name, group="other"):
+        """Mint/reuse an id for ``name`` directly in the place registry, without
+        touching routes.json — for tests that write routes.json out of band
+        (bypassing ``save_routes``'s own id resolution) and need a real,
+        persisted id for a stop that isn't part of any saved route yet."""
+        registry = self.db.load_place_registry()
+        by_group_base = self.db._by_group_base(registry)
+        next_id_ref = [self.db._next_id(registry)]
+        place_id = self.db._resolve_or_create(name, registry, by_group_base, next_id_ref)
+        self.db._atomic_write_json(self.db.places_key, {str(k): v for k, v in registry.items()})
+        return place_id
 
 
 class KShortestPathsTests(SimpleTestCase):
@@ -962,8 +990,9 @@ class RoutePriorityStorageTests(R2BackedTestCase):
         # An unmarked route carries no `marks` key at all.
         self.assertEqual(saved[1], {"places": ["E", "F"]})
         self.assertEqual(self.db.load_routes(), saved)
-        # Indices become place names on the way into the graph.
-        self.assertEqual(self.db.load_graph().route_marks(0), (("B", "D", 2),))
+        # Indices become place ids on the way into the graph (internal identity
+        # since the ID-registry migration — see api.db's module docstring).
+        self.assertEqual(self.db.load_graph().route_marks(0), ((self.id("B"), self.id("D"), 2),))
 
     def test_marks_are_sorted_and_overlap_is_rejected(self):
         saved = self.db.save_routes(
@@ -1031,8 +1060,8 @@ class RoutePriorityStorageTests(R2BackedTestCase):
         )
         # And it bites exactly where it used to: on a ride of the whole artery.
         graph = self.db.load_graph()
-        self.assertEqual(tier(graph, ["A", "B", "C"]), 2)
-        self.assertEqual(tier(graph, ["A", "B"]), 0)
+        self.assertEqual(tier(graph, self.ids(["A", "B", "C"])), 2)
+        self.assertEqual(tier(graph, self.ids(["A", "B"])), 0)
 
     def test_a_route_stating_marks_ignores_a_legacy_priority(self):
         # Marks are the more specific statement; the deprecated field must not add
@@ -1047,7 +1076,7 @@ class RoutePriorityStorageTests(R2BackedTestCase):
         # this proves they're re-attached on load rather than lost.
         self.db.save_routes([{"places": ["A", "B", "C"], "priority": 3}])
         graph = self.db.load_graph()
-        self.assertEqual(graph.edge_priority("A", "B"), 3)
+        self.assertEqual(graph.edge_priority(self.id("A"), self.id("B")), 3)
         self.assertEqual(graph.worst_priority(), 3)
 
     def test_routable_graph_keeps_marks(self):
@@ -1082,8 +1111,8 @@ class RoutePriorityStorageTests(R2BackedTestCase):
             ]
         )
         finder = RouteFinder(self.db.load_graph())
-        self.assertEqual(finder.find_routes("q1", "q3", k=1)[0].priority, 2)
-        self.assertEqual(finder.find_routes("S", "q1", k=1)[0].priority, 0)
+        self.assertEqual(finder.find_routes(self.id("q1"), self.id("q3"), k=1)[0].priority, 2)
+        self.assertEqual(finder.find_routes(self.id("S"), self.id("q1"), k=1)[0].priority, 0)
 
 
 class GraphShapeTests(SimpleTestCase):
@@ -1134,7 +1163,7 @@ class CompromisedDestinationsTests(R2BackedTestCase):
         saved = self.db.save_compromised([["B"], ["D", "E"]])
         self.assertEqual(saved, [["B"], ["D", "E"]])
         self.assertEqual(self.db.load_compromised(), [["B"], ["D", "E"]])
-        self.assertEqual(self.db.compromised_places(), {"B", "D", "E"})
+        self.assertEqual(self.db.compromised_places(), set(self.ids(["B", "D", "E"])))
 
     def test_rejects_unknown_destination(self):
         with self.assertRaises(ValidationError):
@@ -1147,14 +1176,14 @@ class CompromisedDestinationsTests(R2BackedTestCase):
     def test_routable_graph_excludes_compromised_places(self):
         self.db.save_compromised([["C"]])
         graph = self.db.load_routable_graph()
-        self.assertNotIn("C", graph)
-        self.assertIn("A", graph)
-        self.assertIn("D", graph)
+        self.assertNotIn(self.id("C"), graph)
+        self.assertIn(self.id("A"), graph)
+        self.assertIn(self.id("D"), graph)
 
     def test_full_graph_still_includes_compromised_places(self):
         self.db.save_compromised([["C"]])
         graph = self.db.load_graph()
-        self.assertIn("C", graph)
+        self.assertIn(self.id("C"), graph)
 
     def test_routing_avoids_compromised_destination(self):
         self.db.save_compromised([["C"]])
@@ -1162,7 +1191,7 @@ class CompromisedDestinationsTests(R2BackedTestCase):
         finder = RouteFinder(graph)
         # C was the only link between the two routes' halves, so it's now
         # unreachable and A-E has no route.
-        self.assertEqual(finder.k_shortest_paths("A", "E"), [])
+        self.assertEqual(finder.k_shortest_paths(self.id("A"), self.id("E")), [])
 
 
 class DetourNoticeTests(R2BackedTestCase):
@@ -1177,10 +1206,14 @@ class DetourNoticeTests(R2BackedTestCase):
         self.db.save_routes([["A", "B", "C"], ["C", "D", "E"]])
 
     def _split(self, start, end):
-        """Mirror views.path: rank once, select natural + compromised-free."""
+        """Mirror views.path: rank once, select natural + compromised-free.
+
+        Takes/returns display-name strings (like the API); resolution to the
+        graph's internal ids is purely internal here, same as views.path does.
+        """
         finder = RouteFinder(self.db.load_graph())
         compromised = self.db.compromised_places()
-        ranked, stretch = finder.rank_candidates(start, end)
+        ranked, stretch = finder.rank_candidates(self.id(start), self.id(end))
         natural = finder.select_diverse(ranked, k=None, max_stretch=stretch)
         detour = (
             sorted({s for r in natural[: self.TOP_N] for s in r.stops} & compromised)
@@ -1192,7 +1225,11 @@ class DetourNoticeTests(R2BackedTestCase):
             if compromised
             else natural
         )
-        return [r.stops for r in clean], detour, [r.stops for r in natural]
+        return (
+            [self.names(r.stops) for r in clean],
+            self.names(detour),
+            [self.names(r.stops) for r in natural],
+        )
 
     def test_sole_connector_compromised_shows_up_in_detour(self):
         self.db.save_compromised([["C"]])
@@ -1212,6 +1249,162 @@ class DetourNoticeTests(R2BackedTestCase):
         clean, detour, natural = self._split("A", "E")
         self.assertEqual(detour, [])
         self.assertEqual(clean, natural)  # excluding an unused place changes nothing
+
+
+class PlaceRegistryTests(R2BackedTestCase):
+    """places.json: the {id: {name, group}} registry, and the id-resolution
+    layer in save_routes/save_compromised that keeps it entirely internal —
+    the wire (save_routes' input/output, load_routes, load_compromised) never
+    sees a raw id, only the full display-name string it always has."""
+
+    def test_new_places_get_distinct_ids_by_parsed_group_and_base(self):
+        # The exact real-world case that broke an earlier {base_name: group}
+        # design: "מ. גולני" and "מחלף גולני" are two different, genuinely
+        # distinct places (a camp and an interchange) that share a base name
+        # once you strip their prefix — resolving by the parsed (group, base)
+        # pair, not the base alone, is what keeps them distinct here.
+        saved = self.db.save_routes([["מ. גולני", "מחלף גולני"]])
+        self.assertEqual(saved, [{"places": ["מ. גולני", "מחלף גולני"]}])
+
+        camp_id, interchange_id = self.id("מ. גולני"), self.id("מחלף גולני")
+        self.assertIsNotNone(camp_id)
+        self.assertIsNotNone(interchange_id)
+        self.assertNotEqual(camp_id, interchange_id)
+
+        registry = self.db.load_place_registry()
+        self.assertEqual(registry[camp_id], {"name": "גולני", "group": "camp"})
+        self.assertEqual(registry[interchange_id], {"name": "גולני", "group": "interchange"})
+
+    def test_unrecognized_prefix_defaults_to_other(self):
+        self.db.save_routes([["אילת", "חיפה"]])
+        self.assertEqual(self.db.load_place_registry()[self.id("אילת")]["group"], DEFAULT_GROUP)
+
+    def test_load_routes_roundtrips_display_strings_byte_for_byte(self):
+        routes = [
+            {
+                "places": ["מ. גולני", "מחלף גולני", "אילת"],
+                "marks": [{"from": 0, "to": 1, "priority": 2}],
+            }
+        ]
+        saved = self.db.save_routes(routes)
+        self.assertEqual(saved, routes)
+        self.assertEqual(self.db.load_routes(), routes)
+
+    def test_resolving_tolerates_spacing_variance_in_the_prefix(self):
+        # "מ.גולני" (no space) and "מ. גולני" (space) parse to the same
+        # (group, base) pair, so re-adding the "same" place with slightly
+        # different spacing must reuse its id rather than mint a duplicate.
+        self.db.save_routes([["מ. גולני", "X"]])
+        first_id = self.id("מ. גולני")
+        self.db.save_routes([["מ.גולני", "X", "Y"]])
+        self.assertEqual(self.id("מ.גולני"), first_id)
+        camps = [e for e in self.db.load_place_registry().values() if e["group"] == "camp"]
+        self.assertEqual(len(camps), 1)
+
+    def test_save_compromised_rejects_a_name_with_no_matching_place(self):
+        self.db.save_routes([["A", "B"]])
+        with self.assertRaises(ValidationError):
+            self.db.save_compromised([["ZZZ"]])
+
+    def test_save_compromised_never_mints_a_new_place(self):
+        self.db.save_routes([["A", "B"]])
+        before = self.db.load_place_registry()
+        with self.assertRaises(ValidationError):
+            self.db.save_compromised([["ZZZ"]])
+        self.assertEqual(self.db.load_place_registry(), before)
+
+    def test_compromised_places_and_routable_graph_work_by_id(self):
+        self.db.save_routes([["A", "B", "C"]])
+        self.db.save_compromised([["B"]])
+        self.assertEqual(self.db.compromised_places(), {self.id("B")})
+        self.assertNotIn(self.id("B"), self.db.load_routable_graph())
+
+
+class MigratePlaceGroupsCommandTests(R2BackedTestCase):
+    """The one-time migration: convert routes.json/compromised.json from
+    name-string storage to id-based storage, populating places.json — and stay
+    a no-op on a re-run."""
+
+    def _run(self, dry_run=False):
+        with tempfile.TemporaryDirectory() as tmp, override_settings(DATA_DIR=tmp):
+            MigratePlaceGroupsCommand().handle(dry_run=dry_run)
+
+    def _write_raw_routes(self, routes):
+        """Pre-migration (string-based) routes.json, written directly —
+        bypassing save_routes' own id resolution, which is exactly the state
+        the migration itself has to handle."""
+        storage.upload_json(self.db.routes_key, routes)
+
+    def test_dry_run_writes_nothing(self):
+        self._write_raw_routes([{"places": ["צ. גומא", "מחלף עכו", "אילת"]}])
+        self._run(dry_run=True)
+        self.assertEqual(self.db.load_place_registry(), {})
+        self.assertEqual(
+            storage.download_json(self.db.routes_key)[0]["places"],
+            ["צ. גומא", "מחלף עכו", "אילת"],
+        )
+
+    def test_assigns_distinct_ids_to_the_real_world_collision_case(self):
+        # "מ. גולני"/"מחלף גולני" and "צ. צאלים"/"צאלים" each strip to one
+        # shared base name — exactly the real data that broke an earlier
+        # design keyed by base name alone. No collision here: each of the 4
+        # distinct strings gets its own id.
+        self._write_raw_routes(
+            [{"places": ["מ. גולני", "מחלף גולני", "צ. צאלים", "צאלים"]}]
+        )
+        self._run()
+        self.assertEqual(
+            self.db.load_routes()[0]["places"],
+            ["מ. גולני", "מחלף גולני", "צ. צאלים", "צאלים"],
+        )
+        self.assertEqual(len(self.db.load_place_registry()), 4)
+
+    def test_reclassifies_other_places_when_a_new_group_is_recognized(self):
+        # Simulate a store migrated *before* some prefix was recognized (e.g. a
+        # group added later, as "road"/"כביש" was): an "other" entry whose
+        # unstripped name now matches a current PREFIX_PATTERNS entry.
+        self._write_raw_routes([{"places": ["כביש 6", "אילת"]}])
+        self._run()  # ordinary migration -- "כביש 6" already classifies as road today
+        road_id = self.id("כביש 6")
+
+        registry = self.db.load_place_registry()
+        registry[road_id] = {"name": "כביש 6", "group": DEFAULT_GROUP}
+        storage.upload_json(self.db.places_key, {str(k): v for k, v in registry.items()})
+
+        self._run()  # registry is non-empty now -- the reclassify path
+
+        updated = self.db.load_place_registry()[road_id]
+        self.assertEqual(updated, {"name": "6", "group": "road"})
+        self.assertEqual(self.db.display_name(updated), "כביש 6")
+        # The id itself never changed, so routes.json needed no rewrite.
+        self.assertEqual(self.db.load_routes()[0]["places"], ["כביש 6", "אילת"])
+
+    def test_reclassify_is_idempotent(self):
+        self._write_raw_routes([{"places": ["כביש 6", "אילת"]}])
+        self._run()
+        road_id = self.id("כביש 6")
+        registry = self.db.load_place_registry()
+        registry[road_id] = {"name": "כביש 6", "group": DEFAULT_GROUP}
+        storage.upload_json(self.db.places_key, {str(k): v for k, v in registry.items()})
+
+        self._run()
+        after_first_reclassify = self.db.load_place_registry()
+        self._run()  # nothing left to reclassify
+        self.assertEqual(self.db.load_place_registry(), after_first_reclassify)
+
+    def test_migrates_compromised_places_too(self):
+        self._write_raw_routes([{"places": ["צ. גומא", "אילת"]}])
+        storage.upload_json(self.db.compromised_key, [["צ. גומא"]])
+        self._run()
+        self.assertEqual(self.db.load_compromised(), [["צ. גומא"]])
+
+    def test_idempotent_on_rerun(self):
+        self._write_raw_routes([{"places": ["צ. גומא", "אילת"]}])
+        self._run()
+        registry, routes = self.db.load_place_registry(), self.db.load_routes()
+        self._run()  # already migrated -- must be a no-op
+        self.assertEqual(self.db.load_place_registry(), registry)
+        self.assertEqual(self.db.load_routes(), routes)
 
 
 class BranchedRouteExpansionTests(SimpleTestCase):
@@ -1375,15 +1568,35 @@ class HeadMarkTests(SimpleTestCase):
 class BranchedRouteStorageTests(R2BackedTestCase):
     """Persisting, loading and deriving the graph from branched routes."""
 
+    @staticmethod
+    def _named_edges(db, graph):
+        """``edge_routes_records`` translated to a set of (endpoint names,
+        sorted route indices) — needed because ``flat_db``/``tree_db`` are
+        separate ``Database`` instances, each with its *own* place registry, so
+        the same place can (and does) mint a different raw id in each; only
+        the *names* are meaningfully comparable across them."""
+        return {
+            (frozenset(db.translate_stops([a, b])), tuple(sorted(route_ids)))
+            for a, b, route_ids in graph.edge_routes_records
+        }
+
+    @staticmethod
+    def _named_marks(db, graph, route_id):
+        return tuple(
+            (db.translate_stops([a])[0], db.translate_stops([b])[0], p)
+            for a, b, p in graph.route_marks(route_id)
+        )
+
     def test_derived_graph_identical_to_flat_authoring(self):
         flat_db = Database(prefix="flat")
         tree_db = Database(prefix="tree")
         flat_db.save_routes(BranchedRouteExpansionTests.FLAT)
         tree_db.save_routes(BranchedRouteExpansionTests.BRANCHED)
+        flat_graph, tree_graph = flat_db.load_graph(), tree_db.load_graph()
         # Same edges *and* same per-edge route indices (leaf order matches flat order).
         self.assertEqual(
-            flat_db.load_graph().edge_routes_records,
-            tree_db.load_graph().edge_routes_records,
+            self._named_edges(flat_db, flat_graph),
+            self._named_edges(tree_db, tree_graph),
         )
 
     def test_roundtrip_preserves_the_tree(self):
@@ -1401,7 +1614,8 @@ class BranchedRouteStorageTests(R2BackedTestCase):
         )
         graph = self.db.load_graph()
         self.assertEqual(
-            [graph.route_marks(i) for i in (0, 1, 2)], [(("J", "T2", 2),)] * 3
+            [self._named_marks(self.db, graph, i) for i in (0, 1, 2)],
+            [(("J", "T2", 2),)] * 3,
         )
 
     def test_flat_route_stays_flat_shape(self):
@@ -1475,10 +1689,10 @@ class BranchedRouteStorageTests(R2BackedTestCase):
         graph = self.db.load_graph()
         # Leaf 0 (H1) is unmarked; leaf 1 (H2) carries its head's mark.
         self.assertEqual(graph.route_marks(0), ())
-        self.assertEqual(graph.route_marks(1), (("H2a", "H2b", 3),))
+        self.assertEqual(self._named_marks(self.db, graph, 1), (("H2a", "H2b", 3),))
         # The shared tail is outside the mark, so it stays free for both — a head's
         # downgrade doesn't spoil the road for its sibling.
-        self.assertEqual(graph.edge_priority("J", "T"), 0)
+        self.assertEqual(graph.edge_priority(self.id("J"), self.id("T")), 0)
 
     def test_rejects_out_of_range_head_priority(self):
         with self.assertRaises(ValidationError):
@@ -1512,7 +1726,7 @@ class BranchedRouteStorageTests(R2BackedTestCase):
         graph = self.db.load_graph()
         # It rates the corridor below that head, from the head to the tail stop it
         # reaches — and leaves the sibling's corridor alone.
-        self.assertEqual(graph.route_marks(0), (("H1", "T", 2),))
+        self.assertEqual(self._named_marks(self.db, graph, 0), (("H1", "T", 2),))
         self.assertEqual(graph.route_marks(1), ())
 
     def test_rejects_a_head_mark_past_the_destination(self):
@@ -1573,10 +1787,12 @@ class BranchedRouteStorageTests(R2BackedTestCase):
             ]
         )
         flat_graph, tree_graph = flat_db.load_graph(), tree_db.load_graph()
-        self.assertEqual(flat_graph.edge_routes_records, tree_graph.edge_routes_records)
         self.assertEqual(
-            [flat_graph.route_marks(i) for i in (0, 1)],
-            [tree_graph.route_marks(i) for i in (0, 1)],
+            self._named_edges(flat_db, flat_graph), self._named_edges(tree_db, tree_graph)
+        )
+        self.assertEqual(
+            [self._named_marks(flat_db, flat_graph, i) for i in (0, 1)],
+            [self._named_marks(tree_db, tree_graph, i) for i in (0, 1)],
         )
 
     def test_pathfinding_matches_flat_authoring(self):
@@ -1586,10 +1802,10 @@ class BranchedRouteStorageTests(R2BackedTestCase):
         tree_db.save_routes(BranchedRouteExpansionTests.BRANCHED)
         flat_finder = RouteFinder(flat_db.load_graph())
         tree_finder = RouteFinder(tree_db.load_graph())
-        flat_ranked, _ = flat_finder.rank_candidates("H2a", "T2")
-        tree_ranked, _ = tree_finder.rank_candidates("H2a", "T2")
-        flat_top = [r.stops for r in flat_finder.select_diverse(flat_ranked, k=None)]
-        tree_top = [r.stops for r in tree_finder.select_diverse(tree_ranked, k=None)]
+        flat_ranked, _ = flat_finder.rank_candidates(flat_db.place_id("H2a"), flat_db.place_id("T2"))
+        tree_ranked, _ = tree_finder.rank_candidates(tree_db.place_id("H2a"), tree_db.place_id("T2"))
+        flat_top = [flat_db.translate_stops(r.stops) for r in flat_finder.select_diverse(flat_ranked, k=None)]
+        tree_top = [tree_db.translate_stops(r.stops) for r in tree_finder.select_diverse(tree_ranked, k=None)]
         self.assertEqual(flat_top, tree_top)
         self.assertEqual(flat_top[0], ["H2a", "J", "T1", "T2"])
 
@@ -1614,8 +1830,10 @@ class DerivedGraphFreshnessTests(R2BackedTestCase):
     ]
 
     def edges(self):
+        registry = self.db.load_place_registry()
         return {
-            frozenset((a, b)) for a, b, _ in storage.download_json(self.db.edge_routes_key)
+            frozenset(self.db.translate_stops([a, b], registry))
+            for a, b, _ in storage.download_json(self.db.edge_routes_key)
         }
 
     def write_routes_out_of_band(self, routes):
@@ -1630,13 +1848,25 @@ class DerivedGraphFreshnessTests(R2BackedTestCase):
 
     def test_out_of_band_route_change_rebuilds_on_load(self):
         self.db.save_routes(self.TREE)
-        extended = [{**self.TREE[0], "branches": [
-            {"places": ["H1a", "H1b"]}, {"places": ["H2a", "H2b", "H2c"]},
-        ]}]
+        # Written directly to routes.json (bypassing save_routes' own id
+        # resolution), so it must already be id-based, like a real out-of-band
+        # restore of this store's own data would be. "H2c" is a genuinely new
+        # stop, registered directly (see `register`) since this bypasses the
+        # normal save path that would otherwise mint it.
+        h2c = self.register("H2c")
+        extended = [
+            {
+                "places": [self.id("T1"), self.id("T2")],
+                "branches": [
+                    {"places": [self.id("H1a"), self.id("H1b")]},
+                    {"places": [self.id("H2a"), self.id("H2b"), h2c]},
+                ],
+            }
+        ]
         self.write_routes_out_of_band(extended)
         graph = self.db.load_graph()
         self.assertIn(frozenset(("H2b", "H2c")), self.edges())
-        self.assertIn("H2c", graph.places())
+        self.assertIn(h2c, graph.places())
 
     def test_restoring_a_mismatched_backup_rebuilds(self):
         # Restoring an *older* derived object (+ its fingerprint) over current
@@ -1663,7 +1893,9 @@ class DerivedGraphFreshnessTests(R2BackedTestCase):
         # every load, including loads that never read them.
         self.db.save_routes(self.TREE)
         records = storage.download_json(self.db.edge_routes_key)
-        storage.upload_json(self.db.edge_routes_key, records + [["H1b", "H2b", [0]]])
+        storage.upload_json(
+            self.db.edge_routes_key, records + [[self.id("H1b"), self.id("H2b"), [0]]]
+        )
         self.db.load_graph()
         self.assertIn(frozenset(("H1b", "H2b")), self.edges())
 

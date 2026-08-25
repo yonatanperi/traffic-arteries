@@ -26,6 +26,7 @@ SEED_FILES = [
     "edge_routes.json",
     "edge_routes.fingerprint.json",
     "compromised.json",
+    "places.json",
 ]
 
 

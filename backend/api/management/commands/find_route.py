@@ -48,12 +48,15 @@ class Command(BaseCommand):
         if not start or not end:
             raise CommandError("start and end must be non-empty place names.")
 
+        registry = database.load_place_registry()
         compromised = database.compromised_places()
         graph = database.load_graph()
-        routes = database.load_expanded_routes()
+        routes = database.load_expanded_routes()  # id-based, like the graph itself
 
-        known = set(graph.places())
-        unknown = [p for p in [start, end, *via] if p not in known]
+        start_id, end_id, *via_ids = database.resolve_places([start, end, *via])
+        unknown = [
+            p for p, p_id in zip([start, end, *via], [start_id, end_id, *via_ids]) if p_id is None
+        ]
         if unknown:
             raise CommandError(f"unknown place(s): {', '.join(unknown)}")
 
@@ -65,7 +68,7 @@ class Command(BaseCommand):
             )
             if not places:
                 return run.start, run.end
-            order = {name: i for i, name in enumerate(places)}
+            order = {place_id: i for i, place_id in enumerate(places)}
             start_i, end_i = order.get(run.start), order.get(run.end)
             if start_i is not None and end_i is not None and start_i > end_i:
                 return places[-1], places[0]
@@ -75,7 +78,7 @@ class Command(BaseCommand):
             origin, dest = run_endpoints(run)
             return {
                 "id": run.route_id if isinstance(run.route_id, int) else -1,
-                "label": f"{origin} - {dest}",
+                "label": f"{database.display_name(registry[origin])} - {database.display_name(registry[dest])}",
                 "share": round(run.hops / total_hops * 100) if total_hops else 100,
                 "priority": run.priority,
                 "startIndex": start_index,
@@ -93,9 +96,9 @@ class Command(BaseCommand):
         # Same pipeline as views.path: rank once, select twice (natural vs.
         # compromised-free) over the one ranked pool, then truncate to TOP_N.
         finder = RouteFinder(graph)
-        ranked, stretch = finder.rank_candidates(start, end, via=via)
+        ranked, stretch = finder.rank_candidates(start_id, end_id, via=via_ids)
         natural = finder.select_diverse(ranked, k=None, max_stretch=stretch)
-        detour = (
+        detour_ids = (
             sorted({stop for r in natural[:TOP_N] for stop in r.stops} & compromised)
             if compromised
             else []
@@ -106,7 +109,7 @@ class Command(BaseCommand):
             else natural
         )
         top = clean[:TOP_N]
-        paths = [r.stops for r in top]
+        paths = [database.translate_stops(r.stops, registry) for r in top]
         meta = [
             {
                 "routeCount": r.route_count,
@@ -116,7 +119,8 @@ class Command(BaseCommand):
             }
             for r in top
         ]
-        payload = {"paths": paths, "meta": meta, "compromisedDetour": detour if paths else []}
+        detour = sorted(database.translate_stops(detour_ids, registry)) if paths else []
+        payload = {"paths": paths, "meta": meta, "compromisedDetour": detour}
 
         if options["json"]:
             self.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2))

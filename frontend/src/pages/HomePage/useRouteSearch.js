@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getPlaces, findPaths } from "../../api/client.js";
-import { classifyPlace } from "../../utils/placeTypes.js";
+import { classifyPlace, DEFAULT_GROUP } from "../../utils/placeGroups.js";
 import { unknownPlaces, unknownPlacesMessage } from "../../utils/validatePlaces.js";
 import { useOriginDestination } from "../../hooks/useOriginDestination.js";
 import { useWaypoints } from "../../hooks/useWaypoints.js";
@@ -18,13 +18,14 @@ export function useRouteSearch() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [invalidPlaces, setInvalidPlaces] = useState(() => new Set()); // unknown place names from the last submit attempt
-  const [hiddenTypes, setHiddenTypes] = useState(() => new Set(["base"])); // stop types filtered out of the results
+  const [hiddenTypes, setHiddenTypes] = useState(() => new Set(["camp", "post"])); // stop types filtered out of the results
   const [didSearch, setDidSearch] = useState(false); // a search is dispatched/showing (drives the phone fold)
   const placeSet = useMemo(() => new Set(places), [places]);
 
   // Only interior stops are ever filtered (start/end are always kept), so a
   // filter chip is only worth showing if some route actually has one of that
-  // type among its interior stops.
+  // type among its interior stops. "אחר" never gets a chip at all — it must
+  // always stay visible — so it's excluded here too, not just at render time.
   const presentTypes = useMemo(() => {
     const set = new Set();
     if (!result) return set;
@@ -32,7 +33,7 @@ export function useRouteSearch() {
       path.forEach((place, i) => {
         if (i === 0 || i === path.length - 1) return;
         const type = classifyPlace(place);
-        if (type) set.add(type);
+        if (type !== DEFAULT_GROUP) set.add(type);
       });
     });
     return set;

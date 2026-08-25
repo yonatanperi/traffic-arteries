@@ -1,0 +1,43 @@
+/* Pinned to the viewport, same reasoning as the route editor's selection-menu
+   popover: inside the branched map the chain lives in a scaled, panned canvas,
+   so anything positioned within it would inherit the zoom and drift off its
+   stops. */
+.place-group-pop {
+  position: fixed;
+  z-index: 100;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-2);
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  animation: rise 0.14s var(--ease) backwards;
+}
+
+.place-group-pop-title {
+  padding: var(--s-1) var(--s-3) var(--s-2);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.place-group-pop-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: start;
+  cursor: pointer;
+}
+.place-group-pop-item:hover,
+.place-group-pop-item:focus-visible {
+  background: var(--surface-hover);
+}

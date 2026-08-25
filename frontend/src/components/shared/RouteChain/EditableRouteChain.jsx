@@ -1,4 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   DndContext,
@@ -25,6 +25,8 @@ import {
   IconClose,
   IconBranch,
 } from "../../ui/icons";
+import { classifyPlace, formatPlace, groupLabel, parseTypedPlace } from "../../../utils/placeGroups.js";
+import PlaceGroupPopover from "./PlaceGroupPopover.jsx";
 import "./RouteChain.css";
 
 // A DndContext with no sensors can never start a drag — used to render the chain
@@ -171,6 +173,29 @@ export default function EditableRouteChain({
   // Id of a freshly-inserted (not-yet-committed) stop, so we can tell an "add"
   // apart from an "edit" and keep the add chain going on Enter.
   const [addingId, setAddingId] = useState(null);
+  // Stops committed with text that matched neither a known suggestion nor a
+  // recognized group prefix, queued for the "which group?" popover (one at a
+  // time, so a multi-part paste asks once per part). `previousValue` is what
+  // to restore on cancel: the prior text for a rename, `null` for a fresh
+  // stop (cancelling removes it, same as an abandoned empty add).
+  const [askQueue, setAskQueue] = useState([]);
+  const [askAnchor, setAskAnchor] = useState(null);
+  // Set when a "keep adding" commit also queued a group-ask: the id to open a
+  // fresh empty stop after, once every ask from that commit has been answered.
+  const pendingContinueRef = useRef(null);
+  const suggestionsSet = useMemo(() => new Set(suggestions), [suggestions]);
+  // Each suggestion's group is derived from its own prefix, purely for a
+  // searchable `keywords` term (e.g. typing "צומת" surfaces every junction).
+  const stopOptions = useMemo(
+    () =>
+      suggestions.map((name) => ({
+        value: name,
+        label: name,
+        keywords: [groupLabel(classifyPlace(name))],
+      })),
+    [suggestions],
+  );
+  const currentAsk = askQueue[0] ?? null;
 
   // Reconcile external changes (e.g. the server's normalized copy) without
   // clobbering ids/edit state when the new value is just the echo of our own
@@ -247,6 +272,80 @@ export default function EditableRouteChain({
     onChange(next.filter((it) => it.value !== "").map((it) => it.value));
   }
 
+  // Computed after commit (not during render), so a stop added this same tick
+  // already has a pill in the DOM for `chainItemRefs` to measure. Recomputed
+  // (not dismissed) on scroll/resize — the popover answers a question with a
+  // destructive "no" (it reverts/removes the stop), so it must never vanish
+  // from a merely-incidental scroll the way a plain menu safely could.
+  useEffect(() => {
+    if (!currentAsk) {
+      setAskAnchor(null);
+      return;
+    }
+    function place() {
+      const rect = chainItemRefs.current.get(currentAsk.itemId)?.getBoundingClientRect();
+      setAskAnchor(
+        rect
+          ? { top: rect.bottom + 6, right: window.innerWidth - rect.right }
+          : { top: 80, right: 80 },
+      );
+    }
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [currentAsk?.itemId]);
+
+  // Resume "continue adding" (see commitEdit) once every ask it deferred has
+  // been answered, one way or another.
+  useEffect(() => {
+    if (askQueue.length > 0 || !pendingContinueRef.current) return;
+    const afterId = pendingContinueRef.current;
+    pendingContinueRef.current = null;
+    const fresh = toItem("");
+    let inserted = false;
+    setItems((prev) => {
+      const idx = prev.findIndex((it) => it.id === afterId);
+      if (idx === -1) return prev;
+      inserted = true;
+      const next = prev.slice();
+      next.splice(idx + 1, 0, fresh);
+      return next;
+    });
+    if (inserted) {
+      setEditingId(fresh.id);
+      setAddingId(fresh.id);
+    }
+  }, [askQueue]);
+
+  function resolveCurrentAsk(group) {
+    const { itemId, rawText, renameFrom } = currentAsk;
+    const resolved = formatPlace(rawText, group);
+    setItems((prev) => {
+      const next = prev.map((it) => (it.id === itemId ? { ...it, value: resolved } : it));
+      emit(next);
+      return next;
+    });
+    if (renameFrom) onRenameStop?.(renameFrom, resolved);
+    setAskQueue((q) => q.slice(1));
+  }
+
+  function cancelCurrentAsk() {
+    const { itemId, previousValue } = currentAsk;
+    setItems((prev) => {
+      const next =
+        previousValue === null
+          ? prev.filter((it) => it.id !== itemId)
+          : prev.map((it) => (it.id === itemId ? { ...it, value: previousValue } : it));
+      emit(next);
+      return next;
+    });
+    setAskQueue((q) => q.slice(1));
+  }
+
   function handleDragEnd({ active, over }) {
     setDragging(false);
     if (!over || active.id === over.id) return;
@@ -295,29 +394,57 @@ export default function EditableRouteChain({
 
     // Renaming an existing stop: only a genuine 1:1 rename (no split, no
     // clearing) qualifies — the parent's "propagate everywhere" prompt makes
-    // no sense once the edit fans out into several stops.
-    if (
-      parts.length === 1 &&
-      !wasAdding &&
-      prev &&
-      prev.value &&
-      prev.value !== parts[0]
-    ) {
+    // no sense once the edit fans out into several stops. Deferred (not fired
+    // here) when the new text itself needs the group-ask popover below — it
+    // must propagate the *resolved* (prefixed) text, not the raw typed one,
+    // or other routes would rename to a different string than this stop ends
+    // up showing.
+    const isRename = parts.length === 1 && !wasAdding && prev && prev.value && prev.value !== parts[0];
+    const renameNeedsAsk =
+      isRename && !suggestionsSet.has(parts[0]) && !parseTypedPlace(parts[0]);
+    if (isRename && !renameNeedsAsk) {
       onRenameStop?.(prev.value, parts[0]);
+    }
+
+    // A part that matches neither a known suggestion nor a recognized group
+    // prefix is committed as typed regardless (above) — never left stuck
+    // mid-edit — but queued for the "which group?" popover, which will
+    // reconstruct its text with the chosen group's prefix once answered.
+    const toAsk = replacement.filter(
+      (it) => it.value && !suggestionsSet.has(it.value) && !parseTypedPlace(it.value),
+    );
+    if (toAsk.length) {
+      setAskQueue((q) => [
+        ...q,
+        ...toAsk.map((it) => ({
+          itemId: it.id,
+          rawText: it.value,
+          previousValue: it.id === prev?.id && !wasAdding ? prev.value : null,
+          renameFrom: renameNeedsAsk && it.id === prev?.id ? prev.value : null,
+        })),
+      ]);
     }
 
     // Continuous add: after committing a freshly-added stop (or a pasted run
     // of several) via Enter/select, open a new empty stop right after the
-    // last one so the user can keep adding.
+    // last one so the user can keep adding. Deferred until any group-ask this
+    // very commit raised has been answered — opening a fresh editor at the same
+    // time as the popover meant the two competed for attention, and the popover
+    // could end up anchored to a pill that had already scrolled away from it.
     if (replacement.length && wasAdding && keepAdding) {
       const lastId = replacement[replacement.length - 1].id;
-      const idx = next.findIndex((it) => it.id === lastId);
-      const fresh = toItem("");
-      const withNew = next.slice();
-      withNew.splice(idx + 1, 0, fresh);
-      setItems(withNew);
-      setEditingId(fresh.id);
-      setAddingId(fresh.id);
+      if (toAsk.length) {
+        pendingContinueRef.current = lastId;
+        setEditingId(null);
+      } else {
+        const idx = next.findIndex((it) => it.id === lastId);
+        const fresh = toItem("");
+        const withNew = next.slice();
+        withNew.splice(idx + 1, 0, fresh);
+        setItems(withNew);
+        setEditingId(fresh.id);
+        setAddingId(fresh.id);
+      }
     } else {
       setEditingId(null);
     }
@@ -465,7 +592,7 @@ export default function EditableRouteChain({
         {editingId === it.id && !selectionMode ? (
           <StopEditor
             initial={it.value}
-            suggestions={suggestions}
+            suggestions={stopOptions}
             onCommit={(v, keepAdding) => commitEdit(it.id, v, keepAdding)}
             onCancel={() => cancelEdit(it.id)}
           />
@@ -550,38 +677,48 @@ export default function EditableRouteChain({
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      modifiers={[scaleModifier]}
-      collisionDetection={closestCenter}
-      onDragStart={() => {
-        setEditingId(null);
-        setDragging(true);
-      }}
-      onDragEnd={handleDragEnd}
-      onDragCancel={() => setDragging(false)}
-    >
-      <SortableContext
-        items={displayItems.map((it) => it.id)}
-        strategy={rectSortingStrategy}
+    <>
+      <DndContext
+        sensors={sensors}
+        modifiers={[scaleModifier]}
+        collisionDetection={closestCenter}
+        onDragStart={() => {
+          setEditingId(null);
+          setDragging(true);
+        }}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setDragging(false)}
       >
-        <ol
-          className={
-            "chain" +
-            (wrapEvery ? " chain--wrapped" : "") +
-            (dragging ? " chain--dragging" : "") +
-            (selectionMode ? " chain--selecting" : "")
-          }
-          data-selection-key={selectionMode ? selectionKey : undefined}
-          onPointerDown={selectionMode ? startPick : undefined}
-          onPointerMove={selectionMode ? movePick : undefined}
-          onPointerUp={selectionMode ? endPick : undefined}
-          onPointerCancel={selectionMode ? endPick : undefined}
+        <SortableContext
+          items={displayItems.map((it) => it.id)}
+          strategy={rectSortingStrategy}
         >
-          {body}
-        </ol>
-      </SortableContext>
-    </DndContext>
+          <ol
+            className={
+              "chain" +
+              (wrapEvery ? " chain--wrapped" : "") +
+              (dragging ? " chain--dragging" : "") +
+              (selectionMode ? " chain--selecting" : "")
+            }
+            data-selection-key={selectionMode ? selectionKey : undefined}
+            onPointerDown={selectionMode ? startPick : undefined}
+            onPointerMove={selectionMode ? movePick : undefined}
+            onPointerUp={selectionMode ? endPick : undefined}
+            onPointerCancel={selectionMode ? endPick : undefined}
+          >
+            {body}
+          </ol>
+        </SortableContext>
+      </DndContext>
+      {currentAsk && askAnchor && (
+        <PlaceGroupPopover
+          at={askAnchor}
+          baseName={currentAsk.rawText}
+          onPick={resolveCurrentAsk}
+          onClose={cancelCurrentAsk}
+        />
+      )}
+    </>
   );
 }
 

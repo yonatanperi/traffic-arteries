@@ -2,7 +2,7 @@
  * Route priority: an int 0..3 on the wire (0 = best), Hebrew letters in the UI.
  *
  * The backend never sees a letter and the UI never shows a digit, so this module
- * is the only place the two vocabularies meet — the same role placeTypes.js plays
+ * is the only place the two vocabularies meet — the same role placeGroups.js plays
  * for place "types". Anything rendering a priority goes through here.
  */
 

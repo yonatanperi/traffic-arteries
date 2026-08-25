@@ -5,7 +5,7 @@ import Pill from "../../components/ui/Pill";
 import IdleBanner from "./IdleBanner.jsx";
 import HomeStory from "./HomeStory";
 import { IconAlert } from "../../components/ui/icons";
-import { PLACE_TYPES } from "../../utils/placeTypes.js";
+import { PLACE_GROUPS, DEFAULT_GROUP } from "../../utils/placeGroups.js";
 import { useIsPhone } from "../../hooks/useMediaQuery.js";
 
 function detourMessage(destinations) {
@@ -55,7 +55,11 @@ export default function ResultsArea({
           )}
           {presentTypes.size > 0 && (
             <div className="type-filters">
-              {PLACE_TYPES.filter((t) => presentTypes.has(t.key)).map((t) => {
+              {/* "אחר" never gets a chip — it must always stay visible — even
+                  though presentTypes already excludes it (useRouteSearch.js). */}
+              {PLACE_GROUPS.filter(
+                (t) => t.key !== DEFAULT_GROUP && presentTypes.has(t.key),
+              ).map((t) => {
                 const active = !hiddenTypes.has(t.key);
                 return (
                   <Pill

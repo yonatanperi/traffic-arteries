@@ -4,7 +4,7 @@ import { IconCopy, IconCheck, IconRoute } from "../../ui/icons";
 import { RouteChain } from "../../shared/RouteChain";
 import Pill from "../../ui/Pill";
 import IconButton from "../../ui/IconButton";
-import { classifyPlace } from "../../../utils/placeTypes.js";
+import { classifyPlace, DEFAULT_GROUP } from "../../../utils/placeGroups.js";
 import {
   isDowngraded,
   priorityLabel,
@@ -32,12 +32,14 @@ function splitLabel(label) {
 }
 
 // Start and end are always kept; only interior stops are subject to filtering.
+// "אחר" is never hidden, regardless of hiddenTypes' contents — it has no
+// filter chip to toggle it off in the first place (ResultsArea.jsx).
 function visiblePath(path, hiddenTypes) {
   if (!hiddenTypes || hiddenTypes.size === 0) return path;
   return path.filter((place, i) => {
     if (i === 0 || i === path.length - 1) return true;
     const type = classifyPlace(place);
-    return !(type && hiddenTypes.has(type));
+    return type === DEFAULT_GROUP || !hiddenTypes.has(type);
   });
 }
 

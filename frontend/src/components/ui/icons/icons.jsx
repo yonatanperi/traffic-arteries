@@ -362,3 +362,15 @@ export function IconHub(props) {
     </Svg>
   );
 }
+
+// Palette — color-by-group toggle.
+export function IconPalette(props) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3a9 8 0 1 0 0 16c1 0 1.6-.5 1.6-1.4 0-.4-.15-.75-.4-1.05-.25-.3-.4-.65-.4-1.05 0-.9.7-1.5 1.6-1.5H16a3 3 0 0 0 3-3c0-4.4-3.6-8-7-8Z" />
+      <circle cx="7.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="7.5" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="16.2" cy="10.5" r="1.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}

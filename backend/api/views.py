@@ -38,7 +38,7 @@ def places(request):
     autocomplete inputs. Compromised (temporarily unavailable) destinations are
     excluded, since they can't be planned through."""
     graph = database.load_routable_graph()
-    return Response(graph.places())
+    return Response(sorted(database.translate_stops(graph.places())))
 
 
 @api_view(["GET", "PUT"])
@@ -89,8 +89,16 @@ def network(request):
     graph = database.load_graph()
     payload = graph.to_network()
     compromised_places = database.compromised_places()
+    registry = database.load_place_registry()
+
     for node in payload["nodes"]:
+        entry = registry[node["id"]]
         node["compromised"] = node["id"] in compromised_places
+        node["group"] = entry["group"]
+        node["id"] = database.display_name(entry)
+    for link in payload["links"]:
+        link["source"] = database.display_name(registry[link["source"]])
+        link["target"] = database.display_name(registry[link["target"]])
     return Response(payload)
 
 
@@ -137,15 +145,24 @@ def path(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Request bodies are display-name strings, per the API contract — resolve
+    # to the internal ids the (now id-keyed) graph actually uses. An
+    # unresolvable name means "no such place," same as an unknown place always
+    # meant here: no route, not an error.
+    registry = database.load_place_registry()
+    start_id, end_id, *via_ids = database.resolve_places([start, end, *via])
+    if start_id is None or end_id is None or any(v is None for v in via_ids):
+        return Response({"paths": [], "meta": [], "compromisedDetour": []})
+
     compromised = database.compromised_places()
     graph = database.load_graph()
     # Expanded subroutes (one per tree node) — this is the list the graph's route
     # indices line up with, so `run.route_id` labels resolve correctly for branched
-    # routes too.
+    # routes too. Still id-based (places() gives ids), like the graph itself.
     routes = database.load_expanded_routes()
 
     def run_endpoints(run):
-        """The authored route's endpoints, oriented to the travel direction.
+        """The authored route's endpoints (ids), oriented to the travel direction.
 
         A run rides authored route ``run.route_id``; its ``start``/``end`` are the
         nodes as travelled. If travel goes *backwards* along the authored route we
@@ -160,7 +177,7 @@ def path(request):
         )
         if not places:
             return run.start, run.end
-        order = {name: i for i, name in enumerate(places)}
+        order = {place_id: i for i, place_id in enumerate(places)}
         start_i, end_i = order.get(run.start), order.get(run.end)
         if start_i is not None and end_i is not None and start_i > end_i:
             return places[-1], places[0]
@@ -187,7 +204,7 @@ def path(request):
         origin, dest = run_endpoints(run)
         return {
             "id": run.route_id if isinstance(run.route_id, int) else -1,
-            "label": f"{origin} - {dest}",
+            "label": f"{database.display_name(registry[origin])} - {database.display_name(registry[dest])}",
             "share": round(run.length / total_length * 100) if total_length else 100,
             "priority": run.priority,
             "startIndex": start_index,
@@ -209,9 +226,9 @@ def path(request):
     # compromised-free results are *selected* — arena and diversity budget computed
     # among showable routes — not a natural list with holes filtered out of it.
     finder = RouteFinder(graph)
-    ranked, stretch = finder.rank_candidates(start, end, via=via)
+    ranked, stretch = finder.rank_candidates(start_id, end_id, via=via_ids)
     natural = finder.select_diverse(ranked, k=None, max_stretch=stretch)
-    detour = (
+    detour_ids = (
         sorted({stop for r in natural[:TOP_N] for stop in r.stops} & compromised)
         if compromised
         else []
@@ -222,7 +239,7 @@ def path(request):
         else natural
     )
     top = clean[:TOP_N]
-    paths = [r.stops for r in top]
+    paths = [database.translate_stops(r.stops, registry) for r in top]
     meta = [
         {
             "routeCount": r.route_count,
@@ -232,4 +249,5 @@ def path(request):
         }
         for r in top
     ]
-    return Response({"paths": paths, "meta": meta, "compromisedDetour": detour if paths else []})
+    detour = sorted(database.translate_stops(detour_ids, registry)) if paths else []
+    return Response({"paths": paths, "meta": meta, "compromisedDetour": detour})

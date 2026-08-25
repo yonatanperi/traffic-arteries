@@ -9,6 +9,7 @@ import {
 } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import { linkEnds, edgeKey } from "../../../utils/graphMetrics.js";
+import { DEFAULT_GROUP, GROUP_COLORS } from "../../../utils/placeGroups.js";
 import "./GraphView.css";
 
 const ACCENT = "#d5ff40";
@@ -49,6 +50,8 @@ const GraphView = forwardRef(function GraphView(
     deadEndIds = null,
     highlightDeadEnds = false,
     compromisedIds = null,
+    colorByGroup = false,
+    hiddenGroups = null,
   },
   ref,
 ) {
@@ -179,17 +182,36 @@ const GraphView = forwardRef(function GraphView(
       const deg = degree.get(node.id) || 1;
       const radius = 4 + Math.min(deg, 6) * 0.9;
 
-      let fill = ACCENT;
+      // Group-color mode swaps the base fill for a fixed categorical palette
+      // (see placeGroups.js) instead of the tier-driven accent/dim scheme —
+      // the tier's *dimming* still applies on top (component/dim alpha), so
+      // hover/selection/path/dead-end signal isn't lost, just less colorful.
+      let fill = colorByGroup
+        ? GROUP_COLORS[node.group] || GROUP_COLORS[DEFAULT_GROUP]
+        : ACCENT;
       let alpha = 1;
-      if (tier === "selected" || tier === "path") fill = ACCENT_2;
-      else if (tier === "neighbour" || tier === "normal") fill = ACCENT;
-      else if (tier === "component") {
-        fill = ACCENT;
+      if (!colorByGroup) {
+        if (tier === "selected" || tier === "path") fill = ACCENT_2;
+        else if (tier === "neighbour" || tier === "normal") fill = ACCENT;
+        else if (tier === "component") {
+          fill = ACCENT;
+          alpha = 0.55;
+        } else if (tier === "dim") {
+          fill = DIM;
+          alpha = 0.3;
+        }
+      } else if (tier === "component") {
         alpha = 0.55;
       } else if (tier === "dim") {
-        fill = DIM;
         alpha = 0.3;
       }
+
+      // The group-color legend doubles as a filter: a hidden group's nodes
+      // fade out (same dimming the tier system already uses for "not what
+      // you're looking at"), rather than disappearing — still there to
+      // toggle back on, still keeping the layout's shape.
+      if (colorByGroup && hiddenGroups?.has(node.group))
+        alpha = Math.min(alpha, 0.08);
 
       // A node's special-status color always overrides the tier fill, but
       // not its alpha, so it still dims correctly when off-path/off-component.
@@ -229,6 +251,8 @@ const GraphView = forwardRef(function GraphView(
       deadEndIds,
       pathActive,
       overrideColorOf,
+      colorByGroup,
+      hiddenGroups,
     ],
   );
 
@@ -253,6 +277,10 @@ const GraphView = forwardRef(function GraphView(
       const always = [];
       const candidates = [];
       data.nodes.forEach((node) => {
+        // A group hidden via the legend-filter gets no label either — it's
+        // meant to fade into the background, not just dim while still naming
+        // itself.
+        if (colorByGroup && hiddenGroups?.has(node.group)) return;
         const tier = tierOf(node.id);
         if (tier === "selected" || tier === "neighbour" || tier === "path") {
           always.push(node);
@@ -303,7 +331,7 @@ const GraphView = forwardRef(function GraphView(
       always.forEach((node) => tryPlace(node, true));
       candidates.forEach((node) => tryPlace(node, false));
     },
-    [data, tierOf, degree],
+    [data, tierOf, degree, colorByGroup, hiddenGroups],
   );
 
   const linkColor = useCallback(

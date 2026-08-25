@@ -1,8 +1,10 @@
+import { useMemo } from "react";
 import Autocomplete from "../../components/ui/Autocomplete";
 import SwapButton from "../../components/ui/SwapButton";
 import Button from "../../components/ui/Button";
 import WaypointsField from "../../components/shared/WaypointsField";
 import { IconOrigin, IconDestination, IconSearch } from "../../components/ui/icons";
+import { classifyPlace, groupLabel } from "../../utils/placeGroups.js";
 
 export default function SearchForm({
   places,
@@ -19,6 +21,14 @@ export default function SearchForm({
   loading,
   onSubmit,
 }) {
+  // Each place's group is derived from its own prefix, purely for a searchable
+  // `keywords` term (e.g. typing "צומת" surfaces every junction) — the group
+  // is never a separate field on the wire.
+  const options = useMemo(
+    () => places.map((p) => ({ value: p, label: p, keywords: [groupLabel(classifyPlace(p))] })),
+    [places],
+  );
+
   return (
     <form className="search-panel card" onSubmit={onSubmit}>
       <div className="search-fields">
@@ -26,7 +36,7 @@ export default function SearchForm({
           label="מוצא"
           icon={<IconOrigin size={17} />}
           placeholder="מקום המוצא"
-          options={places}
+          options={options}
           value={start}
           onChange={onStartChange}
           invalid={invalidPlaces?.has(start.trim())}
@@ -38,7 +48,7 @@ export default function SearchForm({
           label="יעד"
           icon={<IconDestination size={17} />}
           placeholder="מקום היעד"
-          options={places}
+          options={options}
           value={end}
           onChange={onEndChange}
           invalid={invalidPlaces?.has(end.trim())}
@@ -46,7 +56,7 @@ export default function SearchForm({
       </div>
 
       <WaypointsField
-        places={places}
+        places={options}
         vias={vias}
         onAddVia={onAddVia}
         onSetVia={onSetVia}
