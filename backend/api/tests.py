@@ -1648,6 +1648,39 @@ class BranchedRouteStorageTests(R2BackedTestCase):
         with self.assertRaises(ValidationError):
             self.db.save_routes([{"places": ["A", "B"], "branches": [{"places": []}]}])
 
+    def test_rejects_a_repeated_stop_in_one_chain(self):
+        # The graph keys its nodes by place, so the two "B"s are one node and the
+        # stretch between them is a loop the router may cut — a corridor that
+        # silently loses its middle while still reading as one authored route.
+        with self.assertRaises(ValidationError):
+            self.db.save_routes([{"places": ["A", "B", "C", "B", "D"]}])
+
+    def test_rejects_a_head_stop_repeated_in_the_shared_tail(self):
+        # The leaf chain concatenates head and tail, so the repeat is just as fatal
+        # across the junction as inside one node.
+        with self.assertRaises(ValidationError):
+            self.db.save_routes(
+                [{"places": ["J", "T"], "branches": [{"places": ["H", "T"]}]}]
+            )
+
+    def test_allows_the_same_stop_on_two_sibling_heads(self):
+        # Nothing rides two sibling heads, so neither corridor visits "P" twice.
+        saved = self.db.save_routes(
+            [{"places": ["J", "T"], "branches": [{"places": ["P", "A"]}, {"places": ["P", "B"]}]}]
+        )
+        self.assertEqual(len(saved[0]["branches"]), 2)
+
+    def test_a_repeated_stop_never_reaches_the_graph(self):
+        # The regression this rule exists for: a route naming one interchange twice
+        # let the router jump straight from the first occurrence to what followed
+        # the second, skipping every stop between them at a perfect concentration
+        # score. Refusing the save is what keeps that edge out of the graph.
+        self.db.save_routes([{"places": ["A", "B", "C", "D", "E"]}])
+        with self.assertRaises(ValidationError):
+            self.db.save_routes([{"places": ["A", "B", "C", "D", "B", "E"]}])
+        graph = self.db.load_graph()
+        self.assertNotIn(self.id("E"), graph.neighbors(self.id("B")))
+
     def test_roundtrip_preserves_a_head_mark(self):
         head_mark = {"from": 0, "to": 1, "priority": 2}
         saved = self.db.save_routes(

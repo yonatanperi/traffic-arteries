@@ -254,7 +254,14 @@ values. The theme is dark-only (no light-mode branch to maintain).
   stretch on the chain (the `⚑` toggle on each route card) and choosing a priority in
   `PriorityMarkPopover`. A range may run from a head *downstream* into the shared
   tail, never across to a sibling — nothing rides two sibling heads, so a pair of
-  stops on both names no road.
+  stops on both names no road. **No corridor may name the same place twice**
+  (`Database._reject_repeats`, mirrored by `isRouteValid`/`corridorStops` in
+  `branches.js`, which also keeps the add dropdown from offering one): the graph
+  keys its nodes by place, so a repeat collapses into a single node and the stops
+  between the two occurrences become a loop the router cuts — yielding a corridor
+  that is missing its own middle while still riding one authored route, i.e. at a
+  *perfect* concentration score, so it ranks first. Checked over the whole frame,
+  since a head repeating one of its shared tail's stops is the same bug.
 - **`edge_routes.json`** is derived and rebuilt on every save:
   `[[place_a, place_b, [authored route indices]], ...]`. The adjacency is
   reconstructed from these edges — there's no separate adjacency file. This is

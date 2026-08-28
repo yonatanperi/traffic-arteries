@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { EditableRouteChain } from "../../shared/RouteChain";
 import IconButton from "../../ui/IconButton";
@@ -24,6 +24,7 @@ import {
   frameRangeStops,
   removeStopsInRange,
   resolveRange,
+  corridorStops,
   pathKey,
   keyPath,
 } from "../../../utils/branches.js";
@@ -397,6 +398,20 @@ function TreeNode({ ctx, node, path, bracket = false }) {
   const heads = node.branches ?? [];
   const junction = heads.length > 0;
 
+  // Places already on some corridor through this node. Adding one here would make
+  // that corridor visit a place twice, which the graph can't represent — the two
+  // occurrences collapse into a single node and the stops between them become a
+  // loop the router cuts straight out of the route — so the add flow doesn't offer
+  // them. They stay *known* names (the chain still resolves them without asking
+  // which group they belong to); they're only absent from the dropdown.
+  // Memoized on the route + this node's address: the whole tree re-renders on every
+  // pan, drag and hover, and the set is only a function of those two.
+  const taken = useMemo(
+    () => corridorStops(ctx.route, path),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ctx.route, pathKey(path)],
+  );
+
   // Every mark painting on this segment — its own, and any reaching in from a head
   // upstream — in the chain's anonymous vocabulary: a stop range, a ramp step for
   // its tint, and a tag. The chain knows nothing about priority. Only the piece
@@ -448,6 +463,7 @@ function TreeNode({ ctx, node, path, bracket = false }) {
       showStart={!junction}
       showEnd={path.length === 0}
       suggestions={ctx.suggestions}
+      unavailable={taken}
       highlight={ctx.highlight}
       onRenameStop={ctx.onRenameStop}
       compromisedPlaces={ctx.compromisedPlaces}

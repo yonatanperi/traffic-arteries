@@ -577,14 +577,48 @@ function branchesValid(node) {
   );
 }
 
+/** Whether no corridor this route generates visits the same place twice. */
+function noRepeatedStops(route) {
+  return expandRoute(route).every(
+    (leaf) => new Set(leaf.places).size === leaf.places.length,
+  );
+}
+
 /**
  * A route is saveable when a branchless route has ≥2 stops (or a branched tail has
- * ≥1), and every head has ≥1 — the same rule the backend enforces. Used by the
- * autosave validity gate so an in-progress empty tail/head is held, not persisted.
+ * ≥1), every head has ≥1, and no corridor names one place twice — the same rules
+ * the backend enforces. Used by the autosave validity gate so an in-progress empty
+ * tail/head is held, not persisted.
+ *
+ * The repeat rule is here (and not only server-side) because a duplicate stop is
+ * *silently* destructive rather than merely incomplete: the graph keys its nodes by
+ * place, so the two occurrences collapse into one and the stops between them become
+ * a loop the router cuts — producing a top-ranked corridor missing its own middle.
+ * `corridorStops` keeps the add-flow from offering a stop that would do it; holding
+ * the save is the backstop for one typed in by hand.
  */
 export function isRouteValid(route) {
   const min = isLeaf(route) ? 2 : 1;
-  return route.places.length >= min && branchesValid(route);
+  return route.places.length >= min && branchesValid(route) && noRepeatedStops(route);
+}
+
+/**
+ * Every stop that already lies on some corridor through the node at `path` — its
+ * own, its downstream tail's, and every head that converges into it. Adding any of
+ * these to that node would make one corridor visit a place twice, so this is what
+ * the node's add/rename dropdown leaves out.
+ *
+ * Sibling heads are deliberately absent: nothing rides two of them, so the same
+ * place may sit on both without any corridor repeating it.
+ */
+export function corridorStops(route, path) {
+  const stops = new Set(nodeFrame(route, path));
+  const collect = (node) => {
+    node.places.forEach((p) => stops.add(p));
+    branchesOf(node).forEach(collect);
+  };
+  branchesOf(nodeAt(route, path)).forEach(collect);
+  return stops;
 }
 
 /** Number of leaves (distinct origin heads) in a route — its subroute count. */

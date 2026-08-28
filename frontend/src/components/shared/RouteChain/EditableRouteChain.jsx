@@ -81,6 +81,8 @@ function isMatch(value, highlight) {
  *   stops         array of place names (controlled)
  *   onChange      (nextStops) => void  — full next array on every mutation
  *   suggestions   known place names for the edit dropdown
+ *   unavailable   Set of those names to withhold from the dropdown (still known,
+ *                 just not offerable here — see the caller for why)
  *   highlight     optional lowercased query / array of queries for highlighting
  *   onRenameStop  (oldValue, newValue) => void — fired when an existing stop is
  *                 renamed, so the parent can offer to propagate the change.
@@ -149,6 +151,7 @@ export default function EditableRouteChain({
   stops,
   onChange,
   suggestions,
+  unavailable = null,
   highlight,
   onRenameStop,
   compromisedPlaces,
@@ -186,14 +189,20 @@ export default function EditableRouteChain({
   const suggestionsSet = useMemo(() => new Set(suggestions), [suggestions]);
   // Each suggestion's group is derived from its own prefix, purely for a
   // searchable `keywords` term (e.g. typing "צומת" surfaces every junction).
+  // `unavailable` names are withheld from the dropdown but stay in
+  // `suggestionsSet` — they are perfectly real places, just not ones this chain
+  // may take on, so an edit that mentions one must still resolve without the
+  // "which group?" ask a genuinely unknown name gets.
   const stopOptions = useMemo(
     () =>
-      suggestions.map((name) => ({
-        value: name,
-        label: name,
-        keywords: [groupLabel(classifyPlace(name))],
-      })),
-    [suggestions],
+      suggestions
+        .filter((name) => !unavailable?.has(name))
+        .map((name) => ({
+          value: name,
+          label: name,
+          keywords: [groupLabel(classifyPlace(name))],
+        })),
+    [suggestions, unavailable],
   );
   const currentAsk = askQueue[0] ?? null;
 

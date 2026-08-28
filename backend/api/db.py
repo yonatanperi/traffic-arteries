@@ -402,8 +402,39 @@ class Database:
                 raise ValidationError(f"טווחי העדיפות של {label} חופפים זה בזה.")
         return cleaned
 
+    @staticmethod
+    def _reject_repeats(frame, label):
+        """Refuse a corridor that visits the same place twice.
+
+        ``frame`` is a node's whole frame (:func:`node_frame`) — its own stops
+        followed by everything downstream — which is exactly one corridor as the
+        graph will ride it. The graph keys its nodes by *place*, so a chain that
+        names one place twice can't be represented as written: the two occurrences
+        collapse into a single node and the stops between them become a loop the
+        router is free to cut. A route reading ``… קדרים, נחל צלמון, אליקים, גולני,
+        …, התשבי, אליקים, עין תות …`` therefore hands the router a shortcut straight
+        from the first ``אליקים`` to ``עין תות``, and — since it never leaves the
+        one authored route — that shortcut scores as *perfectly* concentrated and
+        wins. The result is a top-ranked route silently missing half the corridor's
+        stops, which is why this is refused at authoring rather than patched up
+        downstream: there is no honest way to guess which of the two occurrences the
+        author meant.
+
+        Checked over the frame, not just the node's own places, because the
+        repetition is just as fatal when a head names a stop its shared tail already
+        has — the leaf chain concatenates the two.
+        """
+        seen = set()
+        for place in frame:
+            if place in seen:
+                raise ValidationError(
+                    f'המקום "{place}" מופיע יותר מפעם אחת לאורך {label} — '
+                    "כל מקום יכול להופיע בו פעם אחת בלבד."
+                )
+            seen.add(place)
+
     @classmethod
-    def _clean_node(cls, node, label, inherited=BEST_PRIORITY, downstream=0, root=False):
+    def _clean_node(cls, node, label, inherited=BEST_PRIORITY, downstream=(), root=False):
         """Validate/normalise one tree node and, recursively, its converging heads.
 
         A node is ``{"places": [...], "marks": [...], "branches": [...]}``; its
@@ -413,10 +444,11 @@ class Database:
         branched root's ``places`` is only the shared tail, and the heads supply the
         origin side).
 
-        ``downstream`` is how many stops lie between this node and the destination;
-        it widens the frame its marks may address (see :meth:`_clean_marks`) and is
-        accumulated on the way down, which is the only place a node's downstream is
-        known.
+        ``downstream`` is the chain between this node and the destination; it
+        widens the frame its marks may address (see :meth:`_clean_marks`), and the
+        frame it completes is the corridor checked for repeated stops (see
+        :meth:`_reject_repeats`). It is accumulated on the way down, which is the
+        only place a node's downstream is known.
 
         A bare ``[...]`` list is accepted as a node with no marks, and so is the
         legacy ``"priority"`` field, which is resolved down the spine exactly as it
@@ -438,15 +470,16 @@ class Database:
         places = cls._clean_places(
             node.get("places"), label, minimum=2 if root and not raw_branches else 1
         )
+        cls._reject_repeats(node_frame(places, downstream), label)
         raw_priority = node.get("priority")
         priority = (
             inherited
             if raw_priority is None
             else cls._clean_priority(raw_priority, label)
         )
-        marks = cls._clean_marks(node.get("marks"), places, downstream, label)
+        marks = cls._clean_marks(node.get("marks"), places, len(downstream), label)
         if not marks and not raw_branches:
-            marks = corridor_mark(places, downstream, priority)
+            marks = corridor_mark(places, len(downstream), priority)
 
         entry = {"places": places}
         # Only carry `marks` / `branches` when there are any, so an unrated flat
@@ -458,7 +491,7 @@ class Database:
                 branch,
                 f"הסתעפות מספר {i + 1} של {label}",
                 priority,
-                frame_length(places, downstream),
+                node_frame(places, downstream),
             )
             for i, branch in enumerate(raw_branches)
         ]
