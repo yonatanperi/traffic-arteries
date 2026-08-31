@@ -16,11 +16,11 @@
 export const DEFAULT_GROUP = "other";
 
 export const PLACE_GROUPS = [
-  { key: "camp", label: "מחנה", prefix: "מ.", test: /^מ\.\s*(?=\S)/ },
+  { key: "camp", label: "מחנה", prefix: "מ.", test: /^מ(?:\.\s*|\s+)(?=\S)/ },
   { key: "post", label: "מוצב", prefix: "מוצב", test: /^מוצב\s+(?=\S)/ },
-  { key: "junction", label: "צומת", prefix: "צ.", test: /^צ\.\s*(?=\S)/ },
+  { key: "junction", label: "צומת", prefix: "צ.", test: /^צ(?:\.\s*|\s+)(?=\S)/ },
   { key: "interchange", label: "מחלף", prefix: "מחלף", test: /^מחלף\s*(?=\S)/ },
-  { key: "firing_zone", label: "שטח אש", prefix: "ש.א", test: /^ש\.?א\s*(?=\S)/ },
+  { key: "firing_zone", label: "שטח אש", prefix: "ש.א", test: /^ש[.\s]?א\s*(?=\S)/ },
   { key: "road", label: "כביש", prefix: "כביש", test: /^כביש\s+(?=\S)/ },
   { key: "checkpoint", label: "מחסום", prefix: "מחסום", test: /^מחסום\s+(?=\S)/ },
   { key: DEFAULT_GROUP, label: "אחר", prefix: null, test: null },

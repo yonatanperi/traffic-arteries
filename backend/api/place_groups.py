@@ -46,11 +46,11 @@ GROUP_KEYS = set(GROUPS)
 # actually load-bearing today — kept explicit regardless for parity with the
 # frontend list's order.
 PREFIX_PATTERNS = [
-    ("camp", re.compile(r"^מ\.\s*(?=\S)")),
+    ("camp", re.compile(r"^מ(?:\.\s*|\s+)(?=\S)")),
     ("post", re.compile(r"^מוצב\s+(?=\S)")),
-    ("junction", re.compile(r"^צ\.\s*(?=\S)")),
+    ("junction", re.compile(r"^צ(?:\.\s*|\s+)(?=\S)")),
     ("interchange", re.compile(r"^מחלף\s*(?=\S)")),
-    ("firing_zone", re.compile(r"^ש\.?א\s*(?=\S)")),
+    ("firing_zone", re.compile(r"^ש[.\s]?א\s*(?=\S)")),
     ("road", re.compile(r"^כביש\s+(?=\S)")),
     ("checkpoint", re.compile(r"^מחסום\s+(?=\S)")),
 ]

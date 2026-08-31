@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconClose } from "../icons";
 import IconButton from "../IconButton";
-import { fuzzyFilter } from "../../../utils/fuzzyMatch";
+import { fuzzyFilter, strictFilter } from "../../../utils/fuzzyMatch";
 import "./Autocomplete.css";
 
 /**
@@ -18,6 +18,12 @@ import "./Autocomplete.css";
  *                     plain-string options) — this component never assumes
  *                     what that value "means".
  *   label, placeholder, icon
+ *   strict            use word-overlap-only matching with no typo tolerance
+ *                     and no prefix matching (see `strictFilter` in
+ *                     utils/fuzzyMatch.js) instead of the default
+ *                     typo-tolerant fuzzy matching — for fields where
+ *                     suggesting an unrelated existing place while typing a
+ *                     brand-new one would be actively misleading.
  */
 export default function Autocomplete({
   value,
@@ -30,6 +36,7 @@ export default function Autocomplete({
   icon,
   prefix,
   invalid,
+  strict,
 }) {
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -45,11 +52,12 @@ export default function Autocomplete({
     () => new Map(normOptions.map((o) => [matchTextOf(o), o])),
     [normOptions],
   );
+  const filter = strict ? strictFilter : fuzzyFilter;
   const matches = useMemo(
     () =>
-      fuzzyFilter(normOptions.map(matchTextOf), value, 8)
+      filter(normOptions.map(matchTextOf), value, 8)
         .map((text) => byMatchText.get(text)),
-    [normOptions, byMatchText, value],
+    [normOptions, byMatchText, value, filter],
   );
 
   // Close when clicking outside.

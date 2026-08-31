@@ -6,6 +6,8 @@
  * obvious matches.
  */
 
+import { parseTypedPlace } from "./placeGroups";
+
 const NIQQUD_RE = /[֑-ׇ]/g;
 const QUOTE_RE = /["“”„״´`]/g;
 const GERESH_RE = /['’‘׳]/g;
@@ -99,6 +101,65 @@ export function fuzzyFilter(options, query, limit = 8) {
   if (!trimmed) return options.slice(0, limit);
   return options
     .map((option) => ({ option, score: matchScore(trimmed, option) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || a.option.length - b.option.length)
+    .slice(0, limit)
+    .map(({ option }) => option);
+}
+
+/** Strips a *recognized* group prefix (e.g. "צ.", "מוצב") off the front of a
+ * typed/stored string, leaving only the words that actually name the place —
+ * used by {@link strictMatchScore} so a prefix never has to be typed to
+ * match, and never counts as matched content on its own. */
+function withoutPrefix(s) {
+  const trimmed = (s || "").trim();
+  const parsed = parseTypedPlace(trimmed);
+  return parsed ? parsed.baseName : trimmed;
+}
+
+function wordsOf(s) {
+  return stripPunct(normalize(withoutPrefix(s)))
+    .split(" ")
+    .filter(Boolean);
+}
+
+/**
+ * Stricter sibling of {@link matchScore}, used only where suggesting an
+ * unrelated existing place while the user is typing a brand-new one would be
+ * actively misleading (the route editor's add-stop field). No typo/edit-
+ * distance tolerance, and no matching into the middle of a word: every query
+ * word (prefix stripped) must equal, or be a prefix of, a whole word of the
+ * option.
+ */
+export function strictMatchScore(query, option) {
+  const qWords = wordsOf(query);
+  if (qWords.length === 0) return 0;
+  const oWords = wordsOf(option);
+  if (oWords.length === 0) return -1;
+
+  if (stripPunct(normalize(option)) === stripPunct(normalize(query))) return 1000;
+
+  const remaining = oWords.slice();
+  let exactHits = 0;
+  for (const qw of qWords) {
+    let idx = remaining.findIndex((ow) => ow === qw);
+    if (idx === -1) idx = remaining.findIndex((ow) => ow.startsWith(qw));
+    if (idx === -1) return -1;
+    if (remaining[idx] === qw) exactHits++;
+    remaining.splice(idx, 1);
+  }
+
+  // Prefer options with fewer unmatched leftover words (closer to an exact
+  // match) and more whole- (vs. partially-typed) word hits.
+  return 900 - remaining.length * 30 + exactHits * 5;
+}
+
+/** Strict-matching sibling of {@link fuzzyFilter} — see {@link strictMatchScore}. */
+export function strictFilter(options, query, limit = 8) {
+  const trimmed = query.trim();
+  if (!trimmed) return options.slice(0, limit);
+  return options
+    .map((option) => ({ option, score: strictMatchScore(trimmed, option) }))
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score || a.option.length - b.option.length)
     .slice(0, limit)

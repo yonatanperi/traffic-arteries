@@ -968,6 +968,7 @@ function StopEditor({ initial, suggestions, onCommit, onCancel }) {
         onSelect={(v) => finish(v, true)}
         onSubmit={(v) => finish(v, true)}
         placeholder="שם תחנה…"
+        strict
       />
       <IconButton
         size="md"
