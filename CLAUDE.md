@@ -49,6 +49,16 @@ Two levels judge a route's quality (and pick the single best result):
    Consequence: with `PriorityMode.HARD_TIER` off, the ranking is fully
    priority-blind, since the arena is then the only priority mechanism left.
 
+**A required stop divides the trip.** A `via` place is somewhere the driver actually
+stops, so the trip is several trips: each stretch between consecutive required stops is
+its own routing problem, searched on its own and scored on its own, and the trip's
+concentration is the **length-weighted mean of its legs'** (`RouteFinder._combine_legs`).
+Expanded that is a block-diagonal HHI — credit pools within a leg, never across a stop —
+which is what says that riding one artery into a stop and a different one out of it is
+two journeys done well rather than one done badly. With no `via` there is one leg and the
+mean is the identity, so the plain point-to-point path is untouched. `Route.legs` is
+therefore always non-empty, and the API surfaces it so the UI can draw the division.
+
 Both are non-additive, so they can't be optimized inside a single shortest-path
 search; `backend/api/graph/routing.py` generates a pool of candidate corridors
 (one biased toward each authored route, one confined to each priority tier) and
@@ -129,8 +139,8 @@ backend/
   api/graph/          the core algorithm — pure Python, no Django dependency
     core.py            Graph: undirected adjacency list; each edge tagged with
                         which authored routes (by index) traverse it
-    search.py          single-route generator strategies (MinMergeStrategy,
-                        WaypointStrategy) over (node, active_route) state
+    search.py          the single-route generator (MinMergeStrategy) over
+                        (node, active_route) state, + the penalty maps biasing it
     concentration.py   evaluate(): exact HHI scoring of a stop chain via a
                         chain-DP over route-credit assignments
     routing.py         RouteFinder: generates + scores + sorts candidate chains
@@ -194,7 +204,16 @@ etc. almost certainly already exists.**
 
 `components/shared/RouteChain/`:
 - `RouteChain` — the canonical *read-only* rendering of a stop chain (pills +
-  chevron connectors); used for path results.
+  chevron connectors); used for path results. Its `endpoints` prop (`"both"` default
+  / `"start"` / `"end"` / `"none"`) says which terminal pills are the *trip's* ends
+  and get the accent — a segment of a split trip ends at a waypoint, not a terminus.
+- `SegmentedRouteChain` — a result drawn as the trip it is: one `RouteChain` per leg,
+  with each required stop raised onto a band of its own between them (drawn once, in
+  the endpoint accent). `visibleSegments(path, legs, hiddenTypes)` cuts the chain by
+  the API's leg indices and applies the stop-type filter *per segment*, which is what
+  keeps every waypoint and every segment terminal on screen whatever is filtered;
+  `shownStops` flattens the parts back for the copy button. With no `via` it renders
+  a bare `RouteChain`, so an ordinary result card is unchanged.
 - `EditableRouteChain` — the drag-to-reorder (dnd-kit) editable version used
   in the route editor. It also owns **stop picking**: `selectionMode` swaps the
   reorder gesture for picking stops (press-and-drag, or tap one end then the other),
@@ -304,20 +323,25 @@ values. The theme is dark-only (no light-mode branch to maintain).
    - No `via`: `MinMergeStrategy` from both directions, biased once per authored
      route (`prefer_route_penalty`) plus an edge-penalty diversity backfill, to
      build the candidate pool.
-   - With `via`: `WaypointStrategy` over optimized stop orderings (bounded by
-     `MAX_OPTIMIZED_WAYPOINTS`; a small TSP over hop-count heuristics). Its *hard*
-     no-revisit rule is scoped to the **leg** (the stretch between consecutive
-     required stops), not the whole route: a required stop may be a dead end, and
-     the only way out is back the way you came. Demanding one globally simple path
-     makes every degree-1 place unroutable as a `via` and rejects many ordinary
-     via-queries outright; a loop *inside* a leg is still banned. Retracing across
-     a leg boundary is nevertheless a **last resort, not a free move**: revisits
-     are counted and minimised *lexicographically first*, ahead of transfers, hops
-     and every penalty in the map, so a globally simple route always wins when one
-     exists and a forced one doubles back as little as the road allows. Backing out
-     of a junction you could have driven straight through reads as a bug however
-     well the route scores — which is why that ordering outranks even
-     `avoid_priority_penalty`'s ban.
+   - With `via`: `_leg_ranked_pool` runs that same point-to-point generation **once
+     per leg** — the stretch between two consecutive required stops — over optimized
+     stop orderings (bounded by `MAX_OPTIMIZED_WAYPOINTS`; a small TSP over hop-count
+     heuristics), then combines the per-leg pools (`_rank_leg_combinations`). This is
+     what lets a route *back out* of a stop that hangs off a junction as a spur: the
+     leg leaving the stop knows nothing about the leg that arrived, so retracing is
+     free to generate and is then judged by the score like anything else. The old
+     whole-sequence search minimised revisits *lexicographically first*, ahead of
+     transfers, hops and every penalty, and so could never propose that corridor at
+     all — the `מ. מש"א חיפה → מ. צוקי עובדה בהל"צ via צ. הנשיא` bug. Two things keep
+     the freedom honest: a leg may **not drive through another required stop**
+     (`_leg_candidates` searches on `graph.without_places(...)` — the rule the old
+     search enforced internally; without it a leg runs past the destination and comes
+     back at a perfect score), and each leg's pool is trimmed by the existing
+     `ALTERNATIVE_FLOOR` before the cartesian product — the objective bounding the
+     pool rather than a guessed candidate count, with `MAX_LEG_COMBINATIONS` only as
+     a valve. Legs are searched on the restricted sub-graph but **scored on the full
+     one**: removing places changes degrees, hence `edge_unit`, hence what a run's
+     length means, and every leg's `hhi` must be in the same units to be averaged.
    - Each candidate is scored exactly by `concentration.evaluate` (the HHI) and
      the pool is sorted once, concentration-first.
    - Then one **refinement round** (`_artery_pair_chains`): a single-artery bias
@@ -345,6 +369,17 @@ values. The theme is dark-only (no light-mode branch to maintain).
    contradicts the shown order; raw `hhi` stays internal and is what the per-run
    `share`s square back to — the priority tier, and which authored routes —
    labeled by their endpoints — each result merges), and `compromisedDetour`.
+   `meta[i].legs` is how the trip divides at the required stops — one entry per leg
+   with its `startIndex`/`endIndex` into `paths[i]`, endpoint names, its own `match`
+   and `priority`, and its slice of `routes`. It is **always present and never
+   empty** (no `via` = one leg spanning the chain), so the UI has one shape to
+   render. A leg's `match` is its `hhi` put on the *route's* percentage scale, so the
+   route's match is exactly the length-weighted mean of the numbers shown per leg;
+   sub-route `share`s are shares **of their leg** (`Σ share²` is that leg's `hhi`).
+   With required stops `paths[i]` may repeat a place name — a spur is left by driving
+   back out through the junction — so chain items are keyed by index, never by name.
+   `api/path_meta.py` builds all of this, and is the single copy `views.path` and the
+   `find_route` command share.
    The match % is **only comparable within one query**: its length term divides by
    `C_min`, the shortest a route through *these* required stops could be, so adding
    a `via` raises the floor and the identical corridor reports a higher %. Two

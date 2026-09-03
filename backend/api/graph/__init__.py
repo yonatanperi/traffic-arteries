@@ -10,7 +10,8 @@ The public objects:
   * :class:`RouteFinder`  — diverse route search over a ``Graph`` whose "best" route
     rides one *good* authored route as far as possible: best priority tier first,
     then highest concentration.
-  * :class:`Route`        — one result: stops, tier, concentration, merged routes.
+  * :class:`Route`        — one result: stops, tier, concentration, merged routes,
+    and the *legs* a required stop splits the trip into (one leg without ``via``).
   * :class:`LengthMode`   — static flag toggling how a run's length is measured
     (crossroad hops only vs. every hop).
   * :class:`PriorityMode` — static flag toggling whether priority is a hard tier or
@@ -20,7 +21,7 @@ The public objects:
     and ``0`` for a run that only clips one.
 
 Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.search`
-(single-route generator strategies over ``(node, active-route)`` state),
+(the single-route generator, over ``(node, active-route)`` state),
 :mod:`.concentration` (the exact per-chain objective), :mod:`.routing` (candidate
 generation, scoring and diverse selection).
 """

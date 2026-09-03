@@ -1,0 +1,88 @@
+/* A result chain split at its required stops. The whole visual job here is to make
+   the seam unmistakable — the segments are separate plans, not one continuous road —
+   while keeping each segment's interior identical to an ordinary chain
+   (RouteChain.css owns that). */
+
+.route-legs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* An accent rail down the inline-start edge ties a segment's heading to its chain
+   and reads, stacked, as the list of legs the trip is made of. */
+.route-leg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding-inline-start: var(--s-4);
+  border-inline-start: 2px solid var(--border);
+}
+
+.route-leg-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+  font-size: 0.82rem;
+}
+
+.route-leg-name {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+/* from → to, the chevron carrying the direction the way it does everywhere else. */
+.route-leg-ends {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--text-faint);
+}
+
+/* The seam. A full-width rule with the waypoint's own pill centred on it: the stop
+   is drawn once, in the accent the route's start and end wear, because that is what
+   it is — the end of one plan and the start of the next. */
+.route-waypoint {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.route-waypoint::before,
+.route-waypoint::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    to left,
+    transparent,
+    rgba(var(--accent-rgb), 0.45),
+    transparent
+  );
+}
+
+.route-waypoint-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.94rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .route-leg {
+    padding-inline-start: var(--s-3);
+  }
+  /* Long place names have to be allowed to wrap on a phone, exactly as
+     RouteChain.css lets a stop pill wrap there. */
+  .route-waypoint-stop {
+    white-space: normal;
+  }
+}

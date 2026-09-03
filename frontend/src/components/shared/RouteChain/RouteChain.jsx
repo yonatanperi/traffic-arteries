@@ -14,8 +14,21 @@ import "./RouteChain.css";
  *                     PathResults when hovering a subroute chip. Matched by
  *                     place name, not index, since `stops` may already be a
  *                     type-filtered subset of the full path.
+ *   endpoints         which terminal stops are the *route's* endpoints and get the
+ *                     accent: "both" (default), "start", "end" or "none". A chain
+ *                     rendered as one segment of a trip split at its waypoints ends
+ *                     where the waypoint band begins, so its inner terminals are
+ *                     mid-route stops — accenting them would claim the trip starts
+ *                     or ends there. See <SegmentedRouteChain>.
  */
-export default function RouteChain({ stops, highlight, highlightedStops }) {
+export default function RouteChain({
+  stops,
+  highlight,
+  highlightedStops,
+  endpoints = "both",
+}) {
+  const accentStart = endpoints === "both" || endpoints === "start";
+  const accentEnd = endpoints === "both" || endpoints === "end";
   return (
     <ol className="chain">
       {stops.map((place, j) => {
@@ -26,8 +39,8 @@ export default function RouteChain({ stops, highlight, highlightedStops }) {
             <span
               className={
                 "stop" +
-                (j === 0 ? " stop--start" : "") +
-                (j === stops.length - 1 ? " stop--end" : "") +
+                (accentStart && j === 0 ? " stop--start" : "") +
+                (accentEnd && j === stops.length - 1 ? " stop--end" : "") +
                 (matched ? " stop--match" : "") +
                 (infoMatched ? " stop--info" : "")
               }

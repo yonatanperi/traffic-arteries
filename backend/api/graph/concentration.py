@@ -38,6 +38,17 @@ completing it.
 
 ``len`` is togglable via :class:`LengthMode` so it can be tuned experimentally.
 
+**Required stops generalise it.** :func:`evaluate` scores one uninterrupted stretch,
+and that is the whole objective for a plain point-to-point query. A ``via`` stop is a
+place the trip actually stops at, so it cuts the trip into *legs*; each leg is scored
+here on its own and the trip's concentration is the length-weighted mean of them
+(:meth:`~.routing.RouteFinder._combine_legs`). Expanded, that is a block-diagonal
+Herfindahl — credit pools within a leg but never across a required stop — which is
+what says that riding one artery into a stop and a different one out of it is two
+journeys done well rather than one journey done badly. With no ``via`` there is one
+leg and the mean is the identity, so this module stays the single-leg primitive and
+its formula above is unchanged.
+
 The metric is **non-additive** (the ``Σ len`` denominator is a global
 normaliser), so it cannot be optimised inside a shortest-path search; instead
 :mod:`.routing` generates candidate chains and scores each one here. Scoring is

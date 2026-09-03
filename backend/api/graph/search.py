@@ -1,11 +1,12 @@
-"""Single-route search strategies over a :class:`~.core.Graph`.
+"""Single-route search over a :class:`~.core.Graph`.
 
-Each strategy answers the same question in a different way: *given a map of edge
-penalties, what is the single best route right now?* — where "best" is
-lexicographic ``(route transfers, crossroad hops)``. Exposing that behind a
-common :meth:`RouteStrategy.find` interface lets the candidate-generation layer
-in :mod:`.routing` stay ignorant of whether it is finding a plain point-to-point
-route or one that must pass through required stops.
+:class:`MinMergeStrategy` answers one question: *given a map of edge penalties,
+what is the single best route from here to there right now?* — where "best" is
+lexicographic ``(route transfers, crossroad hops)``. It is deliberately only ever
+asked about a plain point-to-point stretch. Required stops used to be a second
+strategy that solved the whole ordered sequence at once; they are now handled a leg
+at a time in :meth:`~.routing.RouteFinder._leg_ranked_pool`, so this layer has one
+shape of problem to solve and the penalty maps below compose over it uniformly.
 
 These strategies are **generators**: they minimise route transfers (a good, cheap
 proxy), and the actual objective — riding one authored route as far as possible —
@@ -26,11 +27,6 @@ from collections import deque
 
 from .concentration import LengthMode
 from .core import edge_key
-
-# Safety valve for the waypoint search: give up (return "no route") after
-# exploring this many partial paths. The route graph is small and sparse, so
-# this is never hit in practice; it only guards against pathological blow-ups.
-SEARCH_STATE_CAP = 200_000
 
 # A single scalar cost encodes the lexicographic objective
 # ``(route transfers, crossroad hops)``: one transfer costs TRANSFER_WEIGHT, one
@@ -170,7 +166,9 @@ class RouteStrategy:
     Subclasses implement :meth:`find`, returning ``(nodes, route_seq)`` for the
     best route under those penalties (``route_seq`` is the chosen authored route
     per edge, parallel to the edges of ``nodes``), or ``(None, None)`` when none
-    exists.
+    exists. The interface outlives its second implementation: :mod:`.routing` takes
+    a *pair* of strategies (one per direction) everywhere, and keeping the seam means
+    a future generator slots in without touching the generation layer.
     """
 
     def find(self, penalty):  # pragma: no cover - interface
@@ -221,142 +219,6 @@ class MinMergeStrategy(RouteStrategy):
                             heap,
                             (new_cost, next(counter), neighbour, route,
                              nodes + (neighbour,), route_seq + (route,)),
-                        )
-
-        return None, None
-
-
-class WaypointStrategy(RouteStrategy):
-    """Merge-minimising route visiting ``points`` in order, retracing only when forced.
-
-    The route touches the required stops in the given order, carries the same
-    ``active_route`` state as :class:`MinMergeStrategy`, and is *as simple as the
-    network allows*:
-
-      * no node is re-entered **within a leg** — a leg being the stretch between
-        two consecutive required stops, which is where a pointless loop would be;
-      * re-entering a node used by an *earlier* leg is allowed, but counted, and
-        the search minimises that count **lexicographically first** — ahead of
-        transfers, hops and every penalty in the map;
-      * a required stop may only be entered when it is the *next* one due;
-      * among equal-cost frontiers the earliest-discovered wins (deterministic).
-
-    Hard simplicity is deliberately scoped to the leg, not to the whole route. A
-    required stop can be a **dead end** (``נחל עוז`` and 26 other places in the
-    live network have degree 1) or sit behind a bridge, and the only way back out
-    is the way you came in — so the leg that leaves it must re-cross nodes the
-    leg that arrived already used. Demanding one globally simple path makes every
-    such stop unroutable, and in a sparse road network it also rejects plenty of
-    ordinary via-queries that simply have no simple path visiting the stops in
-    order.
-
-    But retracing is only ever the *last resort* it looks like on the road, so it
-    is not free either: a globally simple route always beats one that doubles
-    back, however many transfers that costs, and when doubling back is
-    unavoidable the search takes the least of it. That ordering has to be
-    lexicographic rather than a heavy weight, because "revisits, then everything
-    else" is the whole point — a route that backs out of a through-junction it
-    could have driven straight past reads as a bug, no matter how well it scores.
-    The one thing it costs: :func:`avoid_priority_penalty`'s ban is *inside* the
-    scalar cost, so a tier-clean corridor that needs to double back now loses to
-    a simple one that crosses a badly-rated artery. That candidate is exactly the
-    ugly-looking route this rule exists to suppress, and the pool has other
-    generators; the tier still ranks the pool afterwards.
-
-    Like :class:`MinMergeStrategy`, dominated states are pruned via a ``best``
-    dict keyed on ``(node, active_route, reached)`` — the same approximation:
-    the *cheapest* way to reach a state wins even though, in principle, a
-    costlier arrival could have a different visited-node history that later
-    avoids a revisit the cheap one can't. Counting revisits narrows that gap (a
-    history that forces a revisit later is now dearer *when it does*, not free)
-    without closing it. Without this pruning the search re-explores the same
-    state once per distinct path prefix, which blows up combinatorially (and
-    reliably burns through :data:`SEARCH_STATE_CAP`) whenever a required stop
-    sits on a well-connected hub. Note ``reached`` is already part of that key,
-    so scoping the visited set to the leg costs no extra states — the legs were
-    separated in the pruning key all along.
-
-    :meth:`find` returns ``(nodes, route_seq)`` or ``(None, None)`` if no such
-    route visits every stop in order.
-    """
-
-    def __init__(self, graph, points):
-        self.graph = graph
-        self.points = points
-
-    def find(self, penalty):
-        graph, points = self.graph, self.points
-        point_set = set(points)
-        last = len(points) - 1  # index of the final stop (the end)
-
-        counter = itertools.count()
-        start = points[0]
-        # Heap entries: (revisits, cost, tie, node, active_route, reached, nodes,
-        # route_seq, leg, earlier). `leg` is the nodes visited since the last
-        # required stop — the set the *hard* no-revisit rule applies to, reset at
-        # every stop — and `earlier` is everything driven before this leg, which is
-        # where the counted, minimised revisits can happen. Splitting them that way
-        # is also what keeps the extra bookkeeping free: `earlier` only changes at a
-        # leg boundary, so every push inside a leg shares the same frozenset rather
-        # than copying a running visited-set per step. The pair (revisits, cost) is
-        # compared lexicographically, so the search is Dijkstra over that ordered
-        # cost: both components only ever grow along a path, which is all the
-        # ordering needs to stay monotone.
-        heap = [(0, 0.0, next(counter), start, None, 1, (start,), (),
-                 frozenset((start,)), frozenset())]
-        best = {(start, None, 1): (0, 0.0)}
-        explored = 0
-
-        while heap:
-            (revisits, cost, _, node, active, reached,
-             nodes, route_seq, leg, earlier) = heapq.heappop(heap)
-            if reached > last:
-                return list(nodes), route_seq  # reached the final stop, in order
-
-            explored += 1
-            if explored > SEARCH_STATE_CAP:
-                break
-
-            settled = best.get((node, active, reached))
-            if settled is not None and (revisits, cost) > settled:
-                continue  # a cheaper way to this state was already settled
-
-            target = points[reached]
-            for neighbour in graph.neighbors(node):
-                # No looping back onto this leg. Reaching the target is always
-                # allowed — that is how a dead-end stop is left (back out through
-                # the node you came in by) and how a round trip closes on its own
-                # start when start == end.
-                if neighbour in leg and neighbour != target:
-                    continue
-                # A required stop is only enterable as the current target.
-                if neighbour in point_set and neighbour != target:
-                    continue
-                pen = penalty.get(edge_key(node, neighbour), 0.0)
-                hop = 1.0 if graph.is_crossroad(neighbour) else 0.0
-                reaches_stop = neighbour == target
-                new_reached = reached + 1 if reaches_stop else reached
-                # A stop starts the next leg, so the leg's visited set restarts
-                # there and everything driven so far rolls into `earlier`.
-                new_leg = frozenset((neighbour,)) if reaches_stop else leg | {neighbour}
-                new_earlier = earlier | leg if reaches_stop else earlier
-                # The hard rule above already let `neighbour` through, so this is
-                # exactly the doubling-back that is allowed but paid for: onto an
-                # earlier leg, or back onto the stop this one is closing on.
-                new_revisits = revisits + (neighbour in earlier or neighbour in leg)
-                for route in _routes_on(graph, node, neighbour):
-                    transfer = 0.0 if route == active else 1.0
-                    new_cost = cost + TRANSFER_WEIGHT * transfer + hop + pen
-                    state = (neighbour, route, new_reached)
-                    key = (new_revisits, new_cost)
-                    settled = best.get(state)
-                    if settled is None or key < settled:
-                        best[state] = key
-                        heapq.heappush(
-                            heap,
-                            (new_revisits, new_cost, next(counter), neighbour, route,
-                             new_reached, nodes + (neighbour,), route_seq + (route,),
-                             new_leg, new_earlier),
                         )
 
         return None, None

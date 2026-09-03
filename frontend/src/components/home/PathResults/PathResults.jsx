@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { IconCopy, IconCheck, IconRoute } from "../../ui/icons";
-import { RouteChain } from "../../shared/RouteChain";
+import {
+  SegmentedRouteChain,
+  visibleSegments,
+  shownStops,
+} from "../../shared/RouteChain";
 import Pill from "../../ui/Pill";
 import IconButton from "../../ui/IconButton";
-import { classifyPlace, DEFAULT_GROUP } from "../../../utils/placeGroups.js";
 import {
   isDowngraded,
   priorityLabel,
@@ -29,18 +32,6 @@ function splitLabel(label) {
   const i = label.indexOf(" - ");
   if (i === -1) return [label, label];
   return [label.slice(0, i), label.slice(i + 3)];
-}
-
-// Start and end are always kept; only interior stops are subject to filtering.
-// "אחר" is never hidden, regardless of hiddenTypes' contents — it has no
-// filter chip to toggle it off in the first place (ResultsArea.jsx).
-function visiblePath(path, hiddenTypes) {
-  if (!hiddenTypes || hiddenTypes.size === 0) return path;
-  return path.filter((place, i) => {
-    if (i === 0 || i === path.length - 1) return true;
-    const type = classifyPlace(place);
-    return type === DEFAULT_GROUP || !hiddenTypes.has(type);
-  });
 }
 
 function CopyButton({ path }) {
@@ -81,8 +72,12 @@ function CopyButton({ path }) {
 }
 
 export default function PathResults({ paths, meta, hiddenTypes }) {
-  const [hovered, setHovered] = useState(null); // { pathIndex, chipIndex, startIndex, endIndex } | null
-  const [pinned, setPinned] = useState(null); // same shape as hovered, but set by click and sticky
+  // { pathIndex, chipKey, startIndex, endIndex } | null. `chipKey` is the chip's
+  // startIndex rather than its position in a list: sub-routes are disjoint
+  // contiguous ranges, so it identifies the chip uniquely wherever the chip is
+  // rendered — which matters now that the chips are split across segment headers.
+  const [hovered, setHovered] = useState(null);
+  const [pinned, setPinned] = useState(null); // same shape, set by click and sticky
   const navigate = useNavigate();
   const { role } = useAuth();
   const canEditRoutes = role === "editor" || role === "admin";
@@ -95,12 +90,124 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
     navigate(`/routes?${params.toString()}`);
   }
 
+  // The sub-route chips for one stretch of a result. Rendered once for the whole
+  // route when the trip has no required stops, and once per segment when it does —
+  // the chips (and the shares on them) are scored per leg, so that is where they
+  // belong.
+  function renderChips(pathIndex, routes) {
+    if (!routes?.length) return null;
+    return (
+      <div className="merge-routes">
+        <span className="merge-routes-label">צירים:</span>
+        {routes.map((r) => {
+          const target = {
+            pathIndex,
+            chipKey: r.startIndex,
+            startIndex: r.startIndex,
+            endIndex: r.endIndex,
+          };
+          const isChipHovered =
+            hovered?.pathIndex === pathIndex &&
+            hovered?.chipKey === r.startIndex;
+          const isChipPinned =
+            pinned?.pathIndex === pathIndex && pinned?.chipKey === r.startIndex;
+          return (
+            <span className="merge-route-chip-group" key={r.startIndex}>
+              <Pill
+                as="button"
+                size="sm"
+                title={
+                  isDowngraded(r.priority)
+                    ? `ציר מקור ב${priorityLabel(r.priority)}`
+                    : undefined
+                }
+                className={
+                  "merge-route-chip" +
+                  (isChipHovered || isChipPinned
+                    ? " merge-route-chip--hovered"
+                    : "") +
+                  (isDowngraded(r.priority)
+                    ? " merge-route-chip--downgraded"
+                    : "")
+                }
+                onMouseEnter={() => setHovered(target)}
+                onMouseLeave={() => setHovered(null)}
+                onClick={() =>
+                  setPinned((prev) =>
+                    prev?.pathIndex === pathIndex &&
+                    prev?.chipKey === r.startIndex
+                      ? null
+                      : target,
+                  )
+                }
+              >
+                {r.label}
+                {isDowngraded(r.priority) && (
+                  <span className="merge-route-priority">
+                    {priorityLetter(r.priority)}
+                  </span>
+                )}
+                {typeof r.share === "number" && (
+                  <span className="merge-route-share">{r.share}%</span>
+                )}
+              </Pill>
+              {isChipPinned && canEditRoutes && (
+                <IconButton
+                  size="sm"
+                  info
+                  className="merge-route-goto"
+                  ariaLabel={`ערוך את הציר ${r.label} בעריכת צירים`}
+                  title="ערוך ציר זה"
+                  onClick={() => goToRoute(r.label)}
+                >
+                  <IconRoute size={13} />
+                </IconButton>
+              )}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // A segment's own stats. Each leg is planned and scored as its own route, so it
+  // has its own match and tier — and because a leg's percentage is put on the
+  // route's scale server-side, the route's match is exactly the length-weighted
+  // mean of the numbers shown here rather than a fourth unrelated figure.
+  function renderLegStats(pathIndex, leg) {
+    return (
+      <>
+        {typeof leg?.match === "number" && (
+          <Pill size="sm" className="match-badge">
+            התאמה {leg.match}%
+          </Pill>
+        )}
+        {isDowngraded(leg?.priority) && (
+          <Pill
+            size="sm"
+            tone="warning"
+            className="priority-badge"
+            title="המקטע עובר בציר מקור בעדיפות נמוכה — לא נמצאה חלופה טובה יותר"
+          >
+            {priorityLabel(leg.priority)}
+          </Pill>
+        )}
+        {renderChips(pathIndex, leg?.routes)}
+      </>
+    );
+  }
+
   return (
     <div className="results">
       {paths.map((path, i) => {
-        const shown = visiblePath(path, hiddenTypes);
-        const filtered = shown.length !== path.length;
         const info = meta?.[i];
+        // The trip as it is actually drawn: one part per segment, with each
+        // required stop raised onto a band between them. Without required stops
+        // this is a single part holding the whole filtered chain.
+        const parts = visibleSegments(path, info?.legs, hiddenTypes);
+        const shown = shownStops(parts);
+        const filtered = shown.length !== path.length;
+        const segmented = parts.length > 1;
         const merge = mergeLabel(info?.routeCount);
         const match = info?.match;
         // Hovering a chip previews it even while another is pinned; once the
@@ -160,88 +267,20 @@ export default function PathResults({ paths, meta, hiddenTypes }) {
                   </span>
                 </span>
 
-                {info?.routes?.length > 0 && (
-                  <div className="merge-routes">
-                    <span className="merge-routes-label">צירים:</span>
-                    {info.routes.map((r, j) => {
-                      const isChipHovered =
-                        hovered?.pathIndex === i && hovered?.chipIndex === j;
-                      const isChipPinned =
-                        pinned?.pathIndex === i && pinned?.chipIndex === j;
-                      return (
-                        <span className="merge-route-chip-group" key={j}>
-                          <Pill
-                            as="button"
-                            size="sm"
-                            title={
-                              isDowngraded(r.priority)
-                                ? `ציר מקור ב${priorityLabel(r.priority)}`
-                                : undefined
-                            }
-                            className={
-                              "merge-route-chip" +
-                              (isChipHovered || isChipPinned
-                                ? " merge-route-chip--hovered"
-                                : "") +
-                              (isDowngraded(r.priority)
-                                ? " merge-route-chip--downgraded"
-                                : "")
-                            }
-                            onMouseEnter={() =>
-                              setHovered({
-                                pathIndex: i,
-                                chipIndex: j,
-                                startIndex: r.startIndex,
-                                endIndex: r.endIndex,
-                              })
-                            }
-                            onMouseLeave={() => setHovered(null)}
-                            onClick={() =>
-                              setPinned((prev) =>
-                                prev?.pathIndex === i && prev?.chipIndex === j
-                                  ? null
-                                  : {
-                                      pathIndex: i,
-                                      chipIndex: j,
-                                      startIndex: r.startIndex,
-                                      endIndex: r.endIndex,
-                                    },
-                              )
-                            }
-                          >
-                            {r.label}
-                            {isDowngraded(r.priority) && (
-                              <span className="merge-route-priority">
-                                {priorityLetter(r.priority)}
-                              </span>
-                            )}
-                            {typeof r.share === "number" && (
-                              <span className="merge-route-share">
-                                {r.share}%
-                              </span>
-                            )}
-                          </Pill>
-                          {isChipPinned && canEditRoutes && (
-                            <IconButton
-                              size="sm"
-                              info
-                              className="merge-route-goto"
-                              ariaLabel={`ערוך את הציר ${r.label} בעריכת צירים`}
-                              title="ערוך ציר זה"
-                              onClick={() => goToRoute(r.label)}
-                            >
-                              <IconRoute size={13} />
-                            </IconButton>
-                          )}
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
+                {/* Split trips carry their chips in the segment headers instead:
+                    a sub-route belongs to the leg it was scored in, and its share
+                    is a share of that leg. */}
+                {!segmented && renderChips(i, info?.routes)}
               </div>
             )}
 
-            <RouteChain stops={shown} highlightedStops={highlightedStops} />
+            <SegmentedRouteChain
+              parts={parts}
+              highlightedStops={highlightedStops}
+              renderHeader={
+                canEditRoutes ? (leg) => renderLegStats(i, leg) : undefined
+              }
+            />
           </article>
         );
       })}

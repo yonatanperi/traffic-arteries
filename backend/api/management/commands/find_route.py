@@ -17,6 +17,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from api.db import database
 from api.graph import RouteFinder
+from api.path_meta import route_meta
 
 TOP_N = 3
 
@@ -60,39 +61,6 @@ class Command(BaseCommand):
         if unknown:
             raise CommandError(f"unknown place(s): {', '.join(unknown)}")
 
-        def run_endpoints(run):
-            places = (
-                routes[run.route_id]["places"]
-                if isinstance(run.route_id, int) and 0 <= run.route_id < len(routes)
-                else None
-            )
-            if not places:
-                return run.start, run.end
-            order = {place_id: i for i, place_id in enumerate(places)}
-            start_i, end_i = order.get(run.start), order.get(run.end)
-            if start_i is not None and end_i is not None and start_i > end_i:
-                return places[-1], places[0]
-            return places[0], places[-1]
-
-        def run_meta(run, total_hops, start_index):
-            origin, dest = run_endpoints(run)
-            return {
-                "id": run.route_id if isinstance(run.route_id, int) else -1,
-                "label": f"{database.display_name(registry[origin])} - {database.display_name(registry[dest])}",
-                "share": round(run.hops / total_hops * 100) if total_hops else 100,
-                "priority": run.priority,
-                "startIndex": start_index,
-                "endIndex": start_index + run.hops,
-            }
-
-        def routes_meta(runs, total_hops):
-            metas = []
-            offset = 0
-            for run in runs:
-                metas.append(run_meta(run, total_hops, offset))
-                offset += run.hops
-            return metas
-
         # Same pipeline as views.path: rank once, select twice (natural vs.
         # compromised-free) over the one ranked pool, then truncate to TOP_N.
         finder = RouteFinder(graph)
@@ -110,15 +78,7 @@ class Command(BaseCommand):
         )
         top = clean[:TOP_N]
         paths = [database.translate_stops(r.stops, registry) for r in top]
-        meta = [
-            {
-                "routeCount": r.route_count,
-                "match": round(r.q * 100),
-                "priority": r.priority,
-                "routes": routes_meta(r.runs, r.total_hops),
-            }
-            for r in top
-        ]
+        meta = [route_meta(r, registry, routes) for r in top]
         detour = sorted(database.translate_stops(detour_ids, registry)) if paths else []
         payload = {"paths": paths, "meta": meta, "compromisedDetour": detour}
 
@@ -148,11 +108,23 @@ class Command(BaseCommand):
                 )
             )
             self.stdout.write("  " + " -> ".join(stops))
-            for run in m["routes"]:
-                self.stdout.write(
-                    f"    [{run['startIndex']}-{run['endIndex']}] "
-                    f"{run['label']}  (priority={run['priority']}, share={run['share']}%)"
-                )
+            # A required stop splits the trip into legs; print each one under its own
+            # heading so the console report shows the same division the UI draws. With
+            # no `via` there is exactly one leg and the heading is skipped, leaving the
+            # report as it always looked.
+            legs = m["legs"]
+            for j, leg in enumerate(legs, start=1):
+                if len(legs) > 1:
+                    self.stdout.write(
+                        f"    leg {j}: {leg['start']} -> {leg['end']}"
+                        f"  [{leg['startIndex']}-{leg['endIndex']}]"
+                        f"  match={leg['match']}%  tier={leg['priority']}"
+                    )
+                for run in leg["routes"]:
+                    self.stdout.write(
+                        f"    [{run['startIndex']}-{run['endIndex']}] "
+                        f"{run['label']}  (priority={run['priority']}, share={run['share']}%)"
+                    )
 
         if payload["compromisedDetour"]:
             self.stdout.write("")

@@ -191,6 +191,23 @@ class WaypointTests(SimpleTestCase):
         ["c2", "T"],
     ]
 
+    # The mirror image, and the shape of the reported bug: W is a *spur* off the
+    # junction J. It does have a way onward to T (x1-x2), but that way is fragmented
+    # and crosses two more junctions, so backing out through J and carrying on down
+    # the one highway is both shorter and far better concentrated. A search that bans
+    # retracing outright can never propose it — which is exactly what
+    # `מ. מש"א חיפה -> מ. צוקי עובדה בהל"צ via צ. הנשיא` used to hit on the live
+    # network, where צ. הנשיא hangs off מחלף בית קמה the same way.
+    SPUR_STOP_ROUTES = [
+        ["S", "h1", "J", "h2", "T"],  # 0: one highway, end to end
+        ["J", "W"],                   # 1: the turn-off onto the W spur
+        ["W", "x1"],                  # 2..4: W's own way onward, transferring
+        ["x1", "x2"],                 #       at every stop
+        ["x2", "T"],
+        ["x1", "s1"],                 # 5..6: stubs, so x1/x2 are real junctions and
+        ["x2", "s2"],                 #       that way onward genuinely costs crossroads
+    ]
+
     def setUp(self):
         self.finder = RouteFinder(Graph.from_routes(self.WAYPOINT_ROUTES))
 
@@ -219,14 +236,49 @@ class WaypointTests(SimpleTestCase):
                 self.assertEqual(len(leg), len(set(leg)), f"leg loops on itself: {leg}")
 
     def test_no_avoidable_retracing(self):
-        # Retracing is a last resort, not a free move: V can be driven straight
-        # through, so no candidate may back out of it onto the highway — even
-        # though that route merges fewer authored routes than carrying on does.
+        # Retracing is a cost, not a ban. V can be driven straight through, so the
+        # route that backs out of it onto the highway must lose — even though it
+        # merges fewer authored routes than carrying on does. It is no longer
+        # *excluded* (searching a leg at a time is what lets the spur case in
+        # test_spur_stop_is_left_by_backing_out be found at all), so what has to hold
+        # is that it never leads: the headline drives V straight through, and any
+        # candidate that doubles back sits strictly below it.
         finder = RouteFinder(Graph.from_routes(self.THROUGH_STOP_ROUTES))
-        paths = finder.k_shortest_paths("S", "T", via=["V"])
-        self.assertTrue(paths, "no route through the required stop")
-        for p in paths:
-            self.assertEqual(len(p), len(set(p)), f"route doubles back needlessly: {p}")
+        routes = finder.find_routes("S", "T", via=["V"])
+        self.assertTrue(routes, "no route through the required stop")
+        best = routes[0].stops
+        self.assertEqual(len(best), len(set(best)), f"headline doubles back: {best}")
+        for route in routes[1:]:
+            if len(route.stops) != len(set(route.stops)):
+                self.assertLess(route.q, routes[0].q, f"retracing route ranks first: {route.stops}")
+
+    def test_spur_stop_is_left_by_backing_out(self):
+        # The reported bug. W hangs off the junction J; its own way onward exists but
+        # is fragmented, so the good corridor arrives at W and drives back out through
+        # J. Minimising revisits ahead of everything else — what the old whole-sequence
+        # waypoint search did — makes that corridor unreachable, not merely unpopular:
+        # it is never generated, so no amount of scoring can recover it. Searching each
+        # leg on its own is what puts it in the pool.
+        finder = RouteFinder(Graph.from_routes(self.SPUR_STOP_ROUTES))
+        routes = finder.find_routes("S", "T", via=["W"])
+        self.assertTrue(routes, "no route through the spur stop")
+        self.assertEqual(routes[0].stops, ["S", "h1", "J", "W", "J", "h2", "T"])
+
+    def test_no_leg_drives_through_another_required_stop(self):
+        # A leg may not pass through a required stop that is not one of its own two
+        # endpoints. Without that guard a leg is free to run past the destination and
+        # come back, and the returning leg then rides the outbound artery for its whole
+        # measured length and scores *perfectly* — "drive to T, turn round, collect V,
+        # drive to T again" outranking every honest corridor.
+        finder = RouteFinder(Graph.from_routes(self.THROUGH_STOP_ROUTES))
+        points = {"S", "V", "T"}
+        for route in finder.find_routes("S", "T", via=["V"]):
+            for leg in route.legs:
+                interior = route.stops[leg.start_index + 1 : leg.end_index]
+                self.assertFalse(
+                    points.intersection(interior),
+                    f"leg drives through a required stop: {route.stops}",
+                )
 
     def test_retracing_is_no_more_than_forced(self):
         # When retracing *is* forced, it is minimal: leaving the P spur costs one
@@ -246,21 +298,26 @@ class WaypointTests(SimpleTestCase):
             i = p.index("P")
             self.assertEqual((p[i - 1], p[i + 1]), ("C", "C"))
 
-    def test_long_single_road_beats_a_short_transfer(self):
-        # Counting every hop (LengthMode.CROSSROADS_ONLY = False), the long way
-        # round is the *concentrated* one: A-Z-X-N-K-C rides road 3 for 5 of its 6
-        # hops (83%), while the short A-C-B transfers immediately, splitting 50/50
-        # across two roads. Concentration is the objective, so the long ride wins.
+    def test_a_required_stop_stops_one_road_dominating_the_other_leg(self):
+        # Both ways from A to C ride a *single* authored road end to end: the direct
+        # A-C (road 1) and the long A-Z-X-N-K-C (road 3, with Z-X-N-K transparent).
+        # Requiring C therefore makes them exactly equal on the objective — leg 1
+        # scores 1.0 either way, leg 2 (C-B) is the same road for both — and, since
+        # Z-X-N-K cross no junction, they even cost the same crossroad distance. So
+        # nothing about concentration separates them and the raw hop count breaks the
+        # tie, shortest first.
         #
-        # Both corridors cross the same two crossroads (Z-X-N-K are transparent), so
-        # the length-adjusted ranking score does not separate them — the long single
-        # road wins outright on concentration (hhi 0.72 vs 0.50). The short transfer
-        # survives as an alternative: its ratio to the headline is 0.50/0.72 = 0.69,
-        # just above ALTERNATIVE_FLOOR, so the floor rates it comparable-but-worse
-        # rather than junk. It is the boundary case the floor is tuned around.
-        paths = self.finder.k_shortest_paths("A", "B", via=["C"])
-        self.assertEqual(paths[0], ["A", "Z", "X", "N", "K", "C", "B"])
-        self.assertIn(["A", "C", "B"], paths)
+        # Undivided, the long way used to win: road 3's five-hop stint dominated the
+        # single-hop C-B tail, so the whole-route Herfindahl preferred it. Pooling
+        # credit across a required stop like that is exactly what leg-wise scoring
+        # drops — the driver stops at C, so what road got them there cannot be traded
+        # against what road takes them onward. Note the long corridor is then out of
+        # range anyway: at 7 stops against the best route's 3 it exceeds
+        # WAYPOINT_MAX_STRETCH, the same rule that rejects LONG_FRAGMENTED below.
+        routes = self.finder.find_routes("A", "B", via=["C"])
+        self.assertEqual(routes[0].stops, ["A", "C", "B"])
+        self.assertAlmostEqual(routes[0].hhi, 1.0)
+        self.assertEqual([leg.hhi for leg in routes[0].legs], [1.0, 1.0])
 
     def test_excessive_detour_is_rejected_by_stretch(self):
         # WAYPOINT_MAX_STRETCH: an alternative may not exceed the best route
@@ -292,6 +349,85 @@ class WaypointTests(SimpleTestCase):
             self.finder.k_shortest_paths("A", "B", via=[]),
             self.finder.k_shortest_paths("A", "B"),
         )
+
+
+class LegScoringTests(SimpleTestCase):
+    """How a required stop divides the trip, and how the divided trip is scored."""
+
+    def test_a_plain_query_is_one_leg_spanning_the_whole_chain(self):
+        # Callers (views.path, the find_route command, the UI) read `legs`
+        # unconditionally, so a query with no required stops has to be a one-leg trip
+        # rather than an empty list — and that one leg must report exactly what the
+        # route reports, since the weighted mean over a single leg is the identity.
+        finder = RouteFinder(Graph.from_routes(SPEC_ROUTES))
+        for route in finder.find_routes("K", "M"):
+            self.assertEqual(len(route.legs), 1)
+            leg = route.legs[0]
+            self.assertEqual((leg.start_index, leg.end_index), (0, route.total_hops))
+            self.assertEqual(leg.hhi, route.hhi)
+            self.assertEqual(leg.priority, route.priority)
+            self.assertEqual(list(leg.runs), route.runs)
+
+    def test_legs_tile_the_chain(self):
+        # Adjacent legs share their boundary node — the required stop itself — and
+        # together they cover the chain exactly. The API hands these indices to the
+        # UI to slice `paths[i]` with, so a gap or an overlap would drop or duplicate
+        # a stop on screen.
+        finder = RouteFinder(Graph.from_routes(WaypointTests.WAYPOINT_ROUTES))
+        for route in finder.find_routes("A", "B", via=["P"]):
+            self.assertEqual(route.legs[0].start_index, 0)
+            self.assertEqual(route.legs[-1].end_index, route.total_hops)
+            for before, after in zip(route.legs, route.legs[1:]):
+                self.assertEqual(before.end_index, after.start_index)
+
+    def test_trip_concentration_is_the_legs_length_weighted_mean(self):
+        # The defining identity, asserted over whatever shapes the pool produces.
+        for routes_def, start, end, via in (
+            (WaypointTests.WAYPOINT_ROUTES, "A", "B", ["P"]),
+            (WaypointTests.SPUR_STOP_ROUTES, "S", "T", ["W"]),
+            (WaypointTests.THROUGH_STOP_ROUTES, "S", "T", ["V"]),
+        ):
+            finder = RouteFinder(Graph.from_routes(routes_def))
+            for route in finder.find_routes(start, end, via=via):
+                lengths = [sum(run.length for run in leg.runs) for leg in route.legs]
+                total = sum(lengths)
+                expected = (
+                    sum(l / total * leg.hhi for l, leg in zip(lengths, route.legs))
+                    if total
+                    else sum(leg.hhi for leg in route.legs) / len(route.legs)
+                )
+                self.assertAlmostEqual(route.hhi, expected, msg=str(route.stops))
+
+    def test_credit_does_not_pool_across_a_required_stop(self):
+        # The concrete difference from scoring the chain undivided. A-B-C rides one
+        # road; C-D-E transfers halfway. Leg-wise that is a perfect leg and an evenly
+        # split one — (2/4)·1.0 + (2/4)·0.5 = 0.75. Undivided, the same chain is three
+        # runs of 2/1/1 hops against a 4-hop total, i.e. 0.375: the first road's stint
+        # gets diluted by roads the driver only takes *after* stopping at C. Which of
+        # the two is right is the whole question a required stop answers.
+        with length_mode(False):
+            graph = Graph.from_routes([["A", "B", "C"], ["C", "D"], ["D", "E"]])
+            routes = RouteFinder(graph).find_routes("A", "E", via=["C"])
+            self.assertTrue(routes)
+            best = routes[0]
+            self.assertEqual(best.stops, ["A", "B", "C", "D", "E"])
+            self.assertEqual([leg.hhi for leg in best.legs], [1.0, 0.5])
+            self.assertAlmostEqual(best.hhi, 0.75)
+            self.assertAlmostEqual(evaluate(graph, best.stops)[0], 0.375)
+
+    def test_zero_length_trip_still_scores(self):
+        # Under CROSSROADS_ONLY a trip can measure zero length — nothing on it is a
+        # junction. Every leg then weighs nothing, so the weighted mean is undefined
+        # and falls back to the plain mean, mirroring evaluate()'s own L == 0 branch.
+        # Weighting anyway would hand a zero-length leg zero weight, which lets a
+        # route wander through transparent nodes as though that stretch were not part
+        # of the trip at all.
+        graph = Graph.from_routes([["A", "B"], ["B", "C"]])
+        self.assertEqual(graph.crossroads(), [])
+        routes = RouteFinder(graph).find_routes("A", "C", via=["B"])
+        self.assertTrue(routes, "no route through a trip that crosses no junction")
+        self.assertEqual(routes[0].stops, ["A", "B", "C"])
+        self.assertAlmostEqual(routes[0].hhi, 1.0)
 
 
 class TransparencyTests(SimpleTestCase):

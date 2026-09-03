@@ -34,6 +34,14 @@ chains and scores each one exactly:
      over the one ranked pool (e.g. with and without an ``exclude`` set), which is
      how compromised-destination filtering avoids a second sort.
 
+**Required stops split the problem.** A ``via`` stop is a place the trip actually
+stops at, so the trip is several trips: :meth:`RouteFinder._leg_ranked_pool` runs the
+four steps above once per *leg* — the stretch between two consecutive required stops —
+and combines the per-leg pools into whole routes, whose concentration is the
+length-weighted mean of their legs' (:meth:`RouteFinder._combine_legs`). Everything
+downstream — the arena, the floors, the diversity budgets — is blind to the split, and
+a query with no ``via`` is a one-leg trip scored by the identical formula.
+
 The priority-aware passes are skipped whenever no authored route is rated worse
 than best (the common case), so the search costs exactly what it did before
 priorities existed.
@@ -46,13 +54,13 @@ than once over a single ranked pool.
 """
 
 import itertools
+from collections import namedtuple
 
 from .concentration import LengthMode, PriorityMode, evaluate
 from .core import BEST_PRIORITY, path_edges
 from .search import (
     TRANSFER_WEIGHT,
     MinMergeStrategy,
-    WaypointStrategy,
     avoid_priority_penalty,
     min_crossroad_distance,
     prefer_route_penalty,
@@ -62,6 +70,15 @@ from .search import (
 # Above this many required stops the permutation count (n!) makes exhaustive
 # order optimisation impractical, so we fall back to the caller's order.
 MAX_OPTIMIZED_WAYPOINTS = 7
+
+# Safety valve on the leg-combination pool (see :meth:`RouteFinder._rank_leg_
+# combinations`). The real bound is :data:`ALTERNATIVE_FLOOR`, applied per leg:
+# measured over 25 random one-stop queries on the live network, the raw cartesian
+# product runs 14..520 candidates and the floored one 2..98 (median 18), at roughly
+# a millisecond of scoring each. This is not a tuning knob for that — it only stops
+# eight legs (the :data:`MAX_OPTIMIZED_WAYPOINTS` ceiling) from multiplying out,
+# the way a state cap used to guard the single monolithic waypoint search.
+MAX_LEG_COMBINATIONS = 2_000
 
 # How many arteries the pair pass combines (see :meth:`RouteFinder._artery_pair_chains`):
 # the dominant artery of each of the best this-many *distinct*-artery candidates,
@@ -134,10 +151,24 @@ def _add_penalties(*maps):
     return combined
 
 
+# One leg of a result: the stretch between two consecutive *required* stops (for a
+# query with no ``via`` there is exactly one leg, spanning the whole route).
+#   * ``start_index`` / ``end_index`` — inclusive node indices into ``Route.stops``.
+#     Adjacent legs share their boundary node — the required stop itself.
+#   * ``hhi``      — this leg's own concentration, scored on its own by
+#                    :func:`~.concentration.evaluate`. The route's ``hhi`` is the
+#                    length-weighted mean of these (see :meth:`RouteFinder._combine_legs`).
+#   * ``priority`` — this leg's tier: the worst mark its own runs complete.
+#   * ``runs``     — this leg's slice of ``Route.runs``, in travel order.
+Leg = namedtuple("Leg", "start_index end_index hhi priority runs")
+
+
 class Route:
     """One result route: the stop chain plus how well it rides one good artery.
 
       * ``stops``          — full place-name chain (consecutive pairs are edges).
+                             A chain may repeat a place: a required stop hanging off
+                             a junction is left by driving back out through it.
       * ``priority``       — its *tier*: the worst priority among the sub-routes it
                              rides — ``max`` over ``runs`` (``0`` = rides only the
                              best arteries). The primary ranking key under
@@ -161,6 +192,13 @@ class Route:
                              :class:`~.concentration.LengthMode` units (crossroads
                              crossed, or plain hop count) — the length term the
                              ranking score uses (see :meth:`RouteFinder._rank`).
+      * ``length``         — ``Σ run.length``: the same length notion measured over
+                             the runs rather than the nodes. This is what weights a
+                             leg in the trip's concentration.
+      * ``legs``           — the stretches between consecutive required stops
+                             (:class:`Leg` each), **always at least one**. Without
+                             ``via`` there is exactly one leg spanning the whole
+                             chain, so every caller has a single shape to read.
       * ``total_hops``     — number of edges.
       * ``q``              — the *ranking* score: ``hhi`` tempered by a gentle
                              length preference (see :meth:`RouteFinder._rank`).
@@ -173,7 +211,7 @@ class Route:
                              priority, which the tier reports on its own.
     """
 
-    def __init__(self, stops, hhi, runs, crossroad_hops, priority):
+    def __init__(self, stops, hhi, runs, crossroad_hops, priority, legs=None):
         self.stops = list(stops)
         self.priority = priority
         self.hhi = hhi
@@ -181,8 +219,12 @@ class Route:
         self.route_ids = sorted({r.route_id for r in runs if isinstance(r.route_id, int)})
         self.route_count = len(self.route_ids)
         self.run_lengths = [r.length for r in runs]
+        self.length = sum(self.run_lengths)
         self.crossroad_hops = crossroad_hops
         self.total_hops = max(len(self.stops) - 1, 0)
+        self.legs = list(legs) if legs else [
+            Leg(0, self.total_hops, hhi, priority, list(self.runs))
+        ]
         self.q = hhi  # pool-relative ranking score; set by RouteFinder._rank
 
 
@@ -276,19 +318,164 @@ class RouteFinder:
             )
             return ranked, self.max_stretch
 
-        # Required stops -> leg-wise simple paths, tightly bounded. Try candidate
-        # stop orders cheapest-first and keep the first order that yields a pool.
+        # Required stops -> one search per leg, combined. Try candidate stop orders
+        # cheapest-first and keep the first order that yields a pool.
         stretch = min(self.max_stretch, WAYPOINT_MAX_STRETCH)
         for points in self._ordered_point_lists(start, end, waypoints):
-            ranked = self._ranked_pool(
-                WaypointStrategy(graph, points),
-                WaypointStrategy(graph, points[::-1]),
-                points,
-            )
+            ranked = self._leg_ranked_pool(points)
             if ranked:
                 return ranked, stretch
 
         return [], stretch
+
+    def _leg_ranked_pool(self, points):
+        """The ranked pool for ``[start, *required stops, end]``, leg by leg.
+
+        A required stop is not a hint, it is a place the trip actually stops at — so
+        the trip *is* several trips, and each stretch between two consecutive stops is
+        its own routing problem: generated on its own (:meth:`_leg_candidates`), scored
+        on its own, and only then combined (:meth:`_rank_leg_combinations`).
+
+        This is the whole fix for the corridor a monolithic waypoint search could not
+        reach. The whole-sequence waypoint search this replaces minimised node
+        revisits *lexicographically first*, ahead of transfers, hops and every penalty
+        in the map — so where a required stop hangs off a junction as a spur, it never
+        propose backing out of that junction while any non-retracing corridor existed,
+        however much worse that corridor was. Searching a leg at a time makes retracing
+        across a stop boundary free at generation time (the leg that leaves the spur
+        knows nothing about the leg that arrived), and the ranking then judges it like
+        anything else. What stops that freedom from degenerating into a route that
+        drives past the destination and comes back is :meth:`_leg_candidates`'s guard.
+
+        Returns ``[]`` if any leg is unroutable, which is the caller's signal to try
+        the next stop order.
+        """
+        pools = []
+        for a, b in zip(points, points[1:]):
+            pool = self._leg_candidates(a, b, [p for p in points if p not in (a, b)])
+            if not pool:
+                return []
+            pools.append(pool)
+        return self._rank_leg_combinations(pools, points)
+
+    def _leg_candidates(self, a, b, banned):
+        """One leg's ranked candidates: a plain point-to-point pool, guarded and floored.
+
+        **The guard.** ``banned`` is every *other* required stop (the endpoints
+        included): a leg may not drive through one. Without it a leg is free to run
+        past the destination and come back — the leg that returns then rides the
+        outbound artery for its whole *measured* length and scores perfectly, which is
+        how an unguarded pool proposes "drive to the end, turn round, collect the
+        stop, drive to the end again". This is not a new restriction: it is exactly
+        the rule that whole-sequence search enforced internally (a required stop was
+        only enterable as the current target), re-homed. When the
+        guard leaves the leg unroutable — the only road to the stop genuinely goes
+        through another one — we fall back to the unrestricted graph rather than
+        failing the query.
+
+        **Searched on the sub-graph, scored on the full one.** Removing places changes
+        degrees, and therefore :func:`~.concentration.edge_unit`, and therefore what a
+        run's length *means*. A leg's ``hhi`` has to be measured in the same units as
+        every other leg's or the weighted mean in :meth:`_combine_legs` is incoherent,
+        so only generation sees the restricted graph; :meth:`_score` re-scores the
+        chains it produced against ``self.graph``.
+
+        **The floor.** Candidates below :data:`ALTERNATIVE_FLOOR` of this leg's best
+        are dropped — the same "not worth showing" bar :meth:`select_diverse` already
+        applies to whole routes, reused here so the cartesian product below is bounded
+        by the objective rather than by a guessed candidate count. The leg's best is
+        always kept.
+        """
+        for exclude in (banned, ()):
+            graph = self.graph.without_places(exclude) if exclude else self.graph
+            if a not in graph or b not in graph:
+                continue
+            finder = self if graph is self.graph else RouteFinder(
+                graph, self.penalty_step, self.max_overlap, self.max_stretch
+            )
+            chains = [
+                route.stops
+                for route in finder._ranked_pool(
+                    MinMergeStrategy(graph, a, b), MinMergeStrategy(graph, b, a), [a, b]
+                )
+            ]
+            if not chains:
+                continue
+            pool = self._score(chains, [a, b])
+            pool.sort(key=_rank_key)
+            floor = ALTERNATIVE_FLOOR * pool[0].q
+            return [route for route in pool if route.q >= floor] or pool[:1]
+        return []
+
+    def _rank_leg_combinations(self, pools, points):
+        """Combine the per-leg pools into whole-route candidates and sort once.
+
+        Every way of picking one candidate per leg is a route, so the pool is the
+        cartesian product — already bounded by :meth:`_leg_candidates`'s floor, with
+        :data:`MAX_LEG_COMBINATIONS` as the valve for the many-legged tail. Trimming
+        takes the *weakest* tail of the *largest* pool, so the legs stay as balanced as
+        the cap allows and no leg is ever reduced below its own best candidate.
+
+        The combined routes go on to the unchanged :meth:`select_diverse` — same arena,
+        same floor, same overlap and stretch budgets — so everything after this point
+        is blind to whether a query had required stops.
+        """
+        pools = [list(pool) for pool in pools]
+        total = 1
+        for pool in pools:
+            total *= len(pool)
+        while total > MAX_LEG_COMBINATIONS:
+            largest = max(range(len(pools)), key=lambda i: len(pools[i]))
+            if len(pools[largest]) < 2:
+                break  # every leg is down to its best; the product is as small as it gets
+            total = total // len(pools[largest]) * (len(pools[largest]) - 1)
+            pools[largest] = pools[largest][:-1]
+        routes = [self._combine_legs(combo) for combo in itertools.product(*pools)]
+        self._apply_ranking_score(routes, points)
+        routes.sort(key=_rank_key)
+        return routes
+
+    def _combine_legs(self, leg_routes):
+        """Stitch one candidate per leg into a whole-route :class:`Route`.
+
+        **The trip's concentration is the length-weighted mean of its legs'**::
+
+            hhi = Σ_i (L_i / L) · hhi_i        L_i = leg i's length, L = Σ L_i
+
+        Expanded that is ``Σ_i Σ_r len_ir² / (L_i · L)``, against the undivided
+        route's ``Σ_r (Σ_i len_ir)² / L²`` — a *block-diagonal* Herfindahl, in which
+        credit pools within a leg but never across a required stop. Which is what a
+        required stop means: the driver stops there, so riding one artery into it and
+        a different one out of it is not a compromise to be scored down, it is two
+        journeys each done well. Scoring the chain undivided is what ranked the
+        reported bug's fragmented 27-hop corridor above the 24-hop one that rides a
+        single artery out of the stop.
+
+        With one leg this is the identity ``L_1 / L = 1``, so a query with no ``via``
+        is scored by the very same code and formula it always was.
+
+        ``L == 0`` — a trip crossing no crossroad at all, reachable only under
+        ``CROSSROADS_ONLY`` — falls back to the plain mean, mirroring
+        :func:`~.concentration.evaluate`'s own zero-length branch. It must not be a
+        weighted mean there: a zero-length leg would carry zero weight, which lets a
+        route that wanders off through transparent nodes score as if that stretch
+        weren't part of the trip.
+        """
+        chain = list(leg_routes[0].stops)
+        legs, runs, offset = [], [], 0
+        for route in leg_routes:
+            if legs:
+                chain += route.stops[1:]  # adjacent legs share the required stop
+            start_index, offset = offset, offset + route.total_hops
+            legs.append(Leg(start_index, offset, route.hhi, route.priority, list(route.runs)))
+            runs += route.runs
+        total = sum(route.length for route in leg_routes)
+        if total:
+            hhi = sum(route.length / total * route.hhi for route in leg_routes)
+        else:
+            hhi = sum(route.hhi for route in leg_routes) / len(leg_routes)
+        priority = max((run.priority for run in runs), default=BEST_PRIORITY)
+        return Route(chain, hhi, runs, self._crossroad_hops(chain), priority, legs)
 
     def _ranked_pool(self, forward, reverse, points):
         """The whole ranked pool for one point sequence: generate, rank, refine, re-rank.
@@ -620,6 +807,12 @@ class RouteFinder:
         cancels out of both the sort and :meth:`select_diverse`'s relative floor, and
         only sets the scale the percentages are reported on.
 
+        With required stops, ``hhi`` is the legs' length-weighted mean rather than one
+        undivided Herfindahl (:meth:`_combine_legs`), and ``C_min`` is already chained
+        leg by leg (:meth:`_min_crossroad_distance`) — so both halves of the formula
+        measure the same divided trip. Nothing else here changes, and with one leg both
+        reduce to what they always were.
+
         The base :attr:`Route.hhi` is the **priority-free** concentration: ``q``
         measures *how well the route rides one artery*, and re-rating an authored
         route must not move it. Priority is expressed once, by the tier gate below,
@@ -654,7 +847,18 @@ class RouteFinder:
         not depend on what else is in the pool, so scores computed in two rounds
         are directly comparable.
         """
-        routes = [self._make_route(nodes) for nodes in chains]
+        return self._apply_ranking_score(
+            [self._make_route(nodes) for nodes in chains], points
+        )
+
+    def _apply_ranking_score(self, routes, points):
+        """Fill in each route's ``q`` — its ``hhi`` tempered by the length term.
+
+        Split out of :meth:`_score` because the leg-combination pool builds its
+        :class:`Route` objects a different way (:meth:`_combine_legs`) but must be
+        scored on exactly the same scale, against the same ``C_min`` chained over
+        ``points``.
+        """
         min_cross = self._min_crossroad_distance(points)
         for r in routes:
             # No adjustment when either distance is 0 (nothing between these places
