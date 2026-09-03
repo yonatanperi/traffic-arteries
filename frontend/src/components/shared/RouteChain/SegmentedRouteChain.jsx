@@ -114,22 +114,11 @@ export default function SegmentedRouteChain({
       {parts.map((part) =>
         part.kind === "waypoint" ? (
           <div className="route-waypoint" key={`w${part.index}`}>
-            <span className="route-waypoint-stop">
-              <IconPin size={13} aria-hidden="true" />
-              {part.place}
-            </span>
+            <span className="route-waypoint-stop">{part.place}</span>
           </div>
         ) : (
           <section className="route-leg" key={`s${part.index}`}>
             <header className="route-leg-head">
-              <span className="route-leg-name">מקטע {part.index + 1}</span>
-              {part.leg && (
-                <span className="route-leg-ends">
-                  {part.leg.start}
-                  <IconChevron size={13} aria-hidden="true" />
-                  {part.leg.end}
-                </span>
-              )}
               {renderHeader?.(part.leg, part.index)}
             </header>
             {part.stops.length > 0 && (

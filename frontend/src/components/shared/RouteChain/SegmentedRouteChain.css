@@ -6,7 +6,7 @@
 .route-legs {
   display: flex;
   flex-direction: column;
-  gap: var(--s-3);
+  gap: var(--s-5);
 }
 
 /* An accent rail down the inline-start edge ties a segment's heading to its chain
