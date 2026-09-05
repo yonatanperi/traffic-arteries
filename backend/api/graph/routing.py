@@ -61,6 +61,9 @@ from .core import BEST_PRIORITY, path_edges
 from .search import (
     TRANSFER_WEIGHT,
     MinMergeStrategy,
+    PenalisedStrategy,
+    add_penalties,
+    avoid_places_penalty,
     avoid_priority_penalty,
     min_crossroad_distance,
     prefer_route_penalty,
@@ -72,12 +75,13 @@ from .search import (
 MAX_OPTIMIZED_WAYPOINTS = 7
 
 # Safety valve on the leg-combination pool (see :meth:`RouteFinder._rank_leg_
-# combinations`). The real bound is :data:`ALTERNATIVE_FLOOR`, applied per leg:
-# measured over 25 random one-stop queries on the live network, the raw cartesian
-# product runs 14..520 candidates and the floored one 2..98 (median 18), at roughly
-# a millisecond of scoring each. This is not a tuning knob for that — it only stops
-# eight legs (the :data:`MAX_OPTIMIZED_WAYPOINTS` ceiling) from multiplying out,
-# the way a state cap used to guard the single monolithic waypoint search.
+# combinations`). The real bound is :meth:`RouteFinder.select_diverse` itself, run per
+# leg: its arena, overlap budget and :data:`ALTERNATIVE_FLOOR` cut a raw leg pool of
+# dozens down to a median of 3 candidates (max 12) on the live network, so the product
+# lands at a median of 6 for one required stop and 38 for three (worst seen: 400).
+# This is not a tuning knob for that — it only stops eight legs (the
+# :data:`MAX_OPTIMIZED_WAYPOINTS` ceiling) from multiplying out, the way a state cap
+# used to guard the single monolithic waypoint search.
 MAX_LEG_COMBINATIONS = 2_000
 
 # How many arteries the pair pass combines (see :meth:`RouteFinder._artery_pair_chains`):
@@ -134,21 +138,6 @@ def _rank_key(route):
         route.total_hops,
         min(tuple(route.stops), tuple(route.stops[::-1])),  # canonical orientation
     )
-
-
-def _add_penalties(*maps):
-    """Combine ``{edge_key: cost}`` penalty maps by *adding* the costs.
-
-    The search's penalties are additive (see :data:`~.search.TRANSFER_WEIGHT`), so
-    stacking two biases means summing them, not overwriting: an edge that is both
-    off the preferred artery and below the priority floor should be discouraged on
-    both counts.
-    """
-    combined = {}
-    for penalty in maps:
-        for edge, cost in penalty.items():
-            combined[edge] = combined.get(edge, 0.0) + cost
-    return combined
 
 
 # One leg of a result: the stretch between two consecutive *required* stops (for a
@@ -337,84 +326,99 @@ class RouteFinder:
         on its own, and only then combined (:meth:`_rank_leg_combinations`).
 
         This is the whole fix for the corridor a monolithic waypoint search could not
-        reach. The whole-sequence waypoint search this replaces minimised node
-        revisits *lexicographically first*, ahead of transfers, hops and every penalty
-        in the map — so where a required stop hangs off a junction as a spur, it never
+        reach. The whole-sequence search this replaces minimised node revisits
+        *lexicographically first*, ahead of transfers, hops and every penalty in the
+        map — so where a required stop hangs off a junction as a spur, it would never
         propose backing out of that junction while any non-retracing corridor existed,
         however much worse that corridor was. Searching a leg at a time makes retracing
         across a stop boundary free at generation time (the leg that leaves the spur
         knows nothing about the leg that arrived), and the ranking then judges it like
-        anything else. What stops that freedom from degenerating into a route that
-        drives past the destination and comes back is :meth:`_leg_candidates`'s guard.
+        every other corridor.
+
+        The one thing a leg is *not* free to do is collect another leg's required stop,
+        which :meth:`_leg_candidates` keeps it off.
 
         Returns ``[]`` if any leg is unroutable, which is the caller's signal to try
         the next stop order.
         """
+        stops = points[1:-1]  # the required stops; the trip's own ends are not "stops"
         pools = []
         for a, b in zip(points, points[1:]):
-            pool = self._leg_candidates(a, b, [p for p in points if p not in (a, b)])
+            pool = self._leg_candidates(a, b, [p for p in stops if p not in (a, b)])
             if not pool:
                 return []
             pools.append(pool)
         return self._rank_leg_combinations(pools, points)
 
     def _leg_candidates(self, a, b, banned):
-        """One leg's ranked candidates: a plain point-to-point pool, guarded and floored.
+        """One leg's candidates — *literally* the two steps a plain query takes.
 
-        **The guard.** ``banned`` is every *other* required stop (the endpoints
-        included): a leg may not drive through one. Without it a leg is free to run
-        past the destination and come back — the leg that returns then rides the
-        outbound artery for its whole *measured* length and scores perfectly, which is
-        how an unguarded pool proposes "drive to the end, turn round, collect the
-        stop, drive to the end again". This is not a new restriction: it is exactly
-        the rule that whole-sequence search enforced internally (a required stop was
-        only enterable as the current target), re-homed. When the
-        guard leaves the leg unroutable — the only road to the stop genuinely goes
-        through another one — we fall back to the unrestricted graph rather than
-        failing the query.
+        A leg is a point-to-point query, so it is answered by the same pair of calls
+        :meth:`rank_candidates` makes for one: :meth:`_ranked_pool` to generate and
+        score, then :meth:`select_diverse` to pick. Reusing that second method rather
+        than re-deriving a cheaper filter here is what makes the **priority arena**
+        hold for a leg exactly as it holds for a whole route — round one admits only
+        tier-0 candidates, so a leg always contributes its best clean corridor, and
+        the wider arenas then add its downgraded ones.
 
-        **Searched on the sub-graph, scored on the full one.** Removing places changes
-        degrees, and therefore :func:`~.concentration.edge_unit`, and therefore what a
-        run's length *means*. A leg's ``hhi`` has to be measured in the same units as
-        every other leg's or the weighted mean in :meth:`_combine_legs` is incoherent,
-        so only generation sees the restricted graph; :meth:`_score` re-scores the
-        chains it produced against ``self.graph``.
+        Picking a leg by concentration alone breaks the arena's one guarantee before
+        the arena ever runs: where a leg's *most concentrated* corridor is the
+        downgraded one, the clean corridor is the poorer-scoring candidate and is
+        dropped, so the trip can only be assembled at the worse tier — even though a
+        tier-0 trip exists (:class:`~api.tests.LegPriorityArenaTests`). Selecting the
+        same way at both levels also inherits ``max_overlap`` and
+        :data:`ALTERNATIVE_FLOOR` for free — which is what keeps the cartesian product
+        in :meth:`_rank_leg_combinations` small without a candidate-count knob — and
+        makes both levels track :data:`~.concentration.PriorityMode.HARD_TIER`
+        together, so turning the tier gate off is priority-blind end to end.
 
-        **The floor.** Candidates below :data:`ALTERNATIVE_FLOOR` of this leg's best
-        are dropped — the same "not worth showing" bar :meth:`select_diverse` already
-        applies to whole routes, reused here so the cartesian product below is bounded
-        by the objective rather than by a guessed candidate count. The leg's best is
-        always kept.
+        ``banned`` is the trip's *other* required stops. A leg that drives through one
+        collects a stop belonging to another leg, which makes the ordered visit
+        meaningless and leaves that leg doubling back over ground already driven;
+        keeping each leg to its own stop is the rule the old whole-sequence waypoint
+        search enforced internally (a required stop was only enterable as the current
+        target). Two deliberate limits on it:
+
+          * It is a **soft** ban — :func:`~.search.avoid_places_penalty` added to every
+            search by :class:`~.search.PenalisedStrategy` — not a deletion. A required
+            stop is often a transparent degree-2 point in the middle of a road, and
+            deleting it severs the road rather than routing around it, so the leg comes
+            back with a corridor far worse than the one it would have found and the
+            whole trip is downgraded with it. Softly banned, the search goes round the
+            stop when it can and through it when there is no other way, which also
+            means the ban can never make a leg unroutable.
+          * It covers the required *stops* only, never the trip's own start and end. A
+            leg driving back through the trip's start is the ordinary shape of
+            collecting a stop that lies off to one side — you drive out to it and back
+            the way you came — and it is the exact mirror of a leg driving through the
+            destination, so no orientation-independent rule can forbid one and keep the
+            other. Both are judged on the score, like every other corridor.
+
+        Because nothing is removed, generation and scoring both run on ``self.graph``.
+        A sub-graph would have different degrees, and therefore a different
+        :func:`~.concentration.edge_unit`, and therefore a different meaning for a
+        run's length — which every leg's ``hhi`` has to share for the weighted mean in
+        :meth:`_combine_legs` to mean anything.
         """
-        for exclude in (banned, ()):
-            graph = self.graph.without_places(exclude) if exclude else self.graph
-            if a not in graph or b not in graph:
-                continue
-            finder = self if graph is self.graph else RouteFinder(
-                graph, self.penalty_step, self.max_overlap, self.max_stretch
+        avoid = avoid_places_penalty(self.graph, banned)
+        return self.select_diverse(
+            self._ranked_pool(
+                PenalisedStrategy(MinMergeStrategy(self.graph, a, b), avoid),
+                PenalisedStrategy(MinMergeStrategy(self.graph, b, a), avoid),
+                [a, b],
             )
-            chains = [
-                route.stops
-                for route in finder._ranked_pool(
-                    MinMergeStrategy(graph, a, b), MinMergeStrategy(graph, b, a), [a, b]
-                )
-            ]
-            if not chains:
-                continue
-            pool = self._score(chains, [a, b])
-            pool.sort(key=_rank_key)
-            floor = ALTERNATIVE_FLOOR * pool[0].q
-            return [route for route in pool if route.q >= floor] or pool[:1]
-        return []
+        )
 
     def _rank_leg_combinations(self, pools, points):
         """Combine the per-leg pools into whole-route candidates and sort once.
 
         Every way of picking one candidate per leg is a route, so the pool is the
-        cartesian product — already bounded by :meth:`_leg_candidates`'s floor, with
-        :data:`MAX_LEG_COMBINATIONS` as the valve for the many-legged tail. Trimming
-        takes the *weakest* tail of the *largest* pool, so the legs stay as balanced as
-        the cap allows and no leg is ever reduced below its own best candidate.
+        cartesian product — already bounded by :meth:`_leg_candidates`'s use of
+        :meth:`select_diverse`, with :data:`MAX_LEG_COMBINATIONS` as the valve for the
+        many-legged tail. Trimming takes the *weakest* tail of the *largest* pool.
+        Because each leg arrives in arena order — its clean corridor first, its
+        downgraded ones behind — that tail is the worst-tiered candidates, and no leg
+        is ever reduced below its own best.
 
         The combined routes go on to the unchanged :meth:`select_diverse` — same arena,
         same floor, same overlap and stretch budgets — so everything after this point
@@ -666,7 +670,7 @@ class RouteFinder:
             # the constraint would ban; otherwise it returns the same corridor, skip.
             floor = graph.route_priority(route_id)
             if nodes and self._crosses_forced_below(nodes, floor):
-                nodes, _ = strategy.find(_add_penalties(prefer, self._avoid(floor)))
+                nodes, _ = strategy.find(add_penalties(prefer, self._avoid(floor)))
                 chains.append(nodes)
 
         # One corridor per tier: the best route that never leaves it. Nothing else
@@ -709,7 +713,7 @@ class RouteFinder:
         seen = {frozenset(path_edges(route.stops)) for route in ranked}
         chains = []
         for a, b in itertools.combinations(self._leading_arteries(ranked), 2):
-            penalty = _add_penalties(
+            penalty = add_penalties(
                 prefer_route_penalty(graph, a), prefer_route_penalty(graph, b)
             )
             for strategy, backwards in ((forward, False), (reverse, True)):

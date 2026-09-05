@@ -178,17 +178,43 @@ class WaypointTests(SimpleTestCase):
     ]
     LONG_FRAGMENTED = ["A", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9", "C", "B"]
 
-    # A *through* stop: V hangs off the highway at J but has its own way onward to
-    # T, so nothing forces a route through it to double back. That way onward is
-    # deliberately fragmented (routes 2..4), which makes retracing J the route with
-    # *fewer* transfers — i.e. the one the generator would return if revisits were
-    # free. This is the shape of the live network's "via צ. רבדים" query.
+    # A *through* stop: V hangs off the highway at J but has its own good road
+    # onward to T, so driving straight through it is the better ride and nothing
+    # should double back. The stubs matter: without them c1/c2 are transparent and
+    # V's whole road onward measures *zero* length, which under
+    # LengthMode.CROSSROADS_ONLY makes any detour along it free and the fixture stops
+    # saying anything about routing at all.
     THROUGH_STOP_ROUTES = [
         ["S", "h1", "J", "h2", "T"],  # 0: one highway, end to end
         ["J", "V"],                   # 1: the turn-off onto V
-        ["V", "c1"],                  # 2..4: V's own way onward, transferring
-        ["c1", "c2"],                 #       at every stop
-        ["c2", "T"],
+        ["V", "c1", "c2", "T"],       # 2: V's own road onward, one artery
+        ["c1", "zc1"], ["c2", "zc2"], # 3..4: stubs — c1/c2 are real junctions
+    ]
+
+    # Two required stops where one leg is *tempted* to collect the other's stop:
+    # the direct road to W1 is fragmented, while the road that runs through W2 gets
+    # there on a single artery and so scores better. Letting it do that leaves the
+    # W2 leg doubling back over ground the W1 leg already drove.
+    TWO_STOP_ROUTES = [
+        ["S", "a1"], ["a1", "W1"],           # 0..1: the direct way to W1, fragmented
+        ["S", "b1", "W2", "b2", "W1"],       # 2: one artery to W1 — through W2
+        ["W2", "c1", "T"],                   # 3
+        ["W1", "d1", "T"],                   # 4
+        ["a1", "za"], ["b1", "zb"], ["b2", "zb2"],  # stubs, as above
+        ["c1", "zc"], ["d1", "zd"],
+    ]
+
+    # The trip's own start sitting *on the road* the second leg needs: S is a
+    # transparent degree-2 point partway along the artery, and the required stop K is
+    # at the end of the spur past it. The drive is out to K and back down through S.
+    # A guard that keeps a leg off the trip's endpoints — worse, one that deletes
+    # them from the graph, which severs the road a degree-2 point carries rather than
+    # routing around it — pushes the second leg onto the fragmented bypass instead.
+    START_ON_THE_WAY_ROUTES = [
+        ["K", "n1", "S", "m1", "T"],                   # 0: the artery, through S
+        ["K", "p1"], ["p1", "p2"], ["p2", "T"],        # 1..3: fragmented bypass
+        ["n1", "zn"], ["m1", "zm"],                    # stubs, as above
+        ["p1", "zp1"], ["p2", "zp2"],
     ]
 
     # The mirror image, and the shape of the reported bug: W is a *spur* off the
@@ -236,21 +262,21 @@ class WaypointTests(SimpleTestCase):
                 self.assertEqual(len(leg), len(set(leg)), f"leg loops on itself: {leg}")
 
     def test_no_avoidable_retracing(self):
-        # Retracing is a cost, not a ban. V can be driven straight through, so the
-        # route that backs out of it onto the highway must lose — even though it
-        # merges fewer authored routes than carrying on does. It is no longer
-        # *excluded* (searching a leg at a time is what lets the spur case in
-        # test_spur_stop_is_left_by_backing_out be found at all), so what has to hold
-        # is that it never leads: the headline drives V straight through, and any
-        # candidate that doubles back sits strictly below it.
+        # Retracing is a cost, not a ban. V has its own good road onward, so driving
+        # straight through is the better ride and must win; the route that backs out
+        # onto the highway is still *offered* — searching a leg at a time is what
+        # lets the spur case below be found at all — but never leads.
         finder = RouteFinder(Graph.from_routes(self.THROUGH_STOP_ROUTES))
         routes = finder.find_routes("S", "T", via=["V"])
         self.assertTrue(routes, "no route through the required stop")
         best = routes[0].stops
+        self.assertEqual(best, ["S", "h1", "J", "V", "c1", "c2", "T"])
         self.assertEqual(len(best), len(set(best)), f"headline doubles back: {best}")
         for route in routes[1:]:
             if len(route.stops) != len(set(route.stops)):
-                self.assertLess(route.q, routes[0].q, f"retracing route ranks first: {route.stops}")
+                self.assertLess(
+                    route.q, routes[0].q, f"retracing route ranks first: {route.stops}"
+                )
 
     def test_spur_stop_is_left_by_backing_out(self):
         # The reported bug. W hangs off the junction J; its own way onward exists but
@@ -264,21 +290,47 @@ class WaypointTests(SimpleTestCase):
         self.assertTrue(routes, "no route through the spur stop")
         self.assertEqual(routes[0].stops, ["S", "h1", "J", "W", "J", "h2", "T"])
 
-    def test_no_leg_drives_through_another_required_stop(self):
-        # A leg may not pass through a required stop that is not one of its own two
-        # endpoints. Without that guard a leg is free to run past the destination and
-        # come back, and the returning leg then rides the outbound artery for its whole
-        # measured length and scores *perfectly* — "drive to T, turn round, collect V,
-        # drive to T again" outranking every honest corridor.
-        finder = RouteFinder(Graph.from_routes(self.THROUGH_STOP_ROUTES))
-        points = {"S", "V", "T"}
-        for route in finder.find_routes("S", "T", via=["V"]):
+    def test_a_leg_does_not_collect_another_legs_stop(self):
+        # A leg may not drive through a required stop that is not its own: that
+        # collects a stop belonging to another leg, and leaves that leg doubling back
+        # over ground already driven. Here the temptation is real — the road to W1
+        # through W2 is a single artery where the direct one is fragmented, so without
+        # the guard it leads the W1 leg outright.
+        finder = RouteFinder(Graph.from_routes(self.TWO_STOP_ROUTES))
+        stops = {"W1", "W2"}
+        routes = finder.find_routes("S", "T", via=["W1", "W2"])
+        self.assertTrue(routes, "no route through the required stops")
+        for route in routes:
             for leg in route.legs:
                 interior = route.stops[leg.start_index + 1 : leg.end_index]
                 self.assertFalse(
-                    points.intersection(interior),
-                    f"leg drives through a required stop: {route.stops}",
+                    stops.intersection(interior),
+                    f"leg collects another leg's stop: {route.stops}",
                 )
+
+    def test_the_stop_guard_yields_when_there_is_no_other_way(self):
+        # It is a *soft* ban, so it costs a detour rather than cutting the network:
+        # P hangs off C by a single edge, so a trip through both can only reach P
+        # through C. Deleting C would leave the leg unroutable.
+        finder = RouteFinder(Graph.from_routes(self.WAYPOINT_ROUTES))
+        routes = finder.find_routes("A", "B", via=["C", "P"])
+        self.assertTrue(routes, "no route when one stop is only reachable via another")
+        for route in routes:
+            self.assertIn("P", route.stops)
+            self.assertIn("C", route.stops)
+
+    def test_a_leg_may_drive_back_through_the_trip_start(self):
+        # The mirror of the case above, and the reason the guard covers the required
+        # stops only. S is a transparent point on the artery that leads to K, so
+        # collecting K means driving out and back down through S — the ordinary shape
+        # of a stop that lies off to one side. Keeping a leg off the trip's own
+        # endpoints (or deleting them, which severs the road a degree-2 point carries)
+        # forces the fragmented bypass instead, at a far worse score.
+        finder = RouteFinder(Graph.from_routes(self.START_ON_THE_WAY_ROUTES))
+        routes = finder.find_routes("S", "T", via=["K"])
+        self.assertTrue(routes, "no route out to the spur stop and back")
+        self.assertEqual(routes[0].stops, ["S", "n1", "K", "n1", "S", "m1", "T"])
+        self.assertAlmostEqual(routes[0].hhi, 1.0)
 
     def test_retracing_is_no_more_than_forced(self):
         # When retracing *is* forced, it is minimal: leaving the P spur costs one
@@ -1056,6 +1108,66 @@ class PriorityArenaTests(SimpleTestCase):
         results = self.finder.find_routes("S", "T", k=3)
         self.assertEqual(results[0].stops, ["S", "a1", "a2", "a3", "T"])
         self.assertEqual(results[0].priority, 0)
+
+
+# The arena's situation, inverted, sitting inside a trip's *second leg*: that leg's
+# most concentrated corridor is the downgraded one (a single tier-2 artery, hhi 1.0),
+# and its clean tier-0 corridor is fragmented enough (hhi ~0.51) to fall below
+# ALTERNATIVE_FLOOR of it. Pick each leg by concentration alone and the tier-0
+# corridor is gone before the whole-route arena ever runs, so the trip can only be
+# assembled at tier 2 — even though a tier-0 trip plainly exists.
+LEG_ARENA_ROUTES = [
+    ["P", "p1", "S"],               # 0: the first leg, one clean artery
+    ["S", "q1", "q2", "q3", "T"],   # 1: leg 2's downgraded artery      -> hhi 1.0
+    ["S", "b1", "b2"],              # 2..3: leg 2's clean but fragmented corridor
+    ["b2", "b3", "T"],
+    # stubs so every interior node is a real crossroad (carries length)
+    ["p1", "zp1"],
+    ["q1", "zq1"], ["q2", "zq2"], ["q3", "zq3"],
+    ["b1", "zb1"], ["b2", "zb2"], ["b3", "zb3"],
+]
+LEG_ARENA_MARKS = whole_chain_marks(LEG_ARENA_ROUTES, [0, 2, 0, 0] + [0] * 7)
+
+
+class LegPriorityArenaTests(SimpleTestCase):
+    """The priority arena has to hold for a *leg* exactly as it holds for a whole
+    route — which is why a leg's candidates are picked by `select_diverse` itself
+    rather than by a cheaper filter of its own."""
+
+    def setUp(self):
+        self.finder = RouteFinder(Graph.from_routes(LEG_ARENA_ROUTES, LEG_ARENA_MARKS))
+
+    def test_a_leg_offers_its_clean_corridor_even_when_it_scores_worse(self):
+        # Round one of the arena admits only tier 0, so the leg's clean corridor is
+        # taken first however poorly it scores, and the downgraded one follows behind
+        # once the arena widens. Both have to survive: the first is the only way to
+        # build a tier-0 trip, the second the only way to build the concentrated one.
+        pool = self.finder._leg_candidates("S", "T", [])
+        self.assertEqual([r.priority for r in pool], [0, 2])
+        self.assertLess(pool[0].q, pool[1].q)  # the clean corridor is the *weaker* one
+
+    def test_the_trip_headline_is_the_best_tier_zero_route(self):
+        results = self.finder.find_routes("P", "T", via=["S"])
+        self.assertEqual(results[0].priority, 0)
+        self.assertEqual(results[0].stops, ["P", "p1", "S", "b1", "b2", "b3", "T"])
+        # ...and the concentrated tier-2 trip is still offered, once the arena opens
+        # to its tier — priority ranks, it never filters.
+        self.assertEqual([r.priority for r in results], [0, 2])
+        self.assertGreater(results[1].q, results[0].q)
+
+    def test_the_arena_is_dropped_with_hard_tier_off(self):
+        # Leg selection tracks PriorityMode exactly as whole-route selection does:
+        # with the tier gate off, both levels are plain concentration-first, so the
+        # downgraded corridor leads its leg and the trip.
+        previous = PriorityMode.HARD_TIER
+        PriorityMode.HARD_TIER = False
+        try:
+            pool = self.finder._leg_candidates("S", "T", [])
+            self.assertEqual(pool[0].priority, 2)
+            results = self.finder.find_routes("P", "T", via=["S"])
+            self.assertEqual(results[0].stops, ["P", "p1", "S", "q1", "q2", "q3", "T"])
+        finally:
+            PriorityMode.HARD_TIER = previous
 
 
 class SelectDiverseExclusionTests(SimpleTestCase):

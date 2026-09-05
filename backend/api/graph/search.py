@@ -109,6 +109,21 @@ def _routes_on(graph, a, b):
     return graph.routes_on(a, b) or (edge_key(a, b),)
 
 
+def add_penalties(*maps):
+    """Combine ``{edge_key: cost}`` penalty maps by *adding* the costs.
+
+    The penalties below are additive (see :data:`TRANSFER_WEIGHT`), so stacking two
+    biases means summing them, not overwriting: an edge that is both off the preferred
+    artery and below the priority floor should be discouraged on both counts. Lives
+    here, with the maps it combines, so every consumer composes them the same way.
+    """
+    combined = {}
+    for penalty in maps:
+        for edge, cost in penalty.items():
+            combined[edge] = combined.get(edge, 0.0) + cost
+    return combined
+
+
 def prefer_route_penalty(graph, route_id, bias=TRANSFER_WEIGHT):
     """Penalty map biasing any strategy toward *riding* ``route_id``.
 
@@ -160,6 +175,32 @@ def avoid_priority_penalty(graph, max_priority, bias=None):
     }
 
 
+def avoid_places_penalty(graph, places, bias=None):
+    """Penalty map keeping a search away from ``places`` — unless there is no other way.
+
+    Every edge incident to one of ``places`` is effectively banned (see
+    :func:`ban_weight`), so a strategy routes around them however long a detour that
+    takes, and drives through one only when the network offers no alternative at all.
+
+    A **soft** ban is the whole point, and the difference from simply deleting the
+    places from the graph. A place may be a transparent degree-2 shape point in the
+    middle of a road; deleting it doesn't route the search around it, it severs the
+    road. :meth:`~.routing.RouteFinder._leg_chains` uses this to keep one leg of a trip
+    from collecting a required stop that belongs to another leg, and that stop is
+    routinely such a point.
+    """
+    if not places:
+        return {}
+    if bias is None:
+        bias = ban_weight(graph)
+    exclude = set(places)
+    return {
+        edge_key(a, b): bias
+        for a, b, _ in graph.edge_routes_records
+        if a in exclude or b in exclude
+    }
+
+
 class RouteStrategy:
     """A way to find one route for a given ``{edge_key: multiplier}`` penalty map.
 
@@ -168,11 +209,35 @@ class RouteStrategy:
     per edge, parallel to the edges of ``nodes``), or ``(None, None)`` when none
     exists. The interface outlives its second implementation: :mod:`.routing` takes
     a *pair* of strategies (one per direction) everywhere, and keeping the seam means
-    a future generator slots in without touching the generation layer.
+    a future generator slots in without touching the generation layer — as
+    :class:`PenalisedStrategy` does.
     """
 
     def find(self, penalty):  # pragma: no cover - interface
         raise NotImplementedError
+
+
+class PenalisedStrategy(RouteStrategy):
+    """A strategy with a fixed penalty map added to every search it is asked for.
+
+    :meth:`~.routing.RouteFinder._generate` drives a strategy with a dozen different
+    penalty maps of its own — one per artery, one per priority tier, the diversity
+    backfill — and knows nothing about why. Wrapping the strategy rather than
+    threading a base map through all of that keeps the generation layer closed to
+    modification: a caller that needs every one of those searches to also respect a
+    constraint states it once, here.
+
+    Penalties are additive (see :data:`TRANSFER_WEIGHT`), so composing is summing.
+    """
+
+    def __init__(self, strategy, base):
+        self.strategy = strategy
+        self.base = base
+
+    def find(self, penalty):
+        if not self.base:
+            return self.strategy.find(penalty)
+        return self.strategy.find(add_penalties(self.base, penalty))
 
 
 class MinMergeStrategy(RouteStrategy):

@@ -140,7 +140,10 @@ backend/
     core.py            Graph: undirected adjacency list; each edge tagged with
                         which authored routes (by index) traverse it
     search.py          the single-route generator (MinMergeStrategy) over
-                        (node, active_route) state, + the penalty maps biasing it
+                        (node, active_route) state, the penalty maps biasing it
+                        (prefer_route/avoid_priority/avoid_places + add_penalties),
+                        and PenalisedStrategy, the decorator that pins one of those
+                        maps onto every search a generator makes
     concentration.py   evaluate(): exact HHI scoring of a stop chain via a
                         chain-DP over route-credit assignments
     routing.py         RouteFinder: generates + scores + sorts candidate chains
@@ -332,16 +335,33 @@ values. The theme is dark-only (no light-mode branch to maintain).
      free to generate and is then judged by the score like anything else. The old
      whole-sequence search minimised revisits *lexicographically first*, ahead of
      transfers, hops and every penalty, and so could never propose that corridor at
-     all — the `מ. מש"א חיפה → מ. צוקי עובדה בהל"צ via צ. הנשיא` bug. Two things keep
-     the freedom honest: a leg may **not drive through another required stop**
-     (`_leg_candidates` searches on `graph.without_places(...)` — the rule the old
-     search enforced internally; without it a leg runs past the destination and comes
-     back at a perfect score), and each leg's pool is trimmed by the existing
-     `ALTERNATIVE_FLOOR` before the cartesian product — the objective bounding the
-     pool rather than a guessed candidate count, with `MAX_LEG_COMBINATIONS` only as
-     a valve. Legs are searched on the restricted sub-graph but **scored on the full
-     one**: removing places changes degrees, hence `edge_unit`, hence what a run's
-     length means, and every leg's `hhi` must be in the same units to be averaged.
+     all — the `מ. מש"א חיפה → מ. צוקי עובדה בהל"צ via צ. הנשיא` bug.
+   - **A leg is picked exactly the way a plain query is**: `_leg_candidates` is
+     literally `_ranked_pool` then `select_diverse`, the same pair `rank_candidates`
+     uses. That is what makes the **priority arena** hold per leg — round one admits
+     only tier-0, so a leg always contributes its clean corridor and the wider arenas
+     add its downgraded ones. Filtering a leg by concentration alone breaks the
+     arena's guarantee before the arena runs: where a leg's *most concentrated*
+     corridor is the downgraded one, the clean corridor is the weaker candidate and
+     gets dropped, so the trip can only be assembled at the worse tier even though a
+     tier-0 trip exists (`LegPriorityArenaTests`). Selecting the same way at both
+     levels also inherits `max_overlap` and `ALTERNATIVE_FLOOR` — which is what bounds
+     the cartesian product without a candidate-count knob, `MAX_LEG_COMBINATIONS`
+     being only a valve — and makes both levels track `PriorityMode.HARD_TIER`
+     together.
+   - The one thing a leg may not do is **collect another leg's required stop**
+     (`avoid_places_penalty` added to every search by `PenalisedStrategy`, a decorator
+     so `_generate` stays closed to modification). Two deliberate limits: it is a
+     **soft** ban, not a deletion — a required stop is often a transparent degree-2
+     point, and deleting it severs the road rather than routing around it — so the
+     search goes round it when it can and through it when there is no other way, and
+     can never make a leg unroutable. And it covers the required *stops* only, never
+     the trip's own start and end: driving back through the start is the ordinary
+     shape of collecting a stop off to one side, and it is the exact mirror of driving
+     through the destination, so no orientation-independent rule can forbid one and
+     keep the other. Since nothing is removed, generation and scoring share one graph
+     — a sub-graph's degrees would change `edge_unit`, and every leg's `hhi` has to be
+     in the same units to be averaged.
    - Each candidate is scored exactly by `concentration.evaluate` (the HHI) and
      the pool is sorted once, concentration-first.
    - Then one **refinement round** (`_artery_pair_chains`): a single-artery bias

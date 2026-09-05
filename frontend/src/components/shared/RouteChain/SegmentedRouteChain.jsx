@@ -118,9 +118,11 @@ export default function SegmentedRouteChain({
           </div>
         ) : (
           <section className="route-leg" key={`s${part.index}`}>
-            <header className="route-leg-head">
-              {renderHeader?.(part.leg, part.index)}
-            </header>
+            {renderHeader && (
+              <header className="route-leg-head">
+                {renderHeader(part.leg, part.index)}
+              </header>
+            )}
             {part.stops.length > 0 && (
               <RouteChain
                 stops={part.stops}
