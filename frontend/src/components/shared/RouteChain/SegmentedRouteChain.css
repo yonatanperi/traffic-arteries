@@ -48,14 +48,25 @@
   align-items: center;
   gap: var(--s-3);
 }
+
 .route-waypoint::before,
 .route-waypoint::after {
   content: "";
   flex: 1;
   height: 1px;
+}
+
+.route-waypoint::before {
+  background: linear-gradient(
+    to right,
+    rgba(var(--accent-rgb), 0.45),
+    transparent
+  );
+}
+
+.route-waypoint::after {
   background: linear-gradient(
     to left,
-    transparent,
     rgba(var(--accent-rgb), 0.45),
     transparent
   );
