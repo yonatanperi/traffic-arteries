@@ -18,7 +18,7 @@ export function useRouteSearch() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [invalidPlaces, setInvalidPlaces] = useState(() => new Set()); // unknown place names from the last submit attempt
-  const [hiddenTypes, setHiddenTypes] = useState(() => new Set(["camp", "post"])); // stop types filtered out of the results
+  const [hiddenTypes, setHiddenTypes] = useState(() => new Set(["camp", "post", "firing_zone"])); // stop types filtered out of the results
   const [didSearch, setDidSearch] = useState(false); // a search is dispatched/showing (drives the phone fold)
   const placeSet = useMemo(() => new Set(places), [places]);
 
