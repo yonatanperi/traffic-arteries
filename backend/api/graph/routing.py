@@ -56,7 +56,7 @@ than once over a single ranked pool.
 import itertools
 from collections import namedtuple
 
-from .concentration import LengthMode, PriorityMode, evaluate
+from .concentration import LengthMode, PriorityMode, evaluate, stamp_runs
 from .core import BEST_PRIORITY, path_edges
 from .search import (
     TRANSFER_WEIGHT,
@@ -147,7 +147,9 @@ def _rank_key(route):
 #   * ``hhi``      — this leg's own concentration, scored on its own by
 #                    :func:`~.concentration.evaluate`. The route's ``hhi`` is the
 #                    length-weighted mean of these (see :meth:`RouteFinder._combine_legs`).
-#   * ``priority`` — this leg's tier: the worst mark its own runs complete.
+#   * ``priority`` — this leg's tier: the worst mark the trip rides across it. Read
+#     over the *whole* trip chain, not the leg alone, so a rated stretch the driver
+#     stops in the middle of still rates both legs it falls across.
 #   * ``runs``     — this leg's slice of ``Route.runs``, in travel order.
 Leg = namedtuple("Leg", "start_index end_index hhi priority runs")
 
@@ -158,9 +160,10 @@ class Route:
       * ``stops``          — full place-name chain (consecutive pairs are edges).
                              A chain may repeat a place: a required stop hanging off
                              a junction is left by driving back out through it.
-      * ``priority``       — its *tier*: the worst priority among the sub-routes it
-                             rides — ``max`` over ``runs`` (``0`` = rides only the
-                             best arteries). The primary ranking key under
+      * ``priority``       — its *tier*: the worst mark it rides whole — ``max`` over
+                             ``runs``, which :func:`~.concentration.stamp_runs` has
+                             already stamped from the chain itself (``0`` = rides no
+                             rated stretch). The primary ranking key under
                              :data:`~.concentration.PriorityMode.HARD_TIER`.
       * ``hhi``            — concentration in ``[0, 1]``: the plain Herfindahl
                              ``Σ (len_i / L)²`` over the sub-routes ridden (1.0 means
@@ -458,6 +461,13 @@ class RouteFinder:
         With one leg this is the identity ``L_1 / L = 1``, so a query with no ``via``
         is scored by the very same code and formula it always was.
 
+        The **tier** does not divide this way. Concentration is about how a stretch is
+        driven, which a stop genuinely interrupts; a mark is about which road was
+        covered, which it does not. So the runs are re-stamped against the whole trip
+        chain here (:func:`~.concentration.stamp_runs`) and each leg takes the worst
+        mark the trip rides across it — a rated stretch cut in two by a required stop
+        rates both halves, instead of being shed by neither.
+
         ``L == 0`` — a trip crossing no crossroad at all, reachable only under
         ``CROSSROADS_ONLY`` — falls back to the plain mean, mirroring
         :func:`~.concentration.evaluate`'s own zero-length branch. It must not be a
@@ -466,13 +476,33 @@ class RouteFinder:
         weren't part of the trip.
         """
         chain = list(leg_routes[0].stops)
-        legs, runs, offset = [], [], 0
+        spans, runs, offset = [], [], 0
         for route in leg_routes:
-            if legs:
+            if spans:
                 chain += route.stops[1:]  # adjacent legs share the required stop
             start_index, offset = offset, offset + route.total_hops
-            legs.append(Leg(start_index, offset, route.hhi, route.priority, list(route.runs)))
+            spans.append((start_index, offset, route.hhi, len(route.runs)))
             runs += route.runs
+
+        # Re-rate over the *whole* trip chain: a leg was scored on its own, so a mark
+        # the trip rides across a required stop is in neither leg's chain and would
+        # vanish. The tier is a fact about the road covered, and a stop the driver
+        # halts at does not un-ride it.
+        runs = stamp_runs(self.graph, chain, runs)
+        legs, taken = [], 0
+        for start_index, end_index, leg_hhi, count in spans:
+            leg_runs = runs[taken : taken + count]
+            taken += count
+            legs.append(
+                Leg(
+                    start_index,
+                    end_index,
+                    leg_hhi,
+                    max((run.priority for run in leg_runs), default=BEST_PRIORITY),
+                    leg_runs,
+                )
+            )
+
         total = sum(route.length for route in leg_routes)
         if total:
             hhi = sum(route.length / total * route.hhi for route in leg_routes)
@@ -600,15 +630,14 @@ class RouteFinder:
     def _make_route(self, nodes):
         """Wrap a stop chain in a scored :class:`Route` (exact concentration + tier).
 
-        The tier is the worst priority among the sub-routes :func:`evaluate` credits
-        (the chips the UI shows) — each run's being the worst mark it *completes* —
-        so it is read straight off ``runs`` rather than recomputed via
-        :func:`~.concentration.tier`, which would cost a second, redundant solve.
+        The tier is the worst mark the chain rides whole. :func:`evaluate` has
+        already stamped it onto every run it falls across, so it is read straight off
+        ``runs`` rather than recomputed via :func:`~.concentration.tier`, which would
+        walk the chain a second time for an answer already in hand.
 
-        One solve answers both: :func:`~.concentration.evaluate` maximises the plain
-        concentration and uses priority only to break ties between equally
-        concentrated readings, so the score, the ``runs`` and their shares are all
-        priority-free while the tier still names the arteries actually ridden.
+        The two are independent: the assignment maximises concentration alone, so the
+        score, the ``runs`` and their shares are priority-free, while the tier follows
+        the road the chain covers and no reading of it can shed a rating.
         """
         hhi, runs = evaluate(self.graph, nodes)
         priority = max((run.priority for run in runs), default=BEST_PRIORITY)

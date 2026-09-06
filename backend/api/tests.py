@@ -12,6 +12,7 @@ from moto import mock_aws
 from . import db as db_module
 from .db import Database, ValidationError, expand_route, expand_routes, upgrade_node
 from .graph import Graph, LengthMode, PriorityMode, RouteFinder, evaluate, tier
+from .graph.concentration import edge_unit
 from .graph.search import MinMergeStrategy, avoid_priority_penalty, prefer_route_penalty
 from .management.commands.migrate_place_groups import Command as MigratePlaceGroupsCommand
 from .place_groups import DEFAULT_GROUP
@@ -992,11 +993,11 @@ class PriorityMarkContainmentTests(SimpleTestCase):
 
 
 class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
-    """The tier is the worst priority among the sub-routes actually ridden (the
-    max-HHI credit assignment / the UI's chips) — NOT an edge-only best. When
-    riding one authored route as far as possible means riding a downgraded one,
-    the route inherits that downgrade, even where the same road is co-served by a
-    well-rated route."""
+    """The tier follows the road the chain covers — NOT an edge-only best. Where a
+    marked stretch is co-served by a well-rated route, the mark still bites (see
+    :class:`MarkRatesTheRoadTests`); what this class pins is the other half of that:
+    the *score* is free to credit the stretch wherever it is most concentrated, and
+    doing so neither creates nor clears a rating."""
 
     # Every edge of S..T is carried by BOTH the downgraded through-route (0) and a
     # well-rated single-hop route. So per-edge the road is priority-0 drivable — but
@@ -1030,9 +1031,9 @@ class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
         self.assertEqual([r.priority for r in runs], [2])
 
     def test_tier_follows_the_ridden_sub_route(self):
-        # The chain is ridden as one run on the priority-2 artery, so the route is
-        # tier 2 — even though every edge is *also* on a priority-0 route. Riding it
-        # as those p0 legs is less concentrated, so that isn't how it's ridden.
+        # The chain rides the priority-2 artery's marked stretch whole, so the route
+        # is tier 2 — even though every edge is *also* on a priority-0 route, and
+        # whichever of them the credit assignment happens to pick.
         self.assertEqual(tier(self.graph, self.CHAIN), 2)
         # The per-edge best is still 0 — that's what generation uses to hunt for a
         # physically different corridor, but it is not the route's tier.
@@ -1055,6 +1056,80 @@ class PriorityTierFollowsRiddenRouteTests(SimpleTestCase):
         self.assertEqual(results[0].priority, 0)
         self.assertNotIn(0, results[0].route_ids)  # does not ride the downgraded artery
         self.assertEqual(results[1].priority, 2)   # the concentrated ride is still offered
+
+
+class MarkRatesTheRoadTests(SimpleTestCase):
+    """A mark rates the **road**, so no reading of a chain can shed one.
+
+    The shape is the reported bug, minimised: a rated spur `P -> n1 -> T` that a
+    second, unrated authored route also covers. `n1` and `T` are not crossroads, so
+    the edge `n1 -> T` carries **zero** length — which used to make peeling it onto
+    the unrated route free: the split tied on concentration, ended the marked run one
+    edge short of the mark, and the tier read 0 for a route that drove every metre of
+    the rated road. Whether a mark bites is now decided by the edges the chain
+    covers, before any credit is assigned, so the dodge (and the required-stop
+    variant of it) is gone.
+    """
+
+    # 0: the marked artery, rated only over its spur P..T.
+    # 1: an unrated artery joining at P and covering the same spur — riding the spur
+    #    "as route 1" is a real, sometimes better-concentrated reading of the road.
+    ROUTES = [
+        ["H", "g1", "g2", "P", "n1", "T"],
+        ["Q", "P", "n1", "T"],
+        ["g1", "z1"],   # stubs -> g1/g2 are crossroads and carry length,
+        ["g2", "z2"],   # while n1 (degree 2) and T (degree 1) carry none
+    ]
+    MARKS = [[("P", "T", 3)], [], [], []]
+    APPROACH = ["H", "g1", "g2", "P", "n1", "T"]
+
+    def setUp(self):
+        self.graph = Graph.from_routes(self.ROUTES, self.MARKS)
+        # The premise: the spur's last edge is weightless, so splitting a run there
+        # costs the score exactly nothing.
+        self.assertEqual(edge_unit(self.graph, "n1", "T"), 0)
+
+    def test_a_weightless_transfer_cannot_shed_the_mark(self):
+        # The whole approach is one run on the marked artery. Peeling the free last
+        # edge onto route 1 would once have made this tier 0.
+        self.assertEqual(tier(self.graph, self.APPROACH), 3)
+        score, runs = evaluate(self.graph, self.APPROACH)
+        self.assertAlmostEqual(score, 1.0)
+        self.assertEqual([r.priority for r in runs], [3])
+
+    def test_the_free_transfer_is_not_taken_at_all(self):
+        # Ties on concentration now go to the fewest transfers, so the reported ride
+        # is the plain one — no run that rides nothing.
+        _, runs = evaluate(self.graph, self.APPROACH)
+        self.assertEqual([r.route_id for r in runs], [0])
+
+    def test_crediting_a_co_serving_route_does_not_shed_the_mark(self):
+        # Q -> T rides the spur most concentratedly as the *unrated* route 1, and the
+        # score is welcome to say so — but the rated road was still driven end to end.
+        chain = ["Q", "P", "n1", "T"]
+        score, runs = evaluate(self.graph, chain)
+        self.assertAlmostEqual(score, 1.0)
+        self.assertEqual([r.route_id for r in runs], [1])   # credited to the unrated one
+        self.assertEqual([r.priority for r in runs], [3])   # and still rated
+        self.assertEqual(tier(self.graph, chain), 3)
+
+    def test_clipping_the_stretch_is_still_free(self):
+        # Stopping at n1 never covers P..T, so nothing is owed — the author's line
+        # between brushing past a road and riding it is untouched.
+        self.assertEqual(tier(self.graph, ["H", "g1", "g2", "P", "n1"]), 0)
+
+    def test_a_required_stop_inside_the_mark_does_not_shed_it(self):
+        # n1 sits *inside* the rated spur, so scoring the trip leg by leg puts the
+        # mark's two ends in different chains. The trip still rode the road.
+        route = RouteFinder(self.graph).find_routes("H", "T", k=1, via=["n1"])[0]
+        self.assertEqual(route.priority, 3)
+        self.assertEqual(len(route.legs), 2)
+        # Both legs fall across the rated stretch, so both report it.
+        self.assertEqual([leg.priority for leg in route.legs], [3, 3])
+
+    def test_an_untouched_mark_rates_nothing(self):
+        # A chain nowhere near the spur is unrated, marks or no marks.
+        self.assertEqual(tier(self.graph, ["z1", "g1", "g2", "z2"]), 0)
 
 
 # A strong tier-0 headline, a competitive tier-1 corridor, and two weaker tier-0

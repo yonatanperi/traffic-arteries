@@ -25,34 +25,41 @@ it). Which node *stores* a mark is what scopes it: one on a tree's shared tail r
 every corridor that rides it; one on a head rates only the corridors below that head.
 Two levels judge a route's quality (and pick the single best result):
 
-1. **Tier** — the worst priority among the sub-routes a route actually *rides*: the
-   `max` over the runs of its max-HHI decomposition (the same chips the UI shows),
-   each run's priority being the worst mark that run completes. A route that
-   completes no bad mark beats one whose concentrated corridor completes one
-   **however long the detour**. Note this is assignment-dependent: a road co-served
-   by a good route escapes the downgrade only when riding it *as* the good route is
-   at least as concentrated — otherwise the concentrated way to ride it is the
-   marked one. (`Graph.edge_priority`, the per-edge best, is a separate, deliberately
-   pessimistic thing — an edge merely *inside* a mark reads as rated — that the
-   generators use to hunt for a corridor avoiding the mark entirely.)
+1. **Tier** — the worst mark a route **rides whole** (`concentration.ridden_marks`):
+   one bites when the chain covers its stretch end to end, on the marked route's own
+   edges. A route that rides no bad mark beats one whose concentrated corridor rides
+   one **however long the detour**. **A mark rates the road, not the reading of it**:
+   it is decided by the edges the chain covers, before and independently of the
+   credit assignment — so a rated stretch cannot be shed by handing it to an unmarked
+   artery that co-serves the same edges, by a transfer dropped inside it, or by a
+   required stop that cuts it in two. (Marks live on routes only because that is how
+   an author draws one; where two authored routes overlap, marking either rates the
+   road for both.) That assignment-independence is what closed the "merge two routes
+   and the mark disappears" hole — a weightless edge peeled onto a co-serving artery
+   used to end the marked run one edge short at exactly zero cost. `Graph.edge_priority`,
+   the per-edge best, is still a separate, deliberately rough thing — pessimistic in
+   that an edge merely *inside* a mark reads as rated, optimistic in that a co-served
+   edge reads as best — that the generators use to hunt for a corridor avoiding the
+   mark entirely.
 2. **Concentration** — within a tier, a Herfindahl (HHI) score over how the route's
    length splits across the authored routes it stitches. Not fewest hops, not fewest
-   merges. `Route.hhi` is deliberately **priority-free**: priority is the tier's job,
-   so re-rating an artery must never move a route's score (or the match % built on
-   it). The priority weights `w(p) = 1 - 0.2p` still exist inside
-   `concentration.evaluate` as the *tie-break* over equally concentrated credit
-   assignments — they decide which artery gets credit for a shared edge (and so
-   which reading completes a mark), and hence the sub-route chips and the tier.
-   The credit-assignment DP keys its state on `(route, run start edge)` rather than
-   `(route, accumulated length)` precisely so a run's *node span* — and therefore
-   whether it completes a mark — is known at the moment the run closes.
-   Consequence: with `PriorityMode.HARD_TIER` off, the ranking is fully
-   priority-blind, since the arena is then the only priority mechanism left.
+   merges. `Route.hhi` is deliberately **priority-free**, and now so is the credit
+   assignment that produces it: `concentration.evaluate` maximises `Σ len²` and breaks
+   ties on **fewest transfers**, with priority nowhere in the DP. Re-rating an artery
+   therefore provably cannot move a route's score, its chips, or the match % built on
+   them — it can only move the tier. Consequence: with `PriorityMode.HARD_TIER` off,
+   the ranking is fully priority-blind, since the arena is then the only priority
+   mechanism left. `stamp_runs` then hands each run the worst mark the *chain* rides
+   across it, so `max(run.priority)` is the tier and the UI's chips carry it.
 
 **A required stop divides the trip.** A `via` place is somewhere the driver actually
 stops, so the trip is several trips: each stretch between consecutive required stops is
 its own routing problem, searched on its own and scored on its own, and the trip's
 concentration is the **length-weighted mean of its legs'** (`RouteFinder._combine_legs`).
+The **tier does not divide this way**: concentration is about how a stretch is driven,
+which a stop genuinely interrupts, while a mark is about which road was covered, which
+it does not — so `_combine_legs` re-stamps the runs against the whole trip chain and a
+rated stretch cut in two by a stop rates both legs instead of being shed by neither.
 Expanded that is a block-diagonal HHI — credit pools within a leg, never across a stop —
 which is what says that riding one artery into a stop and a different one out of it is
 two journeys done well rather than one done badly. With no `via` there is one leg and the

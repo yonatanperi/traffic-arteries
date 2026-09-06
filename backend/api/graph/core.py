@@ -12,17 +12,18 @@ the shortest one. See :mod:`.search`.
 An authored route may also carry **priority marks** (``0`` = best … ``3`` = worst),
 which is what makes some arteries worth riding more than others. A mark rates one
 *stretch* of a route rather than the whole of it, and it only bites when a result
-rides that stretch **entirely** — see :meth:`Graph.run_priority`. The graph is
-where marks live, since both the scorer (:mod:`.concentration`) and the candidate
-generators (:mod:`.search`) need them.
+rides that stretch **entirely** — see :func:`~.concentration.ridden_marks`, which
+is what every result is rated by. The graph is where marks live, since both the
+scorer (:mod:`.concentration`) and the candidate generators (:mod:`.search`) need
+them.
 
 A mark reaches the graph as a ``(start place, end place, priority)`` triple rather
 than the index range the author drew, because the graph holds edges, not chains —
 and the chains it was derived from were *filled* (:meth:`~api.db.Database.
 fill_missing_destinations`), so the authored indices no longer line up anyway.
-Names do, and they are enough: every edge of a run belongs to the route being
-credited, and a route's chain is a simple path, so a contiguous run holding both
-endpoint names necessarily holds the whole stretch between them.
+Names do, and they are enough: a route's chain is a simple path, so a stretch of a
+result that stays on that route's edges and holds both endpoint names necessarily
+holds the whole marked stretch between them.
 """
 
 # Authored-route priority: 0 is best, WORST_PRIORITY is worst. An unmarked stretch
@@ -210,11 +211,11 @@ class Graph:
         of how much of the artery has to be driven before the rating applies. The
         worst such mark wins; a run completing none rides at :data:`BEST_PRIORITY`.
 
-        Testing by endpoint names is exact — every edge of a run is on
+        Testing by endpoint names is exact — every edge of the run is on
         ``route_id`` and that route's chain is a simple path, so a contiguous run
         holding both endpoints holds the whole stretch between them. (Hot callers
-        don't come through here: :func:`~.concentration.evaluate` indexes the marks
-        against the candidate chain once and tests integer windows instead.)
+        don't come through here: :func:`~.concentration.ridden_marks` walks the
+        candidate chain once and reports integer windows instead.)
         """
         marks = self._route_marks.get(route_id)
         if not marks:
@@ -311,14 +312,18 @@ class Graph:
         An edge may be carried by several authored routes; travelling it commits
         you to *at least* the best-rated of them, so the edge's priority is their
         minimum — where a single route rates the edge by the worst of its marks
-        covering it. Note this is **not** the route *tier* (that follows the
-        sub-routes actually ridden, and only when a mark is ridden *whole* — see
-        :func:`~.concentration.tier`); it is the per-edge best the generators use to
-        hunt for a physically better-rated corridor, and the skip test in
+        covering it. Note this is **not** the route *tier* (that needs the marked
+        stretch ridden *whole* — see :func:`~.concentration.tier`); it is the
+        per-edge best the generators use to hunt for a physically better-rated
+        corridor, and the skip test in
         :meth:`~.routing.RouteFinder._crosses_forced_below`. Deliberately
         pessimistic next to the tier: an edge merely *inside* a marked stretch reads
         as rated here even though clipping that stretch would cost nothing, which
         keeps the generators hunting for a corridor that avoids the mark entirely.
+        Optimistic in the one way the tier is not, too — an edge co-served by an
+        unmarked route reads as best here, while the tier rates the road whoever
+        carries it — for the same reason: this is a hint for generation, and it
+        errs toward *looking* for a cleaner corridor rather than toward rating one.
         """
         routes = self.routes_on(a, b)
         if not routes:

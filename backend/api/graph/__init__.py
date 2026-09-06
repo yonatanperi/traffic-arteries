@@ -16,9 +16,9 @@ The public objects:
     (crossroad hops only vs. every hop).
   * :class:`PriorityMode` — static flag toggling whether priority is a hard tier or
     only a weight on the score.
-  * :func:`evaluate` scores a chain; :func:`tier` gives the worst priority among
-    the sub-routes it rides — each run's being the worst mark that run completes,
-    and ``0`` for a run that only clips one.
+  * :func:`evaluate` scores a chain; :func:`tier` gives the worst mark the chain
+    rides **whole** — ``0`` when it only clips one. A mark rates the road, so which
+    authored route the score credits a stretch to cannot change it.
 
 Internals live in sibling modules: :mod:`.core` (the graph), :mod:`.search`
 (the single-route generator, over ``(node, active-route)`` state),
